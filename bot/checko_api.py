@@ -1,8 +1,6 @@
 import aiohttp
 from typing import Any
 
-from bot.config import settings
-
 
 class CheckoAPIError(Exception):
     """Raised when Checko API returns an error."""
@@ -15,9 +13,9 @@ class CheckoAPIError(Exception):
 class CheckoAPI:
     """Async client for the Checko API."""
 
-    def __init__(self) -> None:
-        self._base_url = settings.CHECKO_API_URL.rstrip("/")
-        self._key = settings.CHECKO_API_KEY
+    def __init__(self, base_url: str, key: str) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._key = key
         self._session: aiohttp.ClientSession | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -118,6 +116,3 @@ class CheckoAPI:
     async def search(self, query: str) -> dict:
         """Search companies and entrepreneurs by name or INN."""
         return await self._get("search", query=query)
-
-
-checko_api = CheckoAPI()

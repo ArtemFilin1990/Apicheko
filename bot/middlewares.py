@@ -4,7 +4,7 @@ from typing import Any, Awaitable, Callable
 from aiogram import BaseMiddleware
 from aiogram.types import Message, TelegramObject
 
-from bot.config import settings
+from bot.config import load_settings
 from bot.database.db import Database
 
 
@@ -12,6 +12,7 @@ class ThrottlingMiddleware(BaseMiddleware):
     """Rate-limit middleware: limits each user to THROTTLE_RATE messages/sec."""
 
     def __init__(self, rate: float | None = None) -> None:
+        settings = load_settings()
         self._rate = rate if rate is not None else settings.THROTTLE_RATE
         self._locks: dict[int, asyncio.Lock] = {}
         self._last_call: dict[int, float] = {}

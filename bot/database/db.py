@@ -1,12 +1,13 @@
 import aiosqlite
 
-from bot.config import settings
+from bot.config import load_settings
 
 
 class Database:
     """Async SQLite database wrapper."""
 
     def __init__(self, path: str | None = None) -> None:
+        settings = load_settings()
         self._path = path or settings.DATABASE_PATH
         self._conn: aiosqlite.Connection | None = None
 
