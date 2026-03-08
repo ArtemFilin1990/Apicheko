@@ -1,6 +1,7 @@
 import unittest
 
 from bot.checko_api import CheckoAPI
+from bot.formatters import format_history
 
 
 class _FakeCheckoAPI(CheckoAPI):
@@ -66,6 +67,20 @@ class KeyboardTests(unittest.TestCase):
         markup = company_detail_keyboard("7707083893")
         labels = [btn.text for row in markup.inline_keyboard for btn in row]
         self.assertNotIn("🏦 Банки", labels)
+
+
+class HistoryFormatterTests(unittest.TestCase):
+    def test_format_history_supports_documented_russian_keys(self) -> None:
+        payload = {
+            "data": [
+                {"Дата": "2024-01-01", "Событие": "Смена руководителя"},
+            ]
+        }
+
+        text = format_history(payload)
+
+        self.assertIn("Смена руководителя", text)
+        self.assertIn("2024-01-01", text)
 
 
 if __name__ == "__main__":

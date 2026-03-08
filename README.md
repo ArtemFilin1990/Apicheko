@@ -98,3 +98,5 @@ TDLib стоит рассматривать при необходимости:
 - строить кастомный Telegram-клиент.
 
 Для Python-проектов на TDLib рекомендуются: [pytdbot](https://github.com/pytdbot/client), [aiotdlib](https://github.com/pylakey/aiotdlib).
+
+Справочно: каталог [Telegram Methods](https://core.telegram.org/methods) описывает MTProto-методы клиентского API (например, `messages.*`, `channels.*`) и не используется напрямую в данном боте на Bot API/aiogram.
