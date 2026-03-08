@@ -1,7 +1,8 @@
 import html
 
 from aiogram import Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from bot.database.db import Database
@@ -28,5 +29,15 @@ async def cmd_start(message: Message, db: Database) -> None:
         "Я помогу вам найти информацию о компаниях и предпринимателях "
         "из открытых реестров (ФНС, ЕГРЮЛ, ЕГРИП, ЕФРСБ и др.).\n\n"
         "Выберите действие:",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+@router.message(Command("cancel"))
+async def cmd_cancel(message: Message, state: FSMContext) -> None:
+    """Handle /cancel command: clear any active state and return to main menu."""
+    await state.clear()
+    await message.answer(
+        "❌ Действие отменено. Вы в главном меню.",
         reply_markup=main_menu_keyboard(),
     )

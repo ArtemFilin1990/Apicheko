@@ -10,7 +10,6 @@ from bot.checko_api import CheckoAPI, CheckoAPIError
 from bot.database.db import Database
 from bot.formatters import format_company, format_entrepreneur, format_person, format_search_results
 from bot.keyboards import (
-    back_to_company_keyboard,
     cancel_keyboard,
     company_detail_keyboard,
     search_results_keyboard,
@@ -69,7 +68,7 @@ async def handle_inn_input(
             except CheckoAPIError:
                 data = await checko_api.get_person(inn)
                 text = format_person(data)
-                await message.answer(text, reply_markup=back_to_company_keyboard(inn))
+                await message.answer(text, reply_markup=cancel_keyboard())
     except CheckoAPIError as exc:
         await message.answer(
             f"⚠️ Ошибка при получении данных:\n<i>{html.escape(str(exc))}</i>\n\n"

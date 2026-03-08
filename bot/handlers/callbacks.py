@@ -160,6 +160,12 @@ async def cb_detail(call: CallbackQuery, checko_api: CheckoAPI) -> None:
     fetcher_name = _DETAIL_FETCHERS.get(section)
     formatter = _DETAIL_FORMATTERS.get(section)
 
+    # For the "company" base section, use the entrepreneur fetcher when INN
+    # has 12 digits (individual entrepreneur rather than a legal entity).
+    if section == "company" and len(inn) == 12:
+        fetcher_name = "get_entrepreneur"
+        formatter = format_entrepreneur
+
     if not fetcher_name or not formatter:
         await call.answer("Неизвестный раздел.", show_alert=True)
         return
