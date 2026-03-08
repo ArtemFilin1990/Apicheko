@@ -45,15 +45,23 @@ pip install -r requirements.txt
 
 ## Конфигурация
 
-Скопируйте `.env` и заполните значения:
+Скопируйте шаблон и заполните значения:
 
+```bash
+cp .env.example .env
 ```
+
+```env
 BOT_TOKEN=your_bot_token_here
 CHECKO_API_KEY=your_checko_api_key_here
+CHECKO_API_URL=https://api.checko.ru/v2
+DATABASE_PATH=bot.db
 ```
 
 - `BOT_TOKEN` — токен бота от [@BotFather](https://t.me/BotFather)
 - `CHECKO_API_KEY` — ключ API от [checko.ru](https://checko.ru/)
+- `CHECKO_API_URL` — базовый URL Checko API (опционально)
+- `DATABASE_PATH` — путь к SQLite-файлу (по умолчанию `bot.db`)
 
 ## Запуск
 
