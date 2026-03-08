@@ -59,5 +59,14 @@ class CheckoAPIContractTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class KeyboardTests(unittest.TestCase):
+    def test_company_detail_keyboard_has_no_bank_button(self) -> None:
+        from bot.keyboards import company_detail_keyboard
+
+        markup = company_detail_keyboard("7707083893")
+        labels = [btn.text for row in markup.inline_keyboard for btn in row]
+        self.assertNotIn("🏦 Банки", labels)
+
+
 if __name__ == "__main__":
     unittest.main()
