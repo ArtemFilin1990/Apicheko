@@ -68,6 +68,8 @@ DATABASE_PATH=bot.db
 python -m bot.main
 ```
 
+Если бот запускается в среде с ограниченным исходящим доступом в интернет, можно задать `POLLING_MAX_RETRIES=1`, чтобы процесс завершался после первой неудачной попытки подключения к Telegram API.
+
 ## Технологии
 
 - [aiogram 3.x](https://docs.aiogram.dev/) — Telegram Bot framework
