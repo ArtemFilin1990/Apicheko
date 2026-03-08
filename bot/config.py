@@ -54,20 +54,29 @@ def get_settings() -> Settings:
 def load_settings() -> Settings:
     settings = get_settings()
 
-    placeholders = {
+    token_placeholders = {
         "your_bot_token_here",
         "your_bot_token",
+        "changeme",
+    }
+    checko_placeholders = {
         "your_checko_api_key_here",
         "your_checko_api_key",
         "your_checko_key_here",
         "changeme",
     }
-    if (
-        settings.BOT_TOKEN.lower() in placeholders
-        or settings.CHECKO_API_KEY.lower() in placeholders
-    ):
+
+    invalid_fields: list[str] = []
+    if settings.BOT_TOKEN.lower() in token_placeholders:
+        invalid_fields.append("BOT_TOKEN (or TELEGRAM_TOKEN)")
+    if settings.CHECKO_API_KEY.lower() in checko_placeholders:
+        invalid_fields.append("CHECKO_API_KEY")
+
+    if invalid_fields:
         raise RuntimeError(
-            "Environment contains placeholder credentials. Update BOT_TOKEN (or TELEGRAM_TOKEN) and CHECKO_API_KEY before starting the bot."
+            "Environment contains placeholder credentials for: "
+            + ", ".join(invalid_fields)
+            + ". Replace placeholder values in .env before starting the bot."
         )
 
     return settings
