@@ -1,3 +1,5 @@
+import html
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
@@ -88,8 +90,10 @@ async def cb_history(call: CallbackQuery, db: Database) -> None:
     else:
         lines = ["📋 <b>История запросов</b>\n"]
         for row in rows:
-            inn_part = f" (ИНН: {row['inn']})" if row["inn"] else ""
-            lines.append(f"• {row['query']}{inn_part} — <i>{row['searched_at']}</i>")
+            inn_part = f" (ИНН: {html.escape(row['inn'])})" if row["inn"] else ""
+            lines.append(
+                f"• {html.escape(row['query'])}{inn_part} — <i>{html.escape(str(row['searched_at']))}</i>"
+            )
         text = "\n".join(lines)
     await call.message.edit_text(text, reply_markup=main_menu_keyboard())
     await call.answer()
@@ -140,7 +144,7 @@ async def cb_select_entity(
         await call.message.edit_text(text, reply_markup=company_detail_keyboard(inn))
     except CheckoAPIError as exc:
         await call.message.edit_text(
-            f"⚠️ Ошибка:\n<i>{exc}</i>",
+            f"⚠️ Ошибка:\n<i>{html.escape(str(exc))}</i>",
             reply_markup=cancel_keyboard(),
         )
     await call.answer()
@@ -174,7 +178,7 @@ async def cb_detail(call: CallbackQuery, checko_api: CheckoAPI) -> None:
         )
     except CheckoAPIError as exc:
         await call.message.edit_text(
-            f"⚠️ Ошибка при загрузке раздела «{section}»:\n<i>{exc}</i>",
+            f"⚠️ Ошибка при загрузке раздела «{html.escape(section)}»:\n<i>{html.escape(str(exc))}</i>",
             reply_markup=back_to_company_keyboard(inn),
         )
     await call.answer()

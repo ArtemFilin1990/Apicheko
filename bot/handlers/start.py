@@ -1,3 +1,5 @@
+import html
+
 from aiogram import Router
 from aiogram.filters import CommandStart
 from aiogram.types import Message
@@ -20,7 +22,7 @@ async def cmd_start(message: Message, db: Database) -> None:
             last_name=user.last_name,
         )
 
-    name = user.first_name if user else "пользователь"
+    name = html.escape(user.first_name) if user else "пользователь"
     await message.answer(
         f"👋 Привет, <b>{name}</b>!\n\n"
         "Я помогу вам найти информацию о компаниях и предпринимателях "

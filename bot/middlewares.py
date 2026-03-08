@@ -29,7 +29,7 @@ class ThrottlingMiddleware(BaseMiddleware):
         if user_id is None:
             return await handler(event, data)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         now = loop.time()
 
         last = self._last_call.get(user_id, 0.0)

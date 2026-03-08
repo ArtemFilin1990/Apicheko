@@ -75,3 +75,27 @@ python -m bot.main
 - [aiohttp](https://docs.aiohttp.org/) — HTTP-клиент для Checko API
 - [aiosqlite](https://aiosqlite.omnilib.dev/) — асинхронная работа с SQLite
 - [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) — конфигурация через переменные окружения
+
+## TDLib vs Bot API
+
+[TDLib (Telegram Database Library)](https://github.com/tdlib/td) — официальная C++-библиотека Telegram для построения полноценных Telegram-клиентов. Она используется на уровне MTProto напрямую и поддерживает как аккаунты пользователей, так и ботов.
+
+| Характеристика | TDLib (pytdbot / aiotdlib) | aiogram (Bot API) |
+|---|---|---|
+| Тип аккаунта | Бот **и** пользователь | Только бот |
+| Протокол | MTProto (нативный) | HTTPS / REST |
+| Доступные функции | Весь Telegram API | Только Bot API |
+| Зависимости | C++ TDLib + `tdjson` бинарник | Чистый Python |
+| Сложность настройки | Высокая | Низкая |
+| Подходит для | Кастомные клиенты, юзерботы | Стандартные боты |
+
+**Почему в этом проекте используется aiogram, а не TDLib:**
+
+Данный бот выполняет простые функции: пользователь вводит ИНН или название компании, бот запрашивает Checko API и отображает результат через inline-клавиатуры. Для этого сценария Telegram Bot API полностью достаточен. TDLib добавил бы необходимость в компиляции нативной C++-библиотеки (`tdjson`), управлении MTProto-сессией и усложнил бы деплой без каких-либо выгод для данного use-case.
+
+TDLib стоит рассматривать при необходимости:
+- работать под пользовательским аккаунтом (юзербот),
+- использовать функции, не доступные в Bot API (например, вступление в группы, чтение каналов без прав администратора),
+- строить кастомный Telegram-клиент.
+
+Для Python-проектов на TDLib рекомендуются: [pytdbot](https://github.com/pytdbot/client), [aiotdlib](https://github.com/pylakey/aiotdlib).

@@ -1,3 +1,4 @@
+import html
 import re
 
 from aiogram import F, Router
@@ -71,7 +72,7 @@ async def handle_inn_input(
                 await message.answer(text, reply_markup=back_to_company_keyboard(inn))
     except CheckoAPIError as exc:
         await message.answer(
-            f"⚠️ Ошибка при получении данных:\n<i>{exc}</i>\n\n"
+            f"⚠️ Ошибка при получении данных:\n<i>{html.escape(str(exc))}</i>\n\n"
             "Проверьте правильность ИНН и попробуйте снова.",
             reply_markup=cancel_keyboard(),
         )
@@ -105,12 +106,12 @@ async def handle_name_input(
         if items:
             await message.answer(
                 text,
-                reply_markup=search_results_keyboard(items, "company"),
+                reply_markup=search_results_keyboard(items),
             )
         else:
             await message.answer(text, reply_markup=cancel_keyboard())
     except CheckoAPIError as exc:
         await message.answer(
-            f"⚠️ Ошибка при поиске:\n<i>{exc}</i>",
+            f"⚠️ Ошибка при поиске:\n<i>{html.escape(str(exc))}</i>",
             reply_markup=cancel_keyboard(),
         )
