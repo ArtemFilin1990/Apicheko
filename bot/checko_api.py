@@ -1,5 +1,7 @@
-import aiohttp
+import asyncio
 from typing import Any
+
+import aiohttp
 
 
 class CheckoAPIError(Exception):
@@ -13,14 +15,24 @@ class CheckoAPIError(Exception):
 class CheckoAPI:
     """Async client for the Checko API."""
 
-    def __init__(self, base_url: str, key: str) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        key: str,
+        timeout_seconds: int = 20,
+        max_retries: int = 3,
+        retry_delay_seconds: float = 1.5,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._key = key
         self._session: aiohttp.ClientSession | None = None
+        self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+        self._max_retries = max_retries
+        self._retry_delay_seconds = retry_delay_seconds
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(timeout=self._timeout)
         return self._session
 
     async def close(self) -> None:
@@ -31,15 +43,44 @@ class CheckoAPI:
         session = await self._get_session()
         params["key"] = self._key
         url = f"{self._base_url}/{endpoint.lstrip('/')}"
-        async with session.get(url, params=params) as resp:
-            if resp.status != 200:
-                raise CheckoAPIError(
-                    f"API request failed: {resp.status}", status_code=resp.status
-                )
-            data = await resp.json()
-            if isinstance(data, dict) and data.get("error"):
-                raise CheckoAPIError(data["error"])
-            return data
+
+        last_error: Exception | None = None
+
+        for attempt in range(1, self._max_retries + 1):
+            try:
+                async with session.get(url, params=params) as resp:
+                    if 500 <= resp.status < 600:
+                        raise CheckoAPIError(
+                            f"Checko server error: {resp.status}", status_code=resp.status
+                        )
+                    if resp.status != 200:
+                        raise CheckoAPIError(
+                            f"API request failed: {resp.status}", status_code=resp.status
+                        )
+
+                    data = await resp.json()
+                    if isinstance(data, dict) and data.get("error"):
+                        raise CheckoAPIError(data["error"])
+                    return data
+            except CheckoAPIError as exc:
+                if exc.status_code and 500 <= exc.status_code < 600:
+                    last_error = exc
+                else:
+                    raise
+            except (
+                aiohttp.ClientConnectionError,
+                aiohttp.ClientOSError,
+                aiohttp.ServerTimeoutError,
+                asyncio.TimeoutError,
+                aiohttp.ClientPayloadError,
+            ) as exc:
+                last_error = exc
+
+            if attempt >= self._max_retries:
+                break
+            await asyncio.sleep(self._retry_delay_seconds * attempt)
+
+        raise CheckoAPIError(f"Checko request failed after retries: {last_error}")
 
     # --- Company (ЮЛ) ---
 
