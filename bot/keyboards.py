@@ -39,13 +39,16 @@ def back_to_company_keyboard(inn: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def search_results_keyboard(results: list[dict], entity_type: str) -> InlineKeyboardMarkup:
+def search_results_keyboard(results: list[dict]) -> InlineKeyboardMarkup:
     """Keyboard with search results list."""
     builder = InlineKeyboardBuilder()
     for item in results[:10]:
         inn = item.get("inn", "")
         name = item.get("name", item.get("shortName", inn))
         short_name = name[:40] + "…" if len(name) > 40 else name
+        # 12-digit INN belongs to an individual entrepreneur (ИП) or a person;
+        # 10-digit INN belongs to a legal entity (ЮЛ).
+        entity_type = "entrepreneur" if len(inn) == 12 else "company"
         builder.button(
             text=f"{short_name} ({inn})",
             callback_data=f"select:{entity_type}:{inn}",

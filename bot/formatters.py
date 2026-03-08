@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import html
 from typing import Any
 
 
 def _fmt(value: Any, default: str = "—") -> str:
-    """Return string value or dash for empty/None."""
+    """Return HTML-escaped string value or dash for empty/None."""
     if value is None or value == "":
         return default
-    return str(value)
+    return html.escape(str(value))
 
 
 def format_company(data: dict) -> str:
