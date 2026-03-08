@@ -25,8 +25,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def run_polling(dp: Dispatcher, bot: Bot) -> None:
+async def run_polling(dp: Dispatcher, bot: Bot, max_retries: int | None = None) -> None:
     backoff_seconds = 3
+    network_failures = 0
 
     while True:
         try:
@@ -36,7 +37,12 @@ async def run_polling(dp: Dispatcher, bot: Bot) -> None:
             logger.info("Polling cancelled")
             raise
         except TelegramNetworkError as exc:
+            network_failures += 1
             logger.error("Cannot reach Telegram API: %s", exc)
+            if max_retries is not None and network_failures >= max_retries:
+                raise RuntimeError(
+                    f"Telegram API is unreachable after {network_failures} attempts."
+                ) from exc
             logger.info("Restarting polling in %s sec...", backoff_seconds)
             await asyncio.sleep(backoff_seconds)
             backoff_seconds = min(backoff_seconds * 2, 60)
@@ -89,10 +95,13 @@ async def main() -> None:
         dp.include_router(search.router)
         dp.include_router(callbacks.router)
 
-        await run_polling(dp, bot)
+        await run_polling(dp, bot, settings.POLLING_MAX_RETRIES)
     except TokenValidationError:
         logger.error("BOT_TOKEN is invalid. Update BOT_TOKEN in environment variables.")
         raise SystemExit(1)
+    except RuntimeError as exc:
+        logger.error(str(exc))
+        raise SystemExit(1) from exc
     finally:
         await db.close()
         await checko_api.close()

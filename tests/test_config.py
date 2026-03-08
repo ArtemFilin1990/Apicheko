@@ -47,6 +47,31 @@ class ConfigSettingsTests(unittest.TestCase):
         self.assertIn("BOT_TOKEN (or TELEGRAM_TOKEN)", str(exc.exception))
         self.assertIn("CHECKO_API_KEY", str(exc.exception))
 
+    def test_reads_polling_max_retries_when_set(self) -> None:
+        with temp_env(
+            {
+                "BOT_TOKEN": "12345:abc",
+                "CHECKO_API_KEY": "real_key",
+                "POLLING_MAX_RETRIES": "2",
+            }
+        ):
+            settings = load_settings()
+
+        self.assertEqual(settings.POLLING_MAX_RETRIES, 2)
+
+    def test_rejects_non_positive_polling_max_retries(self) -> None:
+        with temp_env(
+            {
+                "BOT_TOKEN": "12345:abc",
+                "CHECKO_API_KEY": "real_key",
+                "POLLING_MAX_RETRIES": "0",
+            }
+        ):
+            with self.assertRaises(RuntimeError) as exc:
+                load_settings()
+
+        self.assertIn("POLLING_MAX_RETRIES must be greater than 0", str(exc.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

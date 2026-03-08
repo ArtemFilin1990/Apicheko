@@ -27,6 +27,7 @@ class Settings:
     CHECKO_API_URL: str = "https://api.checko.ru/v2"
     DATABASE_PATH: str = "bot.db"
     THROTTLE_RATE: float = 0.5
+    POLLING_MAX_RETRIES: int | None = None
 
 
 def _is_placeholder(value: str, placeholders: Iterable[str]) -> bool:
@@ -51,6 +52,7 @@ def get_settings() -> Settings:
     checko_api_url = (os.getenv("CHECKO_API_URL") or "https://api.checko.ru/v2").strip()
     database_path = (os.getenv("DATABASE_PATH") or "bot.db").strip()
     throttle_rate_raw = (os.getenv("THROTTLE_RATE") or "0.5").strip()
+    polling_max_retries_raw = (os.getenv("POLLING_MAX_RETRIES") or "").strip()
 
     if not bot_token or not checko_api_key:
         raise RuntimeError(
@@ -65,12 +67,23 @@ def get_settings() -> Settings:
     if throttle_rate <= 0:
         raise RuntimeError("THROTTLE_RATE must be greater than 0.")
 
+    polling_max_retries: int | None = None
+    if polling_max_retries_raw:
+        try:
+            polling_max_retries = int(polling_max_retries_raw)
+        except ValueError as exc:
+            raise RuntimeError("POLLING_MAX_RETRIES must be a valid integer.") from exc
+
+        if polling_max_retries <= 0:
+            raise RuntimeError("POLLING_MAX_RETRIES must be greater than 0.")
+
     return Settings(
         BOT_TOKEN=bot_token,
         CHECKO_API_KEY=checko_api_key,
         CHECKO_API_URL=checko_api_url,
         DATABASE_PATH=database_path,
         THROTTLE_RATE=throttle_rate,
+        POLLING_MAX_RETRIES=polling_max_retries,
     )
 
 
