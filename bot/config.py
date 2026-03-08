@@ -1,21 +1,60 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from functools import lru_cache
+
+from dotenv import load_dotenv
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
-
-    # Telegram
+@dataclass(frozen=True)
+class Settings:
     BOT_TOKEN: str
-
-    # Checko API
     CHECKO_API_KEY: str
     CHECKO_API_URL: str = "https://api.checko.ru/v2"
-
-    # Database
     DATABASE_PATH: str = "bot.db"
-
-    # Rate limiting (requests per second per user)
     THROTTLE_RATE: float = 0.5
 
 
-settings = Settings()
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    load_dotenv()
+
+    bot_token = (os.getenv("BOT_TOKEN") or "").strip()
+    checko_api_key = (os.getenv("CHECKO_API_KEY") or "").strip()
+    checko_api_url = (os.getenv("CHECKO_API_URL") or "https://api.checko.ru/v2").strip()
+    database_path = (os.getenv("DATABASE_PATH") or "bot.db").strip()
+    throttle_rate_raw = (os.getenv("THROTTLE_RATE") or "0.5").strip()
+
+    if not bot_token or not checko_api_key:
+        raise RuntimeError(
+            "Environment is not configured. Set BOT_TOKEN and CHECKO_API_KEY in .env or environment variables."
+        )
+
+    try:
+        throttle_rate = float(throttle_rate_raw)
+    except ValueError as exc:
+        raise RuntimeError("THROTTLE_RATE must be a valid float value.") from exc
+
+    if throttle_rate <= 0:
+        raise RuntimeError("THROTTLE_RATE must be greater than 0.")
+
+    return Settings(
+        BOT_TOKEN=bot_token,
+        CHECKO_API_KEY=checko_api_key,
+        CHECKO_API_URL=checko_api_url,
+        DATABASE_PATH=database_path,
+        THROTTLE_RATE=throttle_rate,
+    )
+
+
+def load_settings() -> Settings:
+    settings = get_settings()
+
+    placeholders = {"your_bot_token_here", "your_checko_api_key_here"}
+    if settings.BOT_TOKEN in placeholders or settings.CHECKO_API_KEY in placeholders:
+        raise RuntimeError(
+            "Environment contains placeholder credentials. Update BOT_TOKEN and CHECKO_API_KEY before запуском бота."
+        )
+
+    return settings

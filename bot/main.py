@@ -8,8 +8,8 @@ from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.token import TokenValidationError
 
-from bot.checko_api import checko_api
-from bot.config import settings
+from bot.checko_api import CheckoAPI
+from bot.config import load_settings
 from bot.database.db import Database
 from bot.handlers import callbacks, search, start
 from bot.middlewares import DatabaseMiddleware, ThrottlingMiddleware
@@ -22,6 +22,17 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
+    try:
+        settings = load_settings()
+    except RuntimeError as exc:
+        logger.error(str(exc))
+        raise SystemExit(1) from exc
+
+    checko_api = CheckoAPI(
+        base_url=settings.CHECKO_API_URL,
+        key=settings.CHECKO_API_KEY,
+    )
+
     db = Database()
     await db.connect()
     bot: Bot | None = None
