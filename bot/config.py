@@ -20,7 +20,10 @@ class Settings:
 def get_settings() -> Settings:
     load_dotenv()
 
-    bot_token = (os.getenv("BOT_TOKEN") or "").strip()
+    bot_token = (
+        (os.getenv("BOT_TOKEN") or "").strip()
+        or (os.getenv("TELEGRAM_TOKEN") or "").strip()
+    )
     checko_api_key = (os.getenv("CHECKO_API_KEY") or "").strip()
     checko_api_url = (os.getenv("CHECKO_API_URL") or "https://api.checko.ru/v2").strip()
     database_path = (os.getenv("DATABASE_PATH") or "bot.db").strip()
@@ -28,7 +31,7 @@ def get_settings() -> Settings:
 
     if not bot_token or not checko_api_key:
         raise RuntimeError(
-            "Environment is not configured. Set BOT_TOKEN and CHECKO_API_KEY in .env or environment variables."
+            "Environment is not configured. Set BOT_TOKEN (or TELEGRAM_TOKEN) and CHECKO_API_KEY in .env or environment variables."
         )
 
     try:
@@ -51,10 +54,20 @@ def get_settings() -> Settings:
 def load_settings() -> Settings:
     settings = get_settings()
 
-    placeholders = {"your_bot_token_here", "your_checko_api_key_here"}
-    if settings.BOT_TOKEN in placeholders or settings.CHECKO_API_KEY in placeholders:
+    placeholders = {
+        "your_bot_token_here",
+        "your_bot_token",
+        "your_checko_api_key_here",
+        "your_checko_api_key",
+        "your_checko_key_here",
+        "changeme",
+    }
+    if (
+        settings.BOT_TOKEN.lower() in placeholders
+        or settings.CHECKO_API_KEY.lower() in placeholders
+    ):
         raise RuntimeError(
-            "Environment contains placeholder credentials. Update BOT_TOKEN and CHECKO_API_KEY before запуском бота."
+            "Environment contains placeholder credentials. Update BOT_TOKEN (or TELEGRAM_TOKEN) and CHECKO_API_KEY before starting the bot."
         )
 
     return settings
