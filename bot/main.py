@@ -4,7 +4,9 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.utils.token import TokenValidationError
 
 from bot.checko_api import checko_api
 from bot.config import settings
@@ -22,33 +24,41 @@ logger = logging.getLogger(__name__)
 async def main() -> None:
     db = Database()
     await db.connect()
+    bot: Bot | None = None
 
-    bot = Bot(
-        token=settings.BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
-    dp = Dispatcher(storage=MemoryStorage())
-
-    # Middlewares
-    dp.message.middleware(ThrottlingMiddleware())
-    dp.message.middleware(DatabaseMiddleware(db))
-    dp.callback_query.middleware(DatabaseMiddleware(db))
-
-    # Inject checko_api into handler data
-    dp["checko_api"] = checko_api
-
-    # Routers
-    dp.include_router(start.router)
-    dp.include_router(search.router)
-    dp.include_router(callbacks.router)
-
-    logger.info("Starting bot…")
     try:
+        bot = Bot(
+            token=settings.BOT_TOKEN,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        )
+        dp = Dispatcher(storage=MemoryStorage())
+
+        # Middlewares
+        dp.message.middleware(ThrottlingMiddleware())
+        dp.message.middleware(DatabaseMiddleware(db))
+        dp.callback_query.middleware(DatabaseMiddleware(db))
+
+        # Inject checko_api into handler data
+        dp["checko_api"] = checko_api
+
+        # Routers
+        dp.include_router(start.router)
+        dp.include_router(search.router)
+        dp.include_router(callbacks.router)
+
+        logger.info("Starting bot…")
         await dp.start_polling(bot)
+    except TokenValidationError:
+        logger.error("BOT_TOKEN is invalid. Update BOT_TOKEN in environment variables.")
+        raise SystemExit(1)
+    except TelegramNetworkError as exc:
+        logger.error("Cannot reach Telegram API: %s", exc)
+        raise SystemExit(1)
     finally:
         await db.close()
         await checko_api.close()
-        await bot.session.close()
+        if bot is not None:
+            await bot.session.close()
 
 
 if __name__ == "__main__":
