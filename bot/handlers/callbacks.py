@@ -8,7 +8,6 @@ from bot.checko_api import CheckoAPI, CheckoAPIError
 from bot.database.db import Database
 from bot.formatters import (
     format_arbitration,
-    format_bank,
     format_bankruptcy,
     format_company,
     format_contracts,
@@ -35,7 +34,6 @@ _DETAIL_FORMATTERS = {
     "enforcements": format_enforcements,
     "contracts": format_contracts,
     "inspections": format_inspections,
-    "bank": format_bank,
     "bankruptcy": format_bankruptcy,
     "history": format_history,
 }
@@ -47,7 +45,6 @@ _DETAIL_FETCHERS = {
     "enforcements": "get_enforcements",
     "contracts": "get_contracts",
     "inspections": "get_inspections",
-    "bank": "get_bank",
     "bankruptcy": "get_bankruptcy",
     "history": "get_history",
 }
@@ -74,7 +71,7 @@ async def cb_help(call: CallbackQuery) -> None:
         "• <b>Поиск по названию</b> — введите название компании или ИП.\n"
         "• <b>История запросов</b> — последние 10 ваших запросов.\n\n"
         "После получения карточки вы можете изучить разделы:\n"
-        "финансы, арбитраж, госконтракты, проверки, банки, банкротство и др."
+        "финансы, арбитраж, госконтракты, проверки, банкротство и др."
     )
     await call.message.edit_text(help_text, reply_markup=main_menu_keyboard())
     await call.answer()

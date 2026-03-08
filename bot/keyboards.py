@@ -1,4 +1,4 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
@@ -22,11 +22,10 @@ def company_detail_keyboard(inn: str) -> InlineKeyboardMarkup:
     builder.button(text="🏛️ Исполн. производства", callback_data=f"detail:{inn}:enforcements")
     builder.button(text="📑 Госконтракты", callback_data=f"detail:{inn}:contracts")
     builder.button(text="🔍 Проверки", callback_data=f"detail:{inn}:inspections")
-    builder.button(text="🏦 Банки", callback_data=f"detail:{inn}:bank")
     builder.button(text="📰 Банкротство", callback_data=f"detail:{inn}:bankruptcy")
     builder.button(text="📜 История изменений", callback_data=f"detail:{inn}:history")
     builder.button(text="🔙 В меню", callback_data="menu")
-    builder.adjust(2, 2, 2, 2, 1, 1)
+    builder.adjust(2, 2, 2, 1, 1, 1)
     return builder.as_markup()
 
 

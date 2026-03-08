@@ -108,7 +108,7 @@ class CheckoAPI:
 
     async def get_bankruptcy(self, inn: str) -> dict:
         """Get bankruptcy records by INN."""
-        return await self._get("bankruptcy", inn=inn)
+        return await self._get("bankruptcy-messages", inn=inn)
 
     # --- Enforcement proceedings (Исполнительные производства) ---
 
@@ -120,13 +120,22 @@ class CheckoAPI:
 
     async def get_arbitration(self, inn: str) -> dict:
         """Get arbitration cases by INN."""
-        return await self._get("arbitration", inn=inn)
+        return await self._get("legal-cases", inn=inn)
 
     # --- Government contracts (Госзакупки) ---
 
     async def get_contracts(self, inn: str) -> dict:
-        """Get government contracts by INN."""
-        return await self._get("contracts", inn=inn)
+        """Get government contracts by INN for all supported procurement laws."""
+        all_items: list[dict[str, Any]] = []
+
+        for law in ("44", "94", "223"):
+            response = await self._get("contracts", inn=inn, law=law)
+            data = response.get("data", response)
+            items = data if isinstance(data, list) else data.get("items", [])
+            if isinstance(items, list):
+                all_items.extend(items)
+
+        return {"data": {"items": all_items}}
 
     # --- Inspections (Проверки) ---
 
@@ -138,19 +147,13 @@ class CheckoAPI:
 
     async def get_financial(self, inn: str) -> dict:
         """Get financial reports by INN."""
-        return await self._get("financial", inn=inn)
-
-    # --- Bank accounts (Банк) ---
-
-    async def get_bank(self, inn: str) -> dict:
-        """Get bank account info by INN."""
-        return await self._get("bank", inn=inn)
+        return await self._get("finances", inn=inn)
 
     # --- Change history (История изменений) ---
 
     async def get_history(self, inn: str) -> dict:
         """Get change history by INN."""
-        return await self._get("history", inn=inn)
+        return await self._get("timeline", inn=inn)
 
     # --- Search ---
 

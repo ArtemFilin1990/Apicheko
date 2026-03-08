@@ -11,6 +11,15 @@ def _fmt(value: Any, default: str = "—") -> str:
     return html.escape(str(value))
 
 
+def _pick(source: dict[str, Any], *keys: str) -> Any:
+    """Return the first present non-empty value from source by key candidates."""
+    for key in keys:
+        value = source.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
 def format_company(data: dict) -> str:
     """Format company (ЮЛ) info for Telegram message."""
     d = data.get("data", data)
@@ -164,25 +173,6 @@ def format_inspections(data: dict) -> str:
     return "\n".join(lines)
 
 
-def format_bank(data: dict) -> str:
-    """Format bank accounts info."""
-    d = data.get("data", data)
-    accounts = d if isinstance(d, list) else d.get("accounts", [])
-    lines = [
-        "🏦 <b>Банковские счета</b>",
-        "",
-        f"📋 <b>Всего счетов:</b> {len(accounts) if isinstance(accounts, list) else '—'}",
-    ]
-    if isinstance(accounts, list):
-        for acc in accounts[:5]:
-            lines.append(
-                f"• {_fmt(acc.get('bankName'))} — {_fmt(acc.get('account'))}"
-            )
-        if len(accounts) > 5:
-            lines.append(f"… и ещё {len(accounts) - 5}")
-    return "\n".join(lines)
-
-
 def format_bankruptcy(data: dict) -> str:
     """Format bankruptcy (ЕФРСБ) records."""
     d = data.get("data", data)
@@ -213,9 +203,9 @@ def format_history(data: dict) -> str:
     ]
     if isinstance(events, list):
         for ev in events[:5]:
-            lines.append(
-                f"• {_fmt(ev.get('type'))} ({_fmt(ev.get('date'))})"
-            )
+            event_name = _pick(ev, "type", "event", "name", "Событие")
+            event_date = _pick(ev, "date", "eventDate", "Дата")
+            lines.append(f"• {_fmt(event_name)} ({_fmt(event_date)})")
         if len(events) > 5:
             lines.append(f"… и ещё {len(events) - 5}")
     return "\n".join(lines)
