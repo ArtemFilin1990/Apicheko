@@ -3,8 +3,21 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Iterable, List
 
 from dotenv import load_dotenv
+
+TOKEN_PLACEHOLDERS = {
+    "your_bot_token_here",
+    "your_bot_token",
+    "changeme",
+}
+CHECKO_PLACEHOLDERS = {
+    "your_checko_api_key_here",
+    "your_checko_api_key",
+    "your_checko_key_here",
+    "changeme",
+}
 
 
 @dataclass(frozen=True)
@@ -16,14 +29,24 @@ class Settings:
     THROTTLE_RATE: float = 0.5
 
 
+def _is_placeholder(value: str, placeholders: Iterable[str]) -> bool:
+    return value.lower() in placeholders
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     load_dotenv()
 
-    bot_token = (
-        (os.getenv("BOT_TOKEN") or "").strip()
-        or (os.getenv("TELEGRAM_TOKEN") or "").strip()
-    )
+    bot_token_raw = (os.getenv("BOT_TOKEN") or "").strip()
+    telegram_token_raw = (os.getenv("TELEGRAM_TOKEN") or "").strip()
+
+    bot_token = bot_token_raw
+    if (
+        (not bot_token or _is_placeholder(bot_token, TOKEN_PLACEHOLDERS))
+        and telegram_token_raw
+    ):
+        bot_token = telegram_token_raw
+
     checko_api_key = (os.getenv("CHECKO_API_KEY") or "").strip()
     checko_api_url = (os.getenv("CHECKO_API_URL") or "https://api.checko.ru/v2").strip()
     database_path = (os.getenv("DATABASE_PATH") or "bot.db").strip()
@@ -54,20 +77,17 @@ def get_settings() -> Settings:
 def load_settings() -> Settings:
     settings = get_settings()
 
-    placeholders = {
-        "your_bot_token_here",
-        "your_bot_token",
-        "your_checko_api_key_here",
-        "your_checko_api_key",
-        "your_checko_key_here",
-        "changeme",
-    }
-    if (
-        settings.BOT_TOKEN.lower() in placeholders
-        or settings.CHECKO_API_KEY.lower() in placeholders
-    ):
+    invalid_fields: List[str] = []
+    if _is_placeholder(settings.BOT_TOKEN, TOKEN_PLACEHOLDERS):
+        invalid_fields.append("BOT_TOKEN (or TELEGRAM_TOKEN)")
+    if _is_placeholder(settings.CHECKO_API_KEY, CHECKO_PLACEHOLDERS):
+        invalid_fields.append("CHECKO_API_KEY")
+
+    if invalid_fields:
         raise RuntimeError(
-            "Environment contains placeholder credentials. Update BOT_TOKEN (or TELEGRAM_TOKEN) and CHECKO_API_KEY before starting the bot."
+            "Environment contains placeholder credentials for: "
+            + ", ".join(invalid_fields)
+            + ". Replace placeholder values in .env before starting the bot."
         )
 
     return settings
