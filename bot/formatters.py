@@ -211,6 +211,42 @@ def format_history(data: dict) -> str:
     return "\n".join(lines)
 
 
+def format_fedresurs(data: dict) -> str:
+    """Format Fedresurs messages."""
+    d = data.get("data", data)
+    items = d if isinstance(d, list) else d.get("messages", [])
+    lines = [
+        "📄 <b>Сообщения Федресурса</b>",
+        "",
+        f"📋 <b>Всего сообщений:</b> {len(items) if isinstance(items, list) else '—'}",
+    ]
+    if isinstance(items, list):
+        for item in items[:5]:
+            lines.append(
+                f"• {_fmt(item.get('type'))} ({_fmt(item.get('date'))})"
+            )
+        if len(items) > 5:
+            lines.append(f"… и ещё {len(items) - 5}")
+    return "\n".join(lines)
+
+
+def format_bank(data: dict) -> str:
+    """Format bank / credit organization info."""
+    d = data.get("data", data)
+    lines = [
+        "🏦 <b>Банк / Кредитная организация</b>",
+        "",
+        f"📛 <b>Название:</b> {_fmt(d.get('fullName') or d.get('shortName') or d.get('name'))}",
+        f"🔢 <b>ИНН:</b> {_fmt(d.get('inn'))}",
+        f"📌 <b>ОГРН:</b> {_fmt(d.get('ogrn'))}",
+        f"🔑 <b>БИК:</b> {_fmt(d.get('bik') or d.get('bic'))}",
+        f"📅 <b>Дата регистрации:</b> {_fmt(d.get('registrationDate'))}",
+        f"🏷️ <b>Статус:</b> {_fmt(d.get('status'))}",
+        f"📍 <b>Адрес:</b> {_fmt(d.get('address'))}",
+    ]
+    return "\n".join(lines)
+
+
 def format_search_results(results: list[dict]) -> str:
     """Format a list of search results."""
     if not results:
