@@ -23,20 +23,41 @@ class CheckoAPIContractTests(unittest.IsolatedAsyncioTestCase):
     async def test_uses_documented_endpoint_names(self) -> None:
         api = _FakeCheckoAPI()
 
-        await api.get_arbitration("7707083893")
-        await api.get_bankruptcy("7707083893")
-        await api.get_financial("7707083893")
-        await api.get_history("7707083893")
+        await api.get_company(inn="7707083893")
+        await api.get_company_short(inn="7707083893")
+        await api.get_entrepreneur(inn="7707083893")
+        await api.get_person(inn="7707083893")
+        await api.get_arbitration(inn="7707083893")
+        await api.get_bankruptcy(inn="7707083893")
+        await api.get_enforcements(inn="7707083893")
+        await api.get_financial(inn="7707083893")
+        await api.get_history(inn="7707083893")
+        await api.get_inspections(inn="7707083893")
+        await api.search("Сбер")
+        await api.get_bank("044525225")
 
-        self.assertEqual(api.calls[0][0], "legal-cases")
-        self.assertEqual(api.calls[1][0], "bankruptcy-messages")
-        self.assertEqual(api.calls[2][0], "finances")
-        self.assertEqual(api.calls[3][0], "timeline")
+        self.assertEqual(
+            [call[0] for call in api.calls],
+            [
+                "company",
+                "company/short",
+                "entrepreneur",
+                "person",
+                "legal-cases",
+                "bankruptcy-messages",
+                "enforcements",
+                "finances",
+                "timeline",
+                "inspections",
+                "search",
+                "bank",
+            ],
+        )
 
     async def test_contracts_requests_all_supported_laws(self) -> None:
         api = _FakeCheckoAPI()
 
-        response = await api.get_contracts("7707083893")
+        response = await api.get_contracts(inn="7707083893")
 
         self.assertEqual(
             api.calls,
@@ -58,6 +79,14 @@ class CheckoAPIContractTests(unittest.IsolatedAsyncioTestCase):
                 }
             },
         )
+
+    async def test_call_method_rejects_unknown_name(self) -> None:
+        api = _FakeCheckoAPI()
+
+        with self.assertRaises(ValueError) as exc:
+            await api.call_method("unknown", inn="7707083893")
+
+        self.assertIn("Unknown Checko method", str(exc.exception))
 
 
 class KeyboardTests(unittest.TestCase):

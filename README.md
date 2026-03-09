@@ -4,7 +4,8 @@ Telegram-бот для поиска информации о российских
 
 ## Возможности
 
-- 🔍 Поиск по ИНН (10 цифр — ЮЛ, 12 цифр — ИП / физлицо)
+- 🔍 Поиск по идентификатору: ИНН (10/12), ОГРН (13), ОГРНИП (15)
+- 🔀 Для ИНН 12: явный выбор режима «ИП» или «физлицо»
 - 🔎 Поиск по названию компании или ИП
 - 💼 Просмотр основных данных (ОГРН, адрес, руководитель, статус)
 - 📊 Финансовая отчётность
@@ -55,18 +56,99 @@ BOT_TOKEN=your_bot_token_here
 CHECKO_API_KEY=your_checko_api_key_here
 CHECKO_API_URL=https://api.checko.ru/v2
 DATABASE_PATH=bot.db
+DATABASE_SOURCE_URL=https://f10dfe6833ed9c07519e4f0b5be647e5.r2.cloudflarestorage.com/yourist
 ```
 
 - `BOT_TOKEN` — токен бота от [@BotFather](https://t.me/BotFather)
 - `CHECKO_API_KEY` — ключ API от [checko.ru](https://checko.ru/)
 - `CHECKO_API_URL` — базовый URL Checko API (опционально)
 - `DATABASE_PATH` — путь к SQLite-файлу (по умолчанию `bot.db`)
+- `DATABASE_SOURCE_URL` — HTTP(S) URL для начальной SQLite-базы (например, Cloudflare R2). Если `DATABASE_PATH` уже существует, скачивание не выполняется.
 
 ## Запуск
+
+### 1) Локально / polling (по умолчанию)
 
 ```bash
 python -m bot.main
 ```
+
+Если бот запускается в среде с ограниченным исходящим доступом в интернет, можно задать `POLLING_MAX_RETRIES=1`, чтобы процесс завершался после первой неудачной попытки подключения к Telegram API.
+
+### 2) Webhook-режим (для деплоя за Cloudflare)
+
+Если задан `WEBHOOK_BASE_URL`, бот автоматически переключается с polling на webhook.
+
+```env
+WEBHOOK_BASE_URL=https://bot.example.com
+WEBHOOK_PATH=/webhook
+WEBHOOK_SECRET_TOKEN=change_me
+WEBHOOK_HOST=0.0.0.0
+WEBHOOK_PORT=8080
+```
+
+```bash
+python -m bot.main
+```
+
+### Методы деплоя на Cloudflare
+
+1. **Cloudflare Tunnel (рекомендуется для быстрого старта)**
+   - Поднимите бота на сервере (VPS/контейнер) на `WEBHOOK_PORT`.
+   - Опубликуйте его через `cloudflared tunnel` на HTTPS-домен.
+   - Укажите этот HTTPS-домен в `WEBHOOK_BASE_URL`.
+
+2. **Cloudflare Proxy + DNS (orange cloud)**
+   - Разместите бота на публичном сервере с HTTPS.
+   - Пропустите домен через Cloudflare Proxy и используйте его как `WEBHOOK_BASE_URL`.
+
+3. **Cloudflare как edge, бот на origin-инфраструктуре**
+   - Cloudflare выступает только как защищённая edge-точка (WAF, DDoS, TLS),
+     а Python-бот продолжает работать на вашем origin (VM/Kubernetes/Docker).
+
+> Важно: этот проект — Python/aiogram-приложение и не запускается нативно в Cloudflare Workers.
+> Для Workers потребуется отдельный runtime и переписывание обработчиков.
+
+
+## Checko API: методы вызова и формат ответа
+
+В `bot/checko_api.py` собрана карта поддерживаемых методов `METHOD_ENDPOINTS` и универсальный вызов `call_method(method, **params)`. Это позволяет явно видеть, какие логические методы поддерживаются и к каким endpoint они маппятся.
+
+Поддерживаемые логические методы:
+- `company` → `company`
+- `company_short` → `company/short`
+- `entrepreneur` → `entrepreneur`
+- `person` → `person`
+- `bank` → `bank`
+- `bankruptcy` → `bankruptcy-messages`
+- `enforcements` → `enforcements`
+- `arbitration` → `legal-cases`
+- `inspections` → `inspections`
+- `financial` → `finances`
+- `history` → `timeline`
+- `search` → `search`
+
+Контракты (`get_contracts`) обрабатываются отдельно: бот делает 3 запроса (`law=44`, `law=94`, `law=223`) и объединяет элементы в единый ответ вида:
+
+```json
+{
+  "data": {
+    "items": [ ... ]
+  }
+}
+```
+
+Для остальных методов ответ возвращается как есть от Checko API (после базовой проверки HTTP-кода и поля `error`).
+
+
+## Логика маршрутизации идентификаторов
+
+- `10` цифр → запрос как организация (`/v2/company`, параметр `inn`).
+- `13` цифр → запрос как организация (`/v2/company`, параметр `ogrn`).
+- `15` цифр → запрос как ИП (`/v2/entrepreneur`, параметр `ogrnip`).
+- `12` цифр → бот предлагает выбор:
+  - «Проверить как ИП» (`/v2/entrepreneur`, `inn`),
+  - «Проверить связи физлица» (`/v2/person`, `inn`).
 
 ## Технологии
 

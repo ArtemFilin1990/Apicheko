@@ -3,6 +3,7 @@ import logging
 import socket
 import sys
 
+from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -10,9 +11,10 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.token import TokenValidationError
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from bot.checko_api import CheckoAPI
-from bot.config import load_settings
+from bot.config import Settings, load_settings
 from bot.database.db import Database
 from bot.handlers import callbacks, search, start
 from bot.middlewares import DatabaseMiddleware, ThrottlingMiddleware
@@ -31,7 +33,7 @@ async def run_polling(dp: Dispatcher, bot: Bot, max_retries: int | None = None) 
 
     while True:
         try:
-            logger.info("Starting bot...")
+            logger.info("Starting bot in polling mode...")
             await dp.start_polling(bot)
         except asyncio.CancelledError:
             logger.info("Polling cancelled")
@@ -54,6 +56,67 @@ async def run_polling(dp: Dispatcher, bot: Bot, max_retries: int | None = None) 
         else:
             logger.info("Polling stopped normally")
             break
+
+
+async def run_webhook(dp: Dispatcher, bot: Bot, settings: Settings) -> None:
+    if not settings.WEBHOOK_BASE_URL:
+        raise RuntimeError(
+            "WEBHOOK_BASE_URL is required for webhook mode. "
+            "Provide a public HTTPS URL, e.g. through Cloudflare Tunnel."
+        )
+
+    webhook_url = settings.WEBHOOK_BASE_URL.rstrip("/") + settings.WEBHOOK_PATH
+    await bot.set_webhook(
+        url=webhook_url,
+        secret_token=settings.WEBHOOK_SECRET_TOKEN,
+        drop_pending_updates=False,
+    )
+
+    app = web.Application()
+    SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+        secret_token=settings.WEBHOOK_SECRET_TOKEN,
+    ).register(app, path=settings.WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host=settings.WEBHOOK_HOST, port=settings.WEBHOOK_PORT)
+
+    logger.info(
+        "Starting bot in webhook mode on %s:%s, webhook URL: %s",
+        settings.WEBHOOK_HOST,
+        settings.WEBHOOK_PORT,
+        webhook_url,
+    )
+
+    await site.start()
+
+    try:
+        stop_event = asyncio.Event()
+        await stop_event.wait()
+    except asyncio.CancelledError:
+        logger.info("Webhook server cancelled")
+        raise
+    finally:
+        await runner.cleanup()
+
+
+def build_dispatcher(db: Database, checko_api: CheckoAPI) -> Dispatcher:
+    dp = Dispatcher(storage=MemoryStorage())
+
+    dp.message.middleware(ThrottlingMiddleware())
+    dp.message.middleware(DatabaseMiddleware(db))
+    dp.callback_query.middleware(DatabaseMiddleware(db))
+
+    dp["checko_api"] = checko_api
+
+    dp.include_router(start.router)
+    dp.include_router(search.router)
+    dp.include_router(callbacks.router)
+
+    return dp
 
 
 async def main() -> None:
@@ -80,25 +143,18 @@ async def main() -> None:
             session=session,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         )
-        dp = Dispatcher(storage=MemoryStorage())
+        dp = build_dispatcher(db, checko_api)
 
-        # Middlewares
-        dp.message.middleware(ThrottlingMiddleware())
-        dp.message.middleware(DatabaseMiddleware(db))
-        dp.callback_query.middleware(DatabaseMiddleware(db))
-
-        # Inject checko_api into handler data
-        dp["checko_api"] = checko_api
-
-        # Routers
-        dp.include_router(start.router)
-        dp.include_router(search.router)
-        dp.include_router(callbacks.router)
-
-        await run_polling(dp, bot, settings.POLLING_MAX_RETRIES)
+        if settings.WEBHOOK_BASE_URL:
+            await run_webhook(dp, bot, settings)
+        else:
+            await run_polling(dp, bot, settings.POLLING_MAX_RETRIES)
     except TokenValidationError:
         logger.error("BOT_TOKEN is invalid. Update BOT_TOKEN in environment variables.")
         raise SystemExit(1)
+    except TelegramNetworkError as exc:
+        logger.error("Cannot reach Telegram API: %s", exc)
+        raise SystemExit(1) from exc
     except RuntimeError as exc:
         logger.error(str(exc))
         raise SystemExit(1) from exc

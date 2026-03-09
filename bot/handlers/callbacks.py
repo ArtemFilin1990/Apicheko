@@ -16,6 +16,7 @@ from bot.formatters import (
     format_financial,
     format_history,
     format_inspections,
+    format_person,
 )
 from bot.handlers.search import SearchState
 from bot.keyboards import (
@@ -50,9 +51,16 @@ _DETAIL_FETCHERS = {
 }
 
 
+def _identifier_params(identifier: str) -> dict[str, str]:
+    if len(identifier) == 13:
+        return {"ogrn": identifier}
+    if len(identifier) == 15:
+        return {"ogrnip": identifier}
+    return {"inn": identifier}
+
+
 @router.callback_query(F.data == "menu")
 async def cb_menu(call: CallbackQuery, state: FSMContext) -> None:
-    """Return to main menu."""
     await state.clear()
     await call.message.edit_text(
         "🏠 Главное меню. Выберите действие:",
@@ -63,15 +71,12 @@ async def cb_menu(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "help")
 async def cb_help(call: CallbackQuery) -> None:
-    """Show help text."""
     help_text = (
         "ℹ️ <b>Как пользоваться ботом</b>\n\n"
-        "• <b>Поиск по ИНН</b> — введите 10-значный ИНН компании "
-        "или 12-значный ИНН ИП / физлица.\n"
+        "• <b>Поиск по идентификатору</b> — ИНН 10/12, ОГРН 13, ОГРНИП 15.\n"
+        "• Для ИНН 12 бот предложит выбрать: ИП или физлицо.\n"
         "• <b>Поиск по названию</b> — введите название компании или ИП.\n"
-        "• <b>История запросов</b> — последние 10 ваших запросов.\n\n"
-        "После получения карточки вы можете изучить разделы:\n"
-        "финансы, арбитраж, госконтракты, проверки, банкротство и др."
+        "• <b>История запросов</b> — последние 10 ваших запросов."
     )
     await call.message.edit_text(help_text, reply_markup=main_menu_keyboard())
     await call.answer()
@@ -79,7 +84,6 @@ async def cb_help(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "history")
 async def cb_history(call: CallbackQuery, db: Database) -> None:
-    """Show user search history."""
     user_id = call.from_user.id
     rows = await db.get_user_history(user_id)
     if not rows:
@@ -98,12 +102,13 @@ async def cb_history(call: CallbackQuery, db: Database) -> None:
 
 @router.callback_query(F.data == "search:inn")
 async def cb_search_inn(call: CallbackQuery, state: FSMContext) -> None:
-    """Prompt user to enter INN."""
     await state.set_state(SearchState.waiting_for_inn)
     await call.message.edit_text(
-        "🔍 Введите ИНН:\n"
-        "• 10 цифр — для юридического лица\n"
-        "• 12 цифр — для ИП или физического лица",
+        "🔍 Введите идентификатор:\n"
+        "• ИНН 10 — для юридического лица\n"
+        "• ИНН 12 — для ИП или физлица\n"
+        "• ОГРН 13 — для юридического лица\n"
+        "• ОГРНИП 15 — для ИП",
         reply_markup=cancel_keyboard(),
     )
     await call.answer()
@@ -111,7 +116,6 @@ async def cb_search_inn(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "search:name")
 async def cb_search_name(call: CallbackQuery, state: FSMContext) -> None:
-    """Prompt user to enter a company name."""
     await state.set_state(SearchState.waiting_for_name)
     await call.message.edit_text(
         "🔎 Введите название компании или ИП для поиска:",
@@ -120,11 +124,37 @@ async def cb_search_name(call: CallbackQuery, state: FSMContext) -> None:
     await call.answer()
 
 
+@router.callback_query(F.data.startswith("resolve12:"))
+async def cb_resolve_12_inn(call: CallbackQuery, checko_api: CheckoAPI) -> None:
+    _, mode, inn = call.data.split(":", 2)
+
+    await call.message.edit_text("🔄 Загружаю данные…")
+
+    try:
+        if mode == "entrepreneur":
+            data = await checko_api.get_entrepreneur(inn=inn)
+            text = format_entrepreneur(data)
+            await call.message.edit_text(text, reply_markup=company_detail_keyboard(inn))
+        elif mode == "person":
+            data = await checko_api.get_person(inn=inn)
+            text = format_person(data)
+            await call.message.edit_text(text, reply_markup=back_to_company_keyboard(inn))
+        else:
+            await call.answer("Неизвестный режим проверки", show_alert=True)
+            return
+    except CheckoAPIError as exc:
+        await call.message.edit_text(
+            f"⚠️ Ошибка:\n<i>{html.escape(str(exc))}</i>",
+            reply_markup=cancel_keyboard(),
+        )
+
+    await call.answer()
+
+
 @router.callback_query(F.data.startswith("select:"))
 async def cb_select_entity(
     call: CallbackQuery, db: Database, checko_api: CheckoAPI
 ) -> None:
-    """Handle selection of a search result."""
     _, entity_type, inn = call.data.split(":", 2)
     user_id = call.from_user.id
     await db.add_search(user_id=user_id, query=inn, inn=inn, entity_type=entity_type)
@@ -133,10 +163,10 @@ async def cb_select_entity(
 
     try:
         if entity_type == "entrepreneur":
-            data = await checko_api.get_entrepreneur(inn)
+            data = await checko_api.get_entrepreneur(inn=inn)
             text = format_entrepreneur(data)
         else:
-            data = await checko_api.get_company(inn)
+            data = await checko_api.get_company(inn=inn)
             text = format_company(data)
         await call.message.edit_text(text, reply_markup=company_detail_keyboard(inn))
     except CheckoAPIError as exc:
@@ -149,13 +179,12 @@ async def cb_select_entity(
 
 @router.callback_query(F.data.startswith("detail:"))
 async def cb_detail(call: CallbackQuery, checko_api: CheckoAPI) -> None:
-    """Fetch and display a detail section for a company / IP."""
     parts = call.data.split(":", 2)
     if len(parts) != 3:
         await call.answer("Неверный запрос.", show_alert=True)
         return
 
-    _, inn, section = parts
+    _, identifier, section = parts
 
     fetcher_name = _DETAIL_FETCHERS.get(section)
     formatter = _DETAIL_FORMATTERS.get(section)
@@ -168,14 +197,12 @@ async def cb_detail(call: CallbackQuery, checko_api: CheckoAPI) -> None:
 
     try:
         fetcher = getattr(checko_api, fetcher_name)
-        data = await fetcher(inn)
+        data = await fetcher(**_identifier_params(identifier))
         text = formatter(data)
-        await call.message.edit_text(
-            text, reply_markup=back_to_company_keyboard(inn)
-        )
+        await call.message.edit_text(text, reply_markup=back_to_company_keyboard(identifier))
     except CheckoAPIError as exc:
         await call.message.edit_text(
             f"⚠️ Ошибка при загрузке раздела «{html.escape(section)}»:\n<i>{html.escape(str(exc))}</i>",
-            reply_markup=back_to_company_keyboard(inn),
+            reply_markup=back_to_company_keyboard(identifier),
         )
     await call.answer()

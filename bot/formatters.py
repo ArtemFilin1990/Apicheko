@@ -119,6 +119,7 @@ def format_enforcements(data: dict) -> str:
         "🏛️ <b>Исполнительные производства</b>",
         "",
         f"📋 <b>Всего:</b> {total}",
+        "⚠️ Данные ФССП могут содержать неточные совпадения (нечёткий поиск).",
     ]
     if isinstance(items, list):
         for item in items[:5]:

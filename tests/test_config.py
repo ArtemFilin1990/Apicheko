@@ -72,6 +72,66 @@ class ConfigSettingsTests(unittest.TestCase):
 
         self.assertIn("POLLING_MAX_RETRIES must be greater than 0", str(exc.exception))
 
+    def test_rejects_webhook_path_without_leading_slash(self) -> None:
+        with temp_env(
+            {
+                "BOT_TOKEN": "12345:abc",
+                "CHECKO_API_KEY": "real_key",
+                "WEBHOOK_BASE_URL": "https://example.com",
+                "WEBHOOK_PATH": "webhook",
+            }
+        ):
+            with self.assertRaises(RuntimeError) as exc:
+                load_settings()
+
+        self.assertIn("WEBHOOK_PATH must start with '/'", str(exc.exception))
+
+    def test_reads_webhook_settings(self) -> None:
+        with temp_env(
+            {
+                "BOT_TOKEN": "12345:abc",
+                "CHECKO_API_KEY": "real_key",
+                "WEBHOOK_BASE_URL": "https://example.com",
+                "WEBHOOK_PATH": "/telegram",
+                "WEBHOOK_SECRET_TOKEN": "secret",
+                "WEBHOOK_HOST": "127.0.0.1",
+                "WEBHOOK_PORT": "9000",
+            }
+        ):
+            settings = load_settings()
+
+        self.assertEqual(settings.WEBHOOK_BASE_URL, "https://example.com")
+        self.assertEqual(settings.WEBHOOK_PATH, "/telegram")
+        self.assertEqual(settings.WEBHOOK_SECRET_TOKEN, "secret")
+        self.assertEqual(settings.WEBHOOK_HOST, "127.0.0.1")
+        self.assertEqual(settings.WEBHOOK_PORT, 9000)
+
+    def test_reads_database_source_url(self) -> None:
+        with temp_env(
+            {
+                "BOT_TOKEN": "12345:abc",
+                "CHECKO_API_KEY": "real_key",
+                "DATABASE_SOURCE_URL": "https://example.com/base.sqlite3",
+            }
+        ):
+            settings = load_settings()
+
+        self.assertEqual(settings.DATABASE_SOURCE_URL, "https://example.com/base.sqlite3")
+
+    def test_rejects_invalid_database_source_url(self) -> None:
+        with temp_env(
+            {
+                "BOT_TOKEN": "12345:abc",
+                "CHECKO_API_KEY": "real_key",
+                "DATABASE_SOURCE_URL": "ftp://example.com/base.sqlite3",
+            }
+        ):
+            with self.assertRaises(RuntimeError) as exc:
+                load_settings()
+
+        self.assertIn("DATABASE_SOURCE_URL must be a valid HTTP/HTTPS URL", str(exc.exception))
+
+
 
 if __name__ == "__main__":
     unittest.main()
