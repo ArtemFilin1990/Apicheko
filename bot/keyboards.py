@@ -25,9 +25,8 @@ def company_detail_keyboard(inn: str) -> InlineKeyboardMarkup:
     builder.button(text="📰 Банкротство", callback_data=f"detail:{inn}:bankruptcy")
     builder.button(text="📜 История изменений", callback_data=f"detail:{inn}:history")
     builder.button(text="📄 Федресурс", callback_data=f"detail:{inn}:fedresurs")
-    builder.button(text="🏦 Банки", callback_data=f"detail:{inn}:bank")
     builder.button(text="🔙 В меню", callback_data="menu")
-    builder.adjust(2, 2, 2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 2, 1, 1)
     return builder.as_markup()
 
 

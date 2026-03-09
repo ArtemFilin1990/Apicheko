@@ -233,16 +233,15 @@ def format_fedresurs(data: dict) -> str:
 def format_bank(data: dict) -> str:
     """Format bank / credit organization info."""
     d = data.get("data", data)
+    cor = d.get("КорСчет") or {}
     lines = [
         "🏦 <b>Банк / Кредитная организация</b>",
         "",
-        f"📛 <b>Название:</b> {_fmt(d.get('fullName') or d.get('shortName') or d.get('name'))}",
-        f"🔢 <b>ИНН:</b> {_fmt(d.get('inn'))}",
-        f"📌 <b>ОГРН:</b> {_fmt(d.get('ogrn'))}",
-        f"🔑 <b>БИК:</b> {_fmt(d.get('bik') or d.get('bic'))}",
-        f"📅 <b>Дата регистрации:</b> {_fmt(d.get('registrationDate'))}",
-        f"🏷️ <b>Статус:</b> {_fmt(d.get('status'))}",
-        f"📍 <b>Адрес:</b> {_fmt(d.get('address'))}",
+        f"📛 <b>Название:</b> {_fmt(d.get('Наим'))}",
+        f"🔑 <b>БИК:</b> {_fmt(d.get('БИК'))}",
+        f"📍 <b>Адрес:</b> {_fmt(d.get('Адрес'))}",
+        f"🏷️ <b>Тип:</b> {_fmt(d.get('Тип'))}",
+        f"💳 <b>Корр. счёт:</b> {_fmt(cor.get('Номер'))}",
     ]
     return "\n".join(lines)
 

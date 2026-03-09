@@ -163,9 +163,9 @@ class CheckoAPI:
 
     # --- Bank (Банки) ---
 
-    async def get_bank(self, inn: str) -> dict:
-        """Get bank / credit organization info by INN."""
-        return await self._get("bank", inn=inn)
+    async def get_bank(self, bic: str) -> dict:
+        """Get bank / credit organization info by BIC (БИК)."""
+        return await self._get("bank", bic=bic)
 
     # --- Search ---
 

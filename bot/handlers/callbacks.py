@@ -8,7 +8,6 @@ from bot.checko_api import CheckoAPI, CheckoAPIError
 from bot.database.db import Database
 from bot.formatters import (
     format_arbitration,
-    format_bank,
     format_bankruptcy,
     format_company,
     format_contracts,
@@ -39,7 +38,6 @@ _DETAIL_FORMATTERS = {
     "bankruptcy": format_bankruptcy,
     "history": format_history,
     "fedresurs": format_fedresurs,
-    "bank": format_bank,
 }
 
 _DETAIL_FETCHERS = {
@@ -52,7 +50,6 @@ _DETAIL_FETCHERS = {
     "bankruptcy": "get_bankruptcy",
     "history": "get_history",
     "fedresurs": "get_fedresurs",
-    "bank": "get_bank",
 }
 
 
