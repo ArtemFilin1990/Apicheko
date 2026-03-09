@@ -155,6 +155,18 @@ class CheckoAPI:
         """Get change history by INN."""
         return await self._get("timeline", inn=inn)
 
+    # --- Fedresurs (Федресурс) ---
+
+    async def get_fedresurs(self, inn: str) -> dict:
+        """Get Fedresurs messages by INN."""
+        return await self._get("fedresurs", inn=inn)
+
+    # --- Bank (Банки) ---
+
+    async def get_bank(self, bic: str) -> dict:
+        """Get bank / credit organization info by BIC (БИК)."""
+        return await self._get("bank", bic=bic)
+
     # --- Search ---
 
     async def search(self, query: str) -> dict:

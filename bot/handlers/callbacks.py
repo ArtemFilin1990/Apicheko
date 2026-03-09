@@ -13,6 +13,7 @@ from bot.formatters import (
     format_contracts,
     format_enforcements,
     format_entrepreneur,
+    format_fedresurs,
     format_financial,
     format_history,
     format_inspections,
@@ -36,6 +37,7 @@ _DETAIL_FORMATTERS = {
     "inspections": format_inspections,
     "bankruptcy": format_bankruptcy,
     "history": format_history,
+    "fedresurs": format_fedresurs,
 }
 
 _DETAIL_FETCHERS = {
@@ -47,6 +49,7 @@ _DETAIL_FETCHERS = {
     "inspections": "get_inspections",
     "bankruptcy": "get_bankruptcy",
     "history": "get_history",
+    "fedresurs": "get_fedresurs",
 }
 
 
