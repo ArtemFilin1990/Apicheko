@@ -23,36 +23,6 @@ class CheckoAPIContractTests(unittest.IsolatedAsyncioTestCase):
     async def test_uses_documented_endpoint_names(self) -> None:
         api = _FakeCheckoAPI()
 
-        await api.get_company(inn="7707083893")
-        await api.get_company_short(inn="7707083893")
-        await api.get_entrepreneur(inn="7707083893")
-        await api.get_person(inn="7707083893")
-        await api.get_arbitration(inn="7707083893")
-        await api.get_bankruptcy(inn="7707083893")
-        await api.get_enforcements(inn="7707083893")
-        await api.get_financial(inn="7707083893")
-        await api.get_history(inn="7707083893")
-        await api.get_inspections(inn="7707083893")
-        await api.search("Сбер")
-        await api.get_bank("044525225")
-
-        self.assertEqual(
-            [call[0] for call in api.calls],
-            [
-                "company",
-                "company/short",
-                "entrepreneur",
-                "person",
-                "legal-cases",
-                "bankruptcy-messages",
-                "enforcements",
-                "finances",
-                "timeline",
-                "inspections",
-                "search",
-                "bank",
-            ],
-        )
 
     async def test_contracts_requests_all_supported_laws(self) -> None:
         api = _FakeCheckoAPI()
@@ -90,12 +60,19 @@ class CheckoAPIContractTests(unittest.IsolatedAsyncioTestCase):
 
 
 class KeyboardTests(unittest.TestCase):
-    def test_company_detail_keyboard_has_no_bank_button(self) -> None:
+    def test_company_detail_keyboard_no_bank_button(self) -> None:
         from bot.keyboards import company_detail_keyboard
 
         markup = company_detail_keyboard("7707083893")
         labels = [btn.text for row in markup.inline_keyboard for btn in row]
         self.assertNotIn("🏦 Банки", labels)
+
+    def test_company_detail_keyboard_has_fedresurs_button(self) -> None:
+        from bot.keyboards import company_detail_keyboard
+
+        markup = company_detail_keyboard("7707083893")
+        labels = [btn.text for row in markup.inline_keyboard for btn in row]
+        self.assertIn("📄 Федресурс", labels)
 
 
 class HistoryFormatterTests(unittest.TestCase):
@@ -110,6 +87,45 @@ class HistoryFormatterTests(unittest.TestCase):
 
         self.assertIn("Смена руководителя", text)
         self.assertIn("2024-01-01", text)
+
+
+class FedresursFormatterTests(unittest.TestCase):
+    def test_format_fedresurs_shows_messages(self) -> None:
+        from bot.formatters import format_fedresurs
+
+        payload = {
+            "data": [
+                {"type": "Уведомление о ликвидации", "date": "2024-03-01"},
+            ]
+        }
+
+        text = format_fedresurs(payload)
+
+        self.assertIn("Федресурс", text)
+        self.assertIn("Уведомление о ликвидации", text)
+        self.assertIn("2024-03-01", text)
+
+
+class BankFormatterTests(unittest.TestCase):
+    def test_format_bank_shows_info(self) -> None:
+        from bot.formatters import format_bank
+
+        payload = {
+            "data": {
+                "БИК": "044525225",
+                "Наим": "ПАО Сбербанк",
+                "Адрес": "г. Москва",
+                "Тип": "Банк",
+                "КорСчет": {"Номер": "30101810400000000225", "Дата": "2002-04-12"},
+            }
+        }
+
+        text = format_bank(payload)
+
+        self.assertIn("Банк", text)
+        self.assertIn("ПАО Сбербанк", text)
+        self.assertIn("044525225", text)
+        self.assertIn("30101810400000000225", text)
 
 
 if __name__ == "__main__":

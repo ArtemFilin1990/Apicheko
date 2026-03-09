@@ -154,8 +154,7 @@ class CheckoAPI:
     async def get_financial(self, **params: Any) -> dict:
         return await self.call_method("financial", **params)
 
-    async def get_history(self, **params: Any) -> dict:
-        return await self.call_method("history", **params)
+
 
     async def search(self, query: str) -> dict:
         return await self.call_method("search", query=query)

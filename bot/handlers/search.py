@@ -10,7 +10,6 @@ from bot.checko_api import CheckoAPI, CheckoAPIError
 from bot.database.db import Database
 from bot.formatters import format_company, format_entrepreneur, format_person, format_search_results
 from bot.keyboards import (
-    back_to_company_keyboard,
     cancel_keyboard,
     company_detail_keyboard,
     person_or_entrepreneur_keyboard,
@@ -54,25 +53,7 @@ async def handle_inn_input(
         if len(identifier) == 10:
             data = await checko_api.get_company(inn=identifier)
             text = format_company(data)
-            await message.answer(text, reply_markup=company_detail_keyboard(identifier))
-            return
 
-        if len(identifier) == 13:
-            data = await checko_api.get_company(ogrn=identifier)
-            text = format_company(data)
-            await message.answer(text, reply_markup=company_detail_keyboard(identifier))
-            return
-
-        if len(identifier) == 15:
-            data = await checko_api.get_entrepreneur(ogrnip=identifier)
-            text = format_entrepreneur(data)
-            await message.answer(text, reply_markup=company_detail_keyboard(identifier))
-            return
-
-        await message.answer(
-            "Выберите режим проверки для 12-значного ИНН:",
-            reply_markup=person_or_entrepreneur_keyboard(identifier),
-        )
     except CheckoAPIError as exc:
         await message.answer(
             f"⚠️ Ошибка при получении данных:\n<i>{html.escape(str(exc))}</i>\n\n"

@@ -13,6 +13,7 @@ from bot.formatters import (
     format_contracts,
     format_enforcements,
     format_entrepreneur,
+    format_fedresurs,
     format_financial,
     format_history,
     format_inspections,
@@ -37,6 +38,7 @@ _DETAIL_FORMATTERS = {
     "inspections": format_inspections,
     "bankruptcy": format_bankruptcy,
     "history": format_history,
+    "fedresurs": format_fedresurs,
 }
 
 _DETAIL_FETCHERS = {
@@ -48,6 +50,7 @@ _DETAIL_FETCHERS = {
     "inspections": "get_inspections",
     "bankruptcy": "get_bankruptcy",
     "history": "get_history",
+    "fedresurs": "get_fedresurs",
 }
 
 
@@ -188,6 +191,12 @@ async def cb_detail(call: CallbackQuery, checko_api: CheckoAPI) -> None:
 
     fetcher_name = _DETAIL_FETCHERS.get(section)
     formatter = _DETAIL_FORMATTERS.get(section)
+
+    # For the "company" base section, use the entrepreneur fetcher when INN
+    # has 12 digits (individual entrepreneur rather than a legal entity).
+    if section == "company" and len(inn) == 12:
+        fetcher_name = "get_entrepreneur"
+        formatter = format_entrepreneur
 
     if not fetcher_name or not formatter:
         await call.answer("Неизвестный раздел.", show_alert=True)
