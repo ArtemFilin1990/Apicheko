@@ -1,6 +1,13 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import aiohttp
 import aiosqlite
 
 from bot.config import load_settings
+
+MAX_DATABASE_SIZE_BYTES = 50 * 1024 * 1024
 
 
 class Database:
@@ -9,12 +16,50 @@ class Database:
     def __init__(self, path: str | None = None) -> None:
         settings = load_settings()
         self._path = path or settings.DATABASE_PATH
+        self._source_url = settings.DATABASE_SOURCE_URL
         self._conn: aiosqlite.Connection | None = None
 
     async def connect(self) -> None:
+        await self._ensure_database_file()
         self._conn = await aiosqlite.connect(self._path)
         self._conn.row_factory = aiosqlite.Row
         await self._create_tables()
+
+    async def _ensure_database_file(self) -> None:
+        if not self._source_url:
+            return
+
+        destination = Path(self._path)
+        if destination.exists():
+            return
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        timeout = aiohttp.ClientTimeout(total=30)
+        downloaded = 0
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(self._source_url) as response:
+                    if response.status != 200:
+                        raise RuntimeError(
+                            f"Failed to download database from DATABASE_SOURCE_URL: HTTP {response.status}."
+                        )
+
+                    with destination.open("wb") as file:
+                        async for chunk in response.content.iter_chunked(64 * 1024):
+                            downloaded += len(chunk)
+                            if downloaded > MAX_DATABASE_SIZE_BYTES:
+                                raise RuntimeError(
+                                    "Downloaded database exceeds MAX_DATABASE_SIZE_BYTES limit."
+                                )
+                            file.write(chunk)
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            if destination.exists():
+                destination.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"Failed to download database from DATABASE_SOURCE_URL: {exc}."
+            ) from exc
 
     async def close(self) -> None:
         if self._conn:

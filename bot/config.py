@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Iterable, List
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -26,12 +27,24 @@ class Settings:
     CHECKO_API_KEY: str
     CHECKO_API_URL: str = "https://api.checko.ru/v2"
     DATABASE_PATH: str = "bot.db"
+    DATABASE_SOURCE_URL: str | None = None
     THROTTLE_RATE: float = 0.5
     POLLING_MAX_RETRIES: int | None = None
+    WEBHOOK_BASE_URL: str | None = None
+    WEBHOOK_PATH: str = "/webhook"
+    WEBHOOK_SECRET_TOKEN: str | None = None
+    WEBHOOK_HOST: str = "0.0.0.0"
+    WEBHOOK_PORT: int = 8080
 
 
 def _is_placeholder(value: str, placeholders: Iterable[str]) -> bool:
     return value.lower() in placeholders
+
+
+def _validate_http_url(value: str, field_name: str) -> None:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuntimeError(f"{field_name} must be a valid HTTP/HTTPS URL.")
 
 
 @lru_cache(maxsize=1)
@@ -51,8 +64,14 @@ def get_settings() -> Settings:
     checko_api_key = (os.getenv("CHECKO_API_KEY") or "").strip()
     checko_api_url = (os.getenv("CHECKO_API_URL") or "https://api.checko.ru/v2").strip()
     database_path = (os.getenv("DATABASE_PATH") or "bot.db").strip()
+    database_source_url_raw = (os.getenv("DATABASE_SOURCE_URL") or "").strip()
     throttle_rate_raw = (os.getenv("THROTTLE_RATE") or "0.5").strip()
     polling_max_retries_raw = (os.getenv("POLLING_MAX_RETRIES") or "").strip()
+    webhook_base_url_raw = (os.getenv("WEBHOOK_BASE_URL") or "").strip()
+    webhook_path_raw = (os.getenv("WEBHOOK_PATH") or "/webhook").strip()
+    webhook_secret_token_raw = (os.getenv("WEBHOOK_SECRET_TOKEN") or "").strip()
+    webhook_host = (os.getenv("WEBHOOK_HOST") or "0.0.0.0").strip()
+    webhook_port_raw = (os.getenv("WEBHOOK_PORT") or "8080").strip()
 
     if not bot_token or not checko_api_key:
         raise RuntimeError(
@@ -77,13 +96,41 @@ def get_settings() -> Settings:
         if polling_max_retries <= 0:
             raise RuntimeError("POLLING_MAX_RETRIES must be greater than 0.")
 
+    database_source_url: str | None = database_source_url_raw or None
+    if database_source_url is not None:
+        _validate_http_url(database_source_url, "DATABASE_SOURCE_URL")
+
+    webhook_base_url: str | None = webhook_base_url_raw or None
+    if webhook_base_url is not None:
+        _validate_http_url(webhook_base_url, "WEBHOOK_BASE_URL")
+
+    webhook_path = webhook_path_raw or "/webhook"
+    webhook_secret_token: str | None = webhook_secret_token_raw or None
+
+    if not webhook_path.startswith("/"):
+        raise RuntimeError("WEBHOOK_PATH must start with '/'.")
+
+    try:
+        webhook_port = int(webhook_port_raw)
+    except ValueError as exc:
+        raise RuntimeError("WEBHOOK_PORT must be a valid integer.") from exc
+
+    if webhook_port <= 0:
+        raise RuntimeError("WEBHOOK_PORT must be greater than 0.")
+
     return Settings(
         BOT_TOKEN=bot_token,
         CHECKO_API_KEY=checko_api_key,
         CHECKO_API_URL=checko_api_url,
         DATABASE_PATH=database_path,
+        DATABASE_SOURCE_URL=database_source_url,
         THROTTLE_RATE=throttle_rate,
         POLLING_MAX_RETRIES=polling_max_retries,
+        WEBHOOK_BASE_URL=webhook_base_url,
+        WEBHOOK_PATH=webhook_path,
+        WEBHOOK_SECRET_TOKEN=webhook_secret_token,
+        WEBHOOK_HOST=webhook_host,
+        WEBHOOK_PORT=webhook_port,
     )
 
 

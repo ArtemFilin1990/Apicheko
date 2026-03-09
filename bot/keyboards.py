@@ -30,6 +30,16 @@ def company_detail_keyboard(inn: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def person_or_entrepreneur_keyboard(inn: str) -> InlineKeyboardMarkup:
+    """Ask user to choose how to resolve 12-digit INN."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👔 Проверить как ИП", callback_data=f"resolve12:entrepreneur:{inn}")
+    builder.button(text="👤 Проверить связи физлица", callback_data=f"resolve12:person:{inn}")
+    builder.button(text="🔙 В меню", callback_data="menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def back_to_company_keyboard(inn: str) -> InlineKeyboardMarkup:
     """Keyboard to go back to the company details."""
     builder = InlineKeyboardBuilder()
@@ -46,8 +56,6 @@ def search_results_keyboard(results: list[dict]) -> InlineKeyboardMarkup:
         inn = item.get("inn", "")
         name = item.get("name", item.get("shortName", inn))
         short_name = name[:40] + "…" if len(name) > 40 else name
-        # 12-digit INN belongs to an individual entrepreneur (ИП) or a person;
-        # 10-digit INN belongs to a legal entity (ЮЛ).
         entity_type = "entrepreneur" if len(inn) == 12 else "company"
         builder.button(
             text=f"{short_name} ({inn})",

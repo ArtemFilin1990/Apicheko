@@ -4,7 +4,8 @@ Telegram-бот для поиска информации о российских
 
 ## Возможности
 
-- 🔍 Поиск по ИНН (10 цифр — ЮЛ, 12 цифр — ИП / физлицо)
+- 🔍 Поиск по идентификатору: ИНН (10/12), ОГРН (13), ОГРНИП (15)
+- 🔀 Для ИНН 12: явный выбор режима «ИП» или «физлицо»
 - 🔎 Поиск по названию компании или ИП
 - 💼 Просмотр основных данных (ОГРН, адрес, руководитель, статус)
 - 📊 Финансовая отчётность
@@ -55,20 +56,40 @@ BOT_TOKEN=your_bot_token_here
 CHECKO_API_KEY=your_checko_api_key_here
 CHECKO_API_URL=https://api.checko.ru/v2
 DATABASE_PATH=bot.db
+DATABASE_SOURCE_URL=https://f10dfe6833ed9c07519e4f0b5be647e5.r2.cloudflarestorage.com/yourist
 ```
 
 - `BOT_TOKEN` — токен бота от [@BotFather](https://t.me/BotFather)
 - `CHECKO_API_KEY` — ключ API от [checko.ru](https://checko.ru/)
 - `CHECKO_API_URL` — базовый URL Checko API (опционально)
 - `DATABASE_PATH` — путь к SQLite-файлу (по умолчанию `bot.db`)
+- `DATABASE_SOURCE_URL` — HTTP(S) URL для начальной SQLite-базы (например, Cloudflare R2). Если `DATABASE_PATH` уже существует, скачивание не выполняется.
 
 ## Запуск
+
+### 1) Локально / polling (по умолчанию)
 
 ```bash
 python -m bot.main
 ```
 
 Если бот запускается в среде с ограниченным исходящим доступом в интернет, можно задать `POLLING_MAX_RETRIES=1`, чтобы процесс завершался после первой неудачной попытки подключения к Telegram API.
+
+### 2) Webhook-режим (для деплоя за Cloudflare)
+
+Если задан `WEBHOOK_BASE_URL`, бот автоматически переключается с polling на webhook.
+
+```env
+WEBHOOK_BASE_URL=https://bot.example.com
+WEBHOOK_PATH=/webhook
+WEBHOOK_SECRET_TOKEN=change_me
+WEBHOOK_HOST=0.0.0.0
+WEBHOOK_PORT=8080
+```
+
+```bash
+python -m bot.main
+```
 
 ## Технологии
 

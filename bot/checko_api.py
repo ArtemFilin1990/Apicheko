@@ -15,6 +15,21 @@ class CheckoAPIError(Exception):
 class CheckoAPI:
     """Async client for the Checko API."""
 
+    METHOD_ENDPOINTS: dict[str, str] = {
+        "company": "company",
+        "company_short": "company/short",
+        "entrepreneur": "entrepreneur",
+        "person": "person",
+        "bank": "bank",
+        "bankruptcy": "bankruptcy-messages",
+        "enforcements": "enforcements",
+        "arbitration": "legal-cases",
+        "inspections": "inspections",
+        "financial": "finances",
+        "history": "timeline",
+        "search": "search",
+    }
+
     def __init__(
         self,
         base_url: str,
@@ -59,8 +74,16 @@ class CheckoAPI:
                         )
 
                     data = await resp.json()
-                    if isinstance(data, dict) and data.get("error"):
-                        raise CheckoAPIError(data["error"])
+                    if not isinstance(data, dict):
+                        return data
+
+                    if data.get("error"):
+                        raise CheckoAPIError(str(data["error"]))
+
+                    meta = data.get("meta")
+                    if isinstance(meta, dict) and meta.get("status") == "error":
+                        raise CheckoAPIError(str(meta.get("message") or "Checko returned error status."))
+
                     return data
             except CheckoAPIError as exc:
                 if exc.status_code and 500 <= exc.status_code < 600:
@@ -82,54 +105,42 @@ class CheckoAPI:
 
         raise CheckoAPIError(f"Checko request failed after retries: {last_error}")
 
-    # --- Company (ЮЛ) ---
+    async def call_method(self, method: str, **params: Any) -> dict:
+        endpoint = self.METHOD_ENDPOINTS.get(method)
+        if endpoint is None:
+            available = ", ".join(sorted(self.METHOD_ENDPOINTS))
+            raise ValueError(f"Unknown Checko method '{method}'. Available methods: {available}.")
+        return await self._get(endpoint, **params)
 
-    async def get_company(self, inn: str) -> dict:
-        """Get company info by INN."""
-        return await self._get("company", inn=inn)
+    async def get_company(self, **params: Any) -> dict:
+        return await self.call_method("company", **params)
 
-    async def get_company_short(self, inn: str) -> dict:
-        """Get short company info by INN."""
-        return await self._get("company/short", inn=inn)
+    async def get_company_short(self, **params: Any) -> dict:
+        return await self.call_method("company_short", **params)
 
-    # --- Individual Entrepreneur (ИП / ЕГРИП) ---
+    async def get_entrepreneur(self, **params: Any) -> dict:
+        return await self.call_method("entrepreneur", **params)
 
-    async def get_entrepreneur(self, inn: str) -> dict:
-        """Get individual entrepreneur info by INN."""
-        return await self._get("entrepreneur", inn=inn)
+    async def get_person(self, **params: Any) -> dict:
+        return await self.call_method("person", **params)
 
-    # --- Individual (Физическое лицо) ---
+    async def get_bank(self, bic: str) -> dict:
+        return await self.call_method("bank", bic=bic)
 
-    async def get_person(self, inn: str) -> dict:
-        """Get individual info by INN."""
-        return await self._get("person", inn=inn)
+    async def get_bankruptcy(self, **params: Any) -> dict:
+        return await self.call_method("bankruptcy", **params)
 
-    # --- Bankruptcy (ЕФРСБ) ---
+    async def get_enforcements(self, **params: Any) -> dict:
+        return await self.call_method("enforcements", **params)
 
-    async def get_bankruptcy(self, inn: str) -> dict:
-        """Get bankruptcy records by INN."""
-        return await self._get("bankruptcy-messages", inn=inn)
+    async def get_arbitration(self, **params: Any) -> dict:
+        return await self.call_method("arbitration", **params)
 
-    # --- Enforcement proceedings (Исполнительные производства) ---
-
-    async def get_enforcements(self, inn: str) -> dict:
-        """Get enforcement proceedings by INN."""
-        return await self._get("enforcements", inn=inn)
-
-    # --- Arbitration cases (Арбитражные дела) ---
-
-    async def get_arbitration(self, inn: str) -> dict:
-        """Get arbitration cases by INN."""
-        return await self._get("legal-cases", inn=inn)
-
-    # --- Government contracts (Госзакупки) ---
-
-    async def get_contracts(self, inn: str) -> dict:
-        """Get government contracts by INN for all supported procurement laws."""
+    async def get_contracts(self, **params: Any) -> dict:
         all_items: list[dict[str, Any]] = []
 
         for law in ("44", "94", "223"):
-            response = await self._get("contracts", inn=inn, law=law)
+            response = await self._get("contracts", law=law, **params)
             data = response.get("data", response)
             items = data if isinstance(data, list) else data.get("items", [])
             if isinstance(items, list):
@@ -137,38 +148,13 @@ class CheckoAPI:
 
         return {"data": {"items": all_items}}
 
-    # --- Inspections (Проверки) ---
+    async def get_inspections(self, **params: Any) -> dict:
+        return await self.call_method("inspections", **params)
 
-    async def get_inspections(self, inn: str) -> dict:
-        """Get inspections by INN."""
-        return await self._get("inspections", inn=inn)
+    async def get_financial(self, **params: Any) -> dict:
+        return await self.call_method("financial", **params)
 
-    # --- Financial reports (Финансовая отчётность) ---
 
-    async def get_financial(self, inn: str) -> dict:
-        """Get financial reports by INN."""
-        return await self._get("finances", inn=inn)
-
-    # --- Change history (История изменений) ---
-
-    async def get_history(self, inn: str) -> dict:
-        """Get change history by INN."""
-        return await self._get("timeline", inn=inn)
-
-    # --- Fedresurs (Федресурс) ---
-
-    async def get_fedresurs(self, inn: str) -> dict:
-        """Get Fedresurs messages by INN."""
-        return await self._get("fedresurs", inn=inn)
-
-    # --- Bank (Банки) ---
-
-    async def get_bank(self, bic: str) -> dict:
-        """Get bank / credit organization info by BIC (БИК)."""
-        return await self._get("bank", bic=bic)
-
-    # --- Search ---
 
     async def search(self, query: str) -> dict:
-        """Search companies and entrepreneurs by name or INN."""
-        return await self._get("search", query=query)
+        return await self.call_method("search", query=query)
