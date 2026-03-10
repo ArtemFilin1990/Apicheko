@@ -1,0 +1,4 @@
+﻿interface:
+  display_name: "Aiogram Bot Implementer"
+  short_description: "Implement Telegram bots in aiogram 3"
+  default_prompt: "Use $telegram-bot-aiogram-implementer to scaffold, patch, or review an aiogram 3 Telegram bot with /start, menus, routers, typed callback_data, and FSM-safe handler structure."

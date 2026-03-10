@@ -1,0 +1,4 @@
+interface:
+  display_name: "Telegram Assistant"
+  short_description: "Automate Telegram digests, drafts, and style analysis"
+  default_prompt: "Use $telegram-assistant to summarize unread Telegram messages or draft a channel post safely as a draft."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Telegram Bot Designer"
+  short_description: "Design creative Telegram bot concepts"
+  default_prompt: "Use $telegram-bot-designer to invent or review a creative Telegram bot concept, flow, keyboards, states, and implementation-ready spec."

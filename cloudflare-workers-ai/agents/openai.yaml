@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cloudflare Workers AI"
+  short_description: "Validate tokens and work with Workers AI APIs"
+  default_prompt: "Use $cloudflare-workers-ai to validate a Cloudflare Workers AI token, confirm permissions, and run a Workers AI REST API smoke test."

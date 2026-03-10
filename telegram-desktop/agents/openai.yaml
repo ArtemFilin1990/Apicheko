@@ -1,0 +1,4 @@
+interface:
+  display_name: "Telegram Desktop"
+  short_description: "Telegram Desktop repository guide"
+  default_prompt: "Use $telegram-desktop to inspect or modify the Telegram Desktop repository safely."

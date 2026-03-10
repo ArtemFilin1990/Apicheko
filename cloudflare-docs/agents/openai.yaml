@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cloudflare Docs"
+  short_description: "Help with Cloudflare Docs repo work"
+  default_prompt: "Use $cloudflare-docs to inspect or update the cloudflare/cloudflare-docs repository."
