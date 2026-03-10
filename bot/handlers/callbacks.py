@@ -194,7 +194,7 @@ async def cb_detail(call: CallbackQuery, checko_api: CheckoAPI) -> None:
 
     # For the "company" base section, use the entrepreneur fetcher when INN
     # has 12 digits (individual entrepreneur rather than a legal entity).
-    if section == "company" and len(inn) == 12:
+    if section == "company" and len(identifier) == 12:
         fetcher_name = "get_entrepreneur"
         formatter = format_entrepreneur
 
@@ -206,7 +206,11 @@ async def cb_detail(call: CallbackQuery, checko_api: CheckoAPI) -> None:
 
     try:
         fetcher = getattr(checko_api, fetcher_name)
-        data = await fetcher(**_identifier_params(identifier))
+        params = _identifier_params(identifier)
+        if "inn" in params:
+            data = await fetcher(params["inn"])
+        else:
+            data = await fetcher(**params)
         text = formatter(data)
         await call.message.edit_text(text, reply_markup=back_to_company_keyboard(identifier))
     except CheckoAPIError as exc:
