@@ -73,6 +73,26 @@ DATABASE_SOURCE_URL=https://f10dfe6833ed9c07519e4f0b5be647e5.r2.cloudflarestorag
 python -m bot.main
 ```
 
+## Деплой Cloudflare Worker (из корня репозитория)
+
+Для `npx wrangler deploy` в корне репозитория добавлены:
+
+- `wrangler.toml` с `main = "worker.js"`
+- `worker.js` — entrypoint Worker
+
+Перед деплоем задайте секреты (не храните токены в репозитории):
+
+```bash
+npx wrangler secret put TELEGRAM_BOT_TOKEN
+npx wrangler secret put CHECKO_API_KEY
+```
+
+Затем выполните:
+
+```bash
+npx wrangler deploy
+```
+
 Если бот запускается в среде с ограниченным исходящим доступом в интернет, можно задать `POLLING_MAX_RETRIES=1`, чтобы процесс завершался после первой неудачной попытки подключения к Telegram API.
 
 ### 2) Webhook-режим (для деплоя за Cloudflare)
