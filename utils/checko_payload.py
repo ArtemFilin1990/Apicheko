@@ -3,15 +3,15 @@ from __future__ import annotations
 from typing import Any
 
 DEFAULT_ITEM_KEYS = (
-    "Р—Р°РїРёСЃРё",
-    "Р РµР·СѓР»СЊС‚Р°С‚С‹",
-    "РЎРѕРѕР±С‰РµРЅРёСЏ",
-    "Р”РµР»Р°",
-    "РљРѕРЅС‚СЂР°РєС‚С‹",
-    "РџСЂРѕРІРµСЂРєРё",
-    "РРџ",
-    "РЎРѕР±С‹С‚РёСЏ",
-    "РћС‚С‡РµС‚С‹",
+    "Записи",
+    "Результаты",
+    "Сообщения",
+    "Дела",
+    "Контракты",
+    "Проверки",
+    "ИП",
+    "События",
+    "Отчеты",
     "items",
     "results",
     "messages",
@@ -23,6 +23,9 @@ DEFAULT_ITEM_KEYS = (
 
 def extract_data(payload: Any) -> Any:
     if isinstance(payload, dict):
+        nested_payload = payload.get("payload")
+        if isinstance(nested_payload, dict) and "data" in nested_payload:
+            return nested_payload.get("data")
         return payload.get("data", payload)
     return payload
 
@@ -43,4 +46,4 @@ def extract_items(payload: Any, *keys: str) -> list[dict[str, Any]]:
 
 
 def extract_search_results(payload: Any) -> list[dict[str, Any]]:
-    return extract_items(payload, "Р—Р°РїРёСЃРё", "Р РµР·СѓР»СЊС‚Р°С‚С‹", "items", "results")
+    return extract_items(payload, "Записи", "Результаты", "items", "results")

@@ -618,12 +618,12 @@ async function checkoRequest(env, endpoint, params = {}) {
 }
 __name(checkoRequest, "checkoRequest");
 function takeEntity(payload) {
-  const data = payload?.data ?? payload;
+  const data = payload?.payload?.data ?? payload?.data ?? payload;
   return Array.isArray(data) ? data[0] || null : data;
 }
 __name(takeEntity, "takeEntity");
 function takeItems(payload, keys) {
-  const data = payload?.data ?? payload;
+  const data = payload?.payload?.data ?? payload?.data ?? payload;
   if (Array.isArray(data)) {
     return data;
   }

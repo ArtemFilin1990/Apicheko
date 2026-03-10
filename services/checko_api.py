@@ -95,10 +95,13 @@ class CheckoAPI:
                         raise CheckoAPIError(str(data["error"]))
 
                     meta = data.get("meta")
-                    if isinstance(meta, dict) and meta.get("status") == "error":
-                        raise CheckoAPIError(
-                            str(meta.get("message") or "Checko returned error status.")
-                        )
+                    if isinstance(meta, dict):
+                        meta_status = str(meta.get("status") or "").lower()
+                        if meta_status and meta_status not in {"ok", "success"}:
+                            raise CheckoAPIError(
+                                f"Checko meta {meta_status}: "
+                                f"{str(meta.get('message') or 'unknown')}"
+                            )
 
                     return data
             except CheckoAPIError as exc:
@@ -157,7 +160,7 @@ class CheckoAPI:
 
         for law in ("44", "94", "223"):
             response = await self._get("contracts", law=law, **params)
-            all_items.extend(extract_items(response, "Р—Р°РїРёСЃРё", "РљРѕРЅС‚СЂР°РєС‚С‹", "items"))
+            all_items.extend(extract_items(response, "Записи", "Контракты", "items"))
 
         return {"data": {"items": all_items}}
 
