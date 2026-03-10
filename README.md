@@ -5,9 +5,19 @@ Telegram-бот для проверки российских компаний и
 Основной целевой runtime: **Cloudflare Worker + webhook Telegram**.
 Python-бот в `bot/` сохранён как отдельный runtime, но Worker является приоритетным для деплоя.
 
+## Структура репозитория
+
+- `worker/` — production runtime Cloudflare Worker.
+- `bot/` — secondary Python runtime (fallback).
+- `skills/` — skill/agent packs (Cloudflare, Telegram, Terraform, reference helpers).
+- `docs/` — документация и справочные материалы (в т.ч. Checko reference).
+- `review_needed/` — спорные/неразобранные файлы для ручной ревизии.
+- `archive/` — место для устаревших материалов (если потребуется безопасно убрать из active tree).
+
+
 ## Архитектура Worker runtime
 
-- `worker.js` — entrypoint Worker.
+- `worker/worker.js` — entrypoint Worker.
 - `wrangler.toml` — конфигурация Worker.
 
 ### Что делает Worker
@@ -109,7 +119,7 @@ python -m unittest discover -s tests -p "test_*.py"
 Проверка синтаксиса Worker:
 
 ```bash
-node --check worker.js
+node --check worker/worker.js
 ```
 
 ## Безопасность

@@ -95,7 +95,7 @@ async function handleTelegramUpdate(request, env) {
   if (text === "/start" || text === "/help") {
     await sendMessage(env, {
       chat_id: chatId,
-      text: "Отправьте ИНН (10 цифр для компании, 12 цифр для ИП).\nЯ покажу карточку и детали по кнопкам."
+      text: "👋 Добро пожаловать в Apicheko\n\nОтправьте ИНН (10 цифр — компания, 12 цифр — ИП), и я соберу карточку с рисками, финансами и связанными разделами."
     });
     return jsonResponse({ ok: true });
   }
@@ -259,25 +259,29 @@ function buildMainKeyboard(inn, counts) {
   return {
     inline_keyboard: [
       [
-        kb(`⚖️ Арбитраж (${c("arbitration")})`, `arbitration:${inn}`),
-        kb(`🏦 Банкротство (${c("bankruptcy")})`, `bankruptcy:${inn}`),
-        kb(`💼 Госзакупки (${c("contracts")})`, `contracts:${inn}`)
+        kb(`⚖️ Суды и арбитраж (${c("arbitration")})`, `arbitration:${inn}`),
+        kb(`🏦 ЕФРСБ / Банкротство (${c("bankruptcy")})`, `bankruptcy:${inn}`)
       ],
       [
-        kb(`🔍 Проверки (${c("inspections")})`, `inspections:${inn}`),
-        kb(`📊 Финансы (${c("financial")})`, `financial:${inn}`),
+        kb(`💼 Госзакупки (${c("contracts")})`, `contracts:${inn}`),
+        kb(`🔍 Проверки и КНМ (${c("inspections")})`, `inspections:${inn}`)
+      ],
+      [
+        kb(`📊 Финансовая отчётность (${c("financial")})`, `financial:${inn}`),
         kb(`🏛️ ФССП (${c("enforcements")})`, `enforcements:${inn}`)
       ],
       [
-        kb(`📜 История (${c("history")})`, `history:${inn}`),
-        kb(`📋 Федресурс (${c("fedresurs")})`, `fedresurs:${inn}`),
-        kb(`👤 Физлицо (${c("person")})`, `person:${inn}`)
+        kb(`📜 История изменений (${c("history")})`, `history:${inn}`),
+        kb(`📋 Федресурс (${c("fedresurs")})`, `fedresurs:${inn}`)
       ],
       [
-        kb("🏦 Банк", `bank:${inn}`),
-        kb(`👥 Аффилированные лица (${c("affiliates")})`, `affiliates:${inn}:1`)
+        kb(`👥 Аффилированные лица (${c("affiliates")})`, `affiliates:${inn}:1`),
+        kb(`👤 Проверка физлица (${c("person")})`, `person:${inn}`)
       ],
-      [kb("⬅️ Назад к главной", `main:${inn}`)]
+      [
+        kb("🏦 Проверка банка", `bank:${inn}`),
+        kb("🔄 Обновить карточку", `main:${inn}`)
+      ]
     ]
   };
 }
@@ -551,7 +555,7 @@ function assessOverallRisk(counts) {
 }
 __name(assessOverallRisk, "assessOverallRisk");
 function backKeyboard(inn) {
-  return { inline_keyboard: [[kb("⬅️ Назад к главной", `main:${inn}`)]] };
+  return { inline_keyboard: [[kb("⬅️ В карточку компании", `main:${inn}`)]] };
 }
 __name(backKeyboard, "backKeyboard");
 function kb(text, callback_data) {
