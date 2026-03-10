@@ -7,7 +7,3 @@ workers_dev = true
 NODE_ENV = "production"
 CHECKO_API_URL = "https://api.checko.ru/v2"
 
-[[kv_namespaces]]
-binding = "SESSION_KV"
-id = "replace-with-your-kv-namespace-id"
-preview_id = "replace-with-your-kv-preview-namespace-id"

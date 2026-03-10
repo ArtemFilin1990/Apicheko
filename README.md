@@ -8,8 +8,7 @@ Python-бот в `bot/` сохранён как отдельный runtime, но
 ## Архитектура Worker runtime
 
 - `worker.js` — entrypoint Worker.
-- `wrangler.toml` — конфигурация Worker + KV binding.
-- `SESSION_KV` — кэш списочных разделов и пагинации (по callback-сессии).
+- `wrangler.toml` — конфигурация Worker.
 
 ### Что делает Worker
 
@@ -69,10 +68,6 @@ Python-бот в `bot/` сохранён как отдельный runtime, но
 - `NODE_ENV=production`
 - `CHECKO_API_URL=https://api.checko.ru/v2`
 
-### KV binding
-
-- `SESSION_KV`
-
 ## Настройка webhook
 
 Установка webhook:
@@ -90,9 +85,6 @@ curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo"
 ## Деплой Worker
 
 ```bash
-npx wrangler kv namespace create SESSION_KV
-# вставьте id/preview_id в wrangler.toml
-
 npx wrangler secret put TELEGRAM_BOT_TOKEN
 npx wrangler secret put CHECKO_API_KEY
 npx wrangler secret put WEBHOOK_SECRET
