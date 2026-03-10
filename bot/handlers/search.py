@@ -53,7 +53,22 @@ async def handle_inn_input(
         if len(identifier) == 10:
             data = await checko_api.get_company(inn=identifier)
             text = format_company(data)
-
+            await message.answer(text, reply_markup=company_detail_keyboard(identifier))
+        elif len(identifier) == 12:
+            await message.answer(
+                "ИНН из 12 цифр может принадлежать ИП или физическому лицу.\nВыберите тип проверки:",
+                reply_markup=person_or_entrepreneur_keyboard(identifier),
+            )
+        elif len(identifier) == 13:
+            data = await checko_api.get_company(ogrn=identifier)
+            text = format_company(data)
+            inn = (data.get("data") or data).get("ИНН", identifier)
+            await message.answer(text, reply_markup=company_detail_keyboard(inn))
+        elif len(identifier) == 15:
+            data = await checko_api.get_entrepreneur(ogrnip=identifier)
+            text = format_entrepreneur(data)
+            inn = (data.get("data") or data).get("ИНН", identifier)
+            await message.answer(text, reply_markup=company_detail_keyboard(inn))
     except CheckoAPIError as exc:
         await message.answer(
             f"⚠️ Ошибка при получении данных:\n<i>{html.escape(str(exc))}</i>\n\n"

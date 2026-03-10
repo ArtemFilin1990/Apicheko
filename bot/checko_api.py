@@ -27,6 +27,7 @@ class CheckoAPI:
         "inspections": "inspections",
         "financial": "finances",
         "history": "timeline",
+        "fedresurs": "fedresurs",
         "search": "search",
     }
 
@@ -154,7 +155,11 @@ class CheckoAPI:
     async def get_financial(self, **params: Any) -> dict:
         return await self.call_method("financial", **params)
 
+    async def get_history(self, **params: Any) -> dict:
+        return await self.call_method("history", **params)
 
+    async def get_fedresurs(self, **params: Any) -> dict:
+        return await self.call_method("fedresurs", **params)
 
     async def search(self, query: str) -> dict:
         return await self.call_method("search", query=query)
