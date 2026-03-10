@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock
 
 from bot.handlers.callbacks import _DETAIL_FETCHERS, cb_detail
-from bot.keyboards import cancel_keyboard, company_detail_keyboard
+from bot.keyboards import cancel_keyboard, company_detail_keyboard, main_menu_keyboard
 from services.checko_api import CheckoAPI
 
 
@@ -68,6 +68,16 @@ class PersonKeyboardTests(unittest.TestCase):
             for btn in row
         ]
         self.assertIn("detail:7707083893:company", callbacks_data)
+
+
+    def test_main_menu_contains_expected_actions(self) -> None:
+        markup = main_menu_keyboard()
+        labels = [btn.text for row in markup.inline_keyboard for btn in row]
+
+        self.assertIn("🔎 Поиск по ИНН", labels)
+        self.assertIn("🧾 Поиск по названию", labels)
+        self.assertIn("📋 История запросов", labels)
+        self.assertIn("ℹ️ Помощь", labels)
 
     def test_detail_fetchers_map_does_not_have_person_key(self) -> None:
         """Persons have no API sub-sections; the detail fetchers map must not include 'person'."""
