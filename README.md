@@ -75,19 +75,27 @@ python -m bot.main
 
 ## Деплой Cloudflare Worker (из корня репозитория)
 
-Для `npx wrangler deploy` в корне репозитория добавлены:
+Worker-рантайм вынесен в корневой `worker.js`, а `wrangler.toml` указывает на него через `main = "worker.js"`.
 
-- `wrangler.toml` с `main = "worker.js"`
-- `worker.js` — entrypoint Worker
-
-Перед деплоем задайте секреты (не храните токены в репозитории):
+### Обязательные secrets
 
 ```bash
 npx wrangler secret put TELEGRAM_BOT_TOKEN
 npx wrangler secret put CHECKO_API_KEY
 ```
 
-Затем выполните:
+### Опциональные variables
+
+- `CHECKO_API_URL` (по умолчанию `https://api.checko.ru/v2`)
+- `WEBHOOK_PATH` (по умолчанию `/webhook`)
+
+### Поведение Worker
+
+- `GET /` — healthcheck JSON.
+- `POST ${WEBHOOK_PATH}` — обработка Telegram webhook update.
+- Поддержаны команды `/start`, `/help`, а также поиск по ИНН: `10` цифр (компания) и `12` цифр (ИП).
+
+### Деплой
 
 ```bash
 npx wrangler deploy
