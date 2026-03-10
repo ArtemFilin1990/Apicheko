@@ -62,11 +62,15 @@ var worker_default = {
     if (request.method === "GET" && url.pathname === "/") {
       return jsonResponse({ ok: true, service: "telegram-checko-bot", webhookPath });
     }
-    if (request.method === "POST" && url.pathname === webhookPath) {
+    const isWebhookRequest = request.method === "POST" && (url.pathname === webhookPath || url.pathname === "/");
+    if (isWebhookRequest) {
       try {
+        verifyTelegramWebhookSecret(request, env);
         return await handleTelegramUpdate(request, env);
       } catch (error) {
-        return jsonResponse({ ok: false, error: String(error.message || error) }, 400);
+        const message = String(error.message || error);
+        const status = message === "Forbidden: invalid webhook secret token." ? 403 : 400;
+        return jsonResponse({ ok: false, error: message }, status);
       }
     }
     return new Response("Not Found", { status: 404 });
@@ -569,11 +573,18 @@ async function sendMessage(env, body) {
 }
 __name(sendMessage, "sendMessage");
 function ensureSecrets(env) {
-  if (!env.TELEGRAM_BOT_TOKEN || !env.CHECKO_API_KEY) {
-    throw new Error("Missing required secrets TELEGRAM_BOT_TOKEN/CHECKO_API_KEY.");
+  if (!env.TELEGRAM_BOT_TOKEN || !env.CHECKO_API_KEY || !env.WEBHOOK_SECRET) {
+    throw new Error("Missing required secrets TELEGRAM_BOT_TOKEN/CHECKO_API_KEY/WEBHOOK_SECRET.");
   }
 }
 __name(ensureSecrets, "ensureSecrets");
+function verifyTelegramWebhookSecret(request, env) {
+  const token = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
+  if (token !== env.WEBHOOK_SECRET) {
+    throw new Error("Forbidden: invalid webhook secret token.");
+  }
+}
+__name(verifyTelegramWebhookSecret, "verifyTelegramWebhookSecret");
 async function checkoRequest(env, endpoint, params = {}) {
   const baseUrl = (env.CHECKO_API_URL || DEFAULT_CHECKO_API_URL).replace(/\/$/, "");
   const url = new URL(`${baseUrl}/${endpoint}`);
