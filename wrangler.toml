@@ -2,3 +2,12 @@ name = "tgbot"
 main = "worker.js"
 compatibility_date = "2026-03-10"
 workers_dev = true
+
+[vars]
+NODE_ENV = "production"
+CHECKO_API_URL = "https://api.checko.ru/v2"
+
+[[kv_namespaces]]
+binding = "SESSION_KV"
+id = "replace-with-your-kv-namespace-id"
+preview_id = "replace-with-your-kv-preview-namespace-id"
