@@ -5,7 +5,7 @@ from pathlib import Path
 import aiohttp
 import aiosqlite
 
-from bot.config import load_settings
+from config.settings import load_settings
 
 MAX_DATABASE_SIZE_BYTES = 50 * 1024 * 1024
 

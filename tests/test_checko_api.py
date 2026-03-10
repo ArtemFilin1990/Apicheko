@@ -1,7 +1,7 @@
 import unittest
 
-from bot.checko_api import CheckoAPI
 from bot.formatters import format_history
+from services.checko_api import CheckoAPI
 
 
 class _FakeCheckoAPI(CheckoAPI):
@@ -23,6 +23,18 @@ class CheckoAPIContractTests(unittest.IsolatedAsyncioTestCase):
     async def test_uses_documented_endpoint_names(self) -> None:
         api = _FakeCheckoAPI()
 
+        await api.get_company(inn="7707083893")
+        await api.get_entrepreneur(inn="770708389312")
+        await api.get_person(inn="123456789012")
+
+        self.assertEqual(
+            api.calls[:3],
+            [
+                ("company", {"inn": "7707083893"}),
+                ("entrepreneur", {"inn": "770708389312"}),
+                ("person", {"inn": "123456789012"}),
+            ],
+        )
 
     async def test_contracts_requests_all_supported_laws(self) -> None:
         api = _FakeCheckoAPI()
@@ -64,15 +76,15 @@ class KeyboardTests(unittest.TestCase):
         from bot.keyboards import company_detail_keyboard
 
         markup = company_detail_keyboard("7707083893")
-        labels = [btn.text for row in markup.inline_keyboard for btn in row]
-        self.assertNotIn("🏦 Банки", labels)
+        callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+        self.assertNotIn("detail:7707083893:bank", callbacks)
 
     def test_company_detail_keyboard_has_fedresurs_button(self) -> None:
         from bot.keyboards import company_detail_keyboard
 
         markup = company_detail_keyboard("7707083893")
-        labels = [btn.text for row in markup.inline_keyboard for btn in row]
-        self.assertIn("📄 Федресурс", labels)
+        callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+        self.assertIn("detail:7707083893:fedresurs", callbacks)
 
 
 class HistoryFormatterTests(unittest.TestCase):

@@ -5,7 +5,6 @@ from typing import Callable
 
 from aiogram.types import InlineKeyboardMarkup
 
-from bot.checko_api import CheckoAPI
 from bot.formatters import (
     format_arbitration,
     format_bankruptcy,
@@ -19,6 +18,8 @@ from bot.formatters import (
     format_inspections,
 )
 from bot.keyboards import back_to_company_keyboard
+from services.checko_api import CheckoAPI
+from utils.checko_payload import extract_data, extract_items
 
 CardFormatter = Callable[[dict], str]
 
@@ -46,6 +47,16 @@ DETAIL_FETCHERS: dict[str, str] = {
     for section, spec in DETAIL_CARDS.items()
 }
 
+SECTION_LIST_KEYS: dict[str, tuple[str, ...]] = {
+    "arbitration": ("Р”РµР»Р°", "Р—Р°РїРёСЃРё", "cases", "items"),
+    "enforcements": ("РРџ", "Р—Р°РїРёСЃРё", "items"),
+    "contracts": ("РљРѕРЅС‚СЂР°РєС‚С‹", "Р—Р°РїРёСЃРё", "items"),
+    "inspections": ("РџСЂРѕРІРµСЂРєРё", "Р—Р°РїРёСЃРё", "items"),
+    "bankruptcy": ("РЎРѕРѕР±С‰РµРЅРёСЏ", "Р—Р°РїРёСЃРё", "messages", "items"),
+    "history": ("РЎРѕР±С‹С‚РёСЏ", "events"),
+    "fedresurs": ("РЎРѕРѕР±С‰РµРЅРёСЏ", "Р—Р°РїРёСЃРё", "messages", "items"),
+}
+
 
 def _identifier_params(identifier: str) -> dict[str, str]:
     if len(identifier) == 13:
@@ -53,6 +64,39 @@ def _identifier_params(identifier: str) -> dict[str, str]:
     if len(identifier) == 15:
         return {"ogrnip": identifier}
     return {"inn": identifier}
+
+
+def _normalize_financial_payload(payload: dict) -> dict:
+    reports = extract_items(payload, "РћС‚С‡РµС‚С‹", "reports")
+    if reports:
+        return {"data": reports}
+
+    data = extract_data(payload)
+    if isinstance(data, dict):
+        normalized = [
+            {"year": year, **metrics}
+            for year, metrics in data.items()
+            if isinstance(year, str) and year.isdigit() and isinstance(metrics, dict)
+        ]
+        if normalized:
+            normalized.sort(key=lambda item: item.get("year", ""), reverse=True)
+            return {"data": normalized}
+
+    return payload
+
+
+def _normalize_detail_payload(section: str, payload: dict) -> dict:
+    if section == "financial":
+        return _normalize_financial_payload(payload)
+
+    keys = SECTION_LIST_KEYS.get(section)
+    if not keys:
+        return payload
+
+    items = extract_items(payload, *keys)
+    if not items:
+        return payload
+    return {"data": items}
 
 
 async def build_detail_card(
@@ -70,10 +114,7 @@ async def build_detail_card(
 
     fetcher = getattr(checko_api, spec.fetcher)
     params = _identifier_params(identifier)
+    payload = await fetcher(**params)
+    normalized_payload = _normalize_detail_payload(section, payload)
 
-    if "inn" in params:
-        data = await fetcher(params["inn"])
-    else:
-        data = await fetcher(**params)
-
-    return spec.formatter(data), back_to_company_keyboard(identifier)
+    return spec.formatter(normalized_payload), back_to_company_keyboard(identifier)

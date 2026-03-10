@@ -11,6 +11,7 @@ build/
 .ruff_cache/
 .pytest_cache/
 .venv/
+.venv*/
 venv/
 env/
 
@@ -26,3 +27,7 @@ env/
 
 # Environment
 .env
+
+# Local AI/dev tools
+.codex/
+skills/

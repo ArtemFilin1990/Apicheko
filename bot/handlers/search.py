@@ -6,8 +6,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
-from bot.checko_api import CheckoAPI, CheckoAPIError
-from bot.database.db import Database
 from bot.formatters import format_company, format_entrepreneur, format_person, format_search_results
 from bot.keyboards import (
     cancel_keyboard,
@@ -15,6 +13,9 @@ from bot.keyboards import (
     person_or_entrepreneur_keyboard,
     search_results_keyboard,
 )
+from services.checko_api import CheckoAPI, CheckoAPIError
+from storage.database import Database
+from utils.checko_payload import extract_search_results
 
 router = Router(name="search")
 
@@ -35,9 +36,9 @@ async def handle_inn_input(
 
     if not IDENTIFIER_RE.match(identifier):
         await message.answer(
-            "❌ Неверный формат идентификатора.\n"
-            "Поддерживаются: ИНН 10/12, ОГРН 13, ОГРНИП 15 цифр.\n"
-            "Попробуйте ещё раз или нажмите «Отмена».",
+            "вќЊ РќРµРІРµСЂРЅС‹Р№ С„РѕСЂРјР°С‚ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂР°.\n"
+            "РџРѕРґРґРµСЂР¶РёРІР°СЋС‚СЃСЏ: РРќРќ 10/12, РћР“Р Рќ 13, РћР“Р РќРРџ 15 С†РёС„СЂ.\n"
+            "РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р· РёР»Рё РЅР°Р¶РјРёС‚Рµ В«РћС‚РјРµРЅР°В».",
             reply_markup=cancel_keyboard(),
         )
         return
@@ -47,7 +48,7 @@ async def handle_inn_input(
     if user:
         await db.add_search(user_id=user.id, query=identifier, inn=identifier)
 
-    await message.answer("🔄 Ищу информацию…")
+    await message.answer("рџ”„ РС‰Сѓ РёРЅС„РѕСЂРјР°С†РёСЋвЂ¦")
 
     try:
         if len(identifier) == 10:
@@ -56,23 +57,23 @@ async def handle_inn_input(
             await message.answer(text, reply_markup=company_detail_keyboard(identifier))
         elif len(identifier) == 12:
             await message.answer(
-                "ИНН из 12 цифр может принадлежать ИП или физическому лицу.\nВыберите тип проверки:",
+                "РРќРќ РёР· 12 С†РёС„СЂ РјРѕР¶РµС‚ РїСЂРёРЅР°РґР»РµР¶Р°С‚СЊ РРџ РёР»Рё С„РёР·РёС‡РµСЃРєРѕРјСѓ Р»РёС†Сѓ.\nР’С‹Р±РµСЂРёС‚Рµ С‚РёРї РїСЂРѕРІРµСЂРєРё:",
                 reply_markup=person_or_entrepreneur_keyboard(identifier),
             )
         elif len(identifier) == 13:
             data = await checko_api.get_company(ogrn=identifier)
             text = format_company(data)
-            inn = (data.get("data") or data).get("ИНН", identifier)
+            inn = (data.get("data") or data).get("РРќРќ", identifier)
             await message.answer(text, reply_markup=company_detail_keyboard(inn))
         elif len(identifier) == 15:
             data = await checko_api.get_entrepreneur(ogrnip=identifier)
             text = format_entrepreneur(data)
-            inn = (data.get("data") or data).get("ИНН", identifier)
+            inn = (data.get("data") or data).get("РРќРќ", identifier)
             await message.answer(text, reply_markup=company_detail_keyboard(inn))
     except CheckoAPIError as exc:
         await message.answer(
-            f"⚠️ Ошибка при получении данных:\n<i>{html.escape(str(exc))}</i>\n\n"
-            "Проверьте правильность идентификатора и попробуйте снова.",
+            f"вљ пёЏ РћС€РёР±РєР° РїСЂРё РїРѕР»СѓС‡РµРЅРёРё РґР°РЅРЅС‹С…:\n<i>{html.escape(str(exc))}</i>\n\n"
+            "РџСЂРѕРІРµСЂСЊС‚Рµ РїСЂР°РІРёР»СЊРЅРѕСЃС‚СЊ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂР° Рё РїРѕРїСЂРѕР±СѓР№С‚Рµ СЃРЅРѕРІР°.",
             reply_markup=cancel_keyboard(),
         )
 
@@ -86,7 +87,7 @@ async def handle_name_input(
 
     if len(query) < 3:
         await message.answer(
-            "❌ Запрос слишком короткий (минимум 3 символа). Попробуйте ещё раз.",
+            "вќЊ Р—Р°РїСЂРѕСЃ СЃР»РёС€РєРѕРј РєРѕСЂРѕС‚РєРёР№ (РјРёРЅРёРјСѓРј 3 СЃРёРјРІРѕР»Р°). РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р·.",
             reply_markup=cancel_keyboard(),
         )
         return
@@ -96,11 +97,11 @@ async def handle_name_input(
     if user:
         await db.add_search(user_id=user.id, query=query)
 
-    await message.answer("🔄 Ищу…")
+    await message.answer("рџ”„ РС‰СѓвЂ¦")
 
     try:
         data = await checko_api.search(query)
-        items = data if isinstance(data, list) else data.get("data", [])
+        items = extract_search_results(data)
         text = format_search_results(items)
         if items:
             await message.answer(
@@ -111,6 +112,6 @@ async def handle_name_input(
             await message.answer(text, reply_markup=cancel_keyboard())
     except CheckoAPIError as exc:
         await message.answer(
-            f"⚠️ Ошибка при поиске:\n<i>{html.escape(str(exc))}</i>",
+            f"вљ пёЏ РћС€РёР±РєР° РїСЂРё РїРѕРёСЃРєРµ:\n<i>{html.escape(str(exc))}</i>",
             reply_markup=cancel_keyboard(),
         )

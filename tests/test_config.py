@@ -3,7 +3,7 @@ import unittest
 from contextlib import contextmanager
 from typing import Dict
 
-from bot.config import get_settings, load_settings
+from config.settings import get_settings, load_settings
 
 
 @contextmanager

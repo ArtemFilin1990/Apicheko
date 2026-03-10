@@ -13,11 +13,11 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.token import TokenValidationError
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
-from bot.checko_api import CheckoAPI
-from bot.config import Settings, load_settings
-from bot.database.db import Database
 from bot.handlers import callbacks, search, start
 from bot.middlewares import DatabaseMiddleware, ThrottlingMiddleware
+from config.settings import Settings, load_settings
+from services.checko_api import CheckoAPI
+from storage.database import Database
 
 logging.basicConfig(
     level=logging.INFO,

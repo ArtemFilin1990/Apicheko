@@ -5,8 +5,8 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from bot.database.db import Database
 from bot.keyboards import main_menu_keyboard
+from storage.database import Database
 
 router = Router(name="start")
 

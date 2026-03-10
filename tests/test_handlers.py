@@ -1,10 +1,10 @@
 """Tests for handler bug fixes."""
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-from bot.checko_api import CheckoAPI
 from bot.handlers.callbacks import _DETAIL_FETCHERS, cb_detail
 from bot.keyboards import cancel_keyboard, company_detail_keyboard
+from services.checko_api import CheckoAPI
 
 
 class EntrepreneurDetailFetcherTests(unittest.IsolatedAsyncioTestCase):
@@ -31,7 +31,7 @@ class EntrepreneurDetailFetcherTests(unittest.IsolatedAsyncioTestCase):
 
         await cb_detail(call, api)
 
-        api.get_entrepreneur.assert_called_once_with("123456789012")
+        api.get_entrepreneur.assert_called_once_with(inn="123456789012")
         api.get_company.assert_not_called()
 
     async def test_detail_company_10digit_uses_get_company(self) -> None:
@@ -41,7 +41,7 @@ class EntrepreneurDetailFetcherTests(unittest.IsolatedAsyncioTestCase):
 
         await cb_detail(call, api)
 
-        api.get_company.assert_called_once_with("7707083893")
+        api.get_company.assert_called_once_with(inn="7707083893")
         api.get_entrepreneur.assert_not_called()
 
 

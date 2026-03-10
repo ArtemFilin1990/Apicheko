@@ -1,7 +1,10 @@
 import asyncio
+import json
 from typing import Any
 
 import aiohttp
+
+from utils.checko_payload import extract_items
 
 
 class CheckoAPIError(Exception):
@@ -65,25 +68,37 @@ class CheckoAPI:
         for attempt in range(1, self._max_retries + 1):
             try:
                 async with session.get(url, params=params) as resp:
+                    raw = await resp.text()
                     if 500 <= resp.status < 600:
                         raise CheckoAPIError(
-                            f"Checko server error: {resp.status}", status_code=resp.status
+                            f"Checko server error: {resp.status}. Response: {raw[:300]}",
+                            status_code=resp.status,
                         )
                     if resp.status != 200:
                         raise CheckoAPIError(
-                            f"API request failed: {resp.status}", status_code=resp.status
+                            f"API request failed: {resp.status}. Response: {raw[:300]}",
+                            status_code=resp.status,
                         )
 
-                    data = await resp.json()
+                    try:
+                        data = json.loads(raw)
+                    except json.JSONDecodeError as exc:
+                        raise CheckoAPIError(
+                            f"Checko returned non-JSON response: {raw[:300]}",
+                            status_code=resp.status,
+                        ) from exc
+
                     if not isinstance(data, dict):
-                        return data
+                        raise CheckoAPIError("Checko returned unexpected JSON shape.")
 
                     if data.get("error"):
                         raise CheckoAPIError(str(data["error"]))
 
                     meta = data.get("meta")
                     if isinstance(meta, dict) and meta.get("status") == "error":
-                        raise CheckoAPIError(str(meta.get("message") or "Checko returned error status."))
+                        raise CheckoAPIError(
+                            str(meta.get("message") or "Checko returned error status.")
+                        )
 
                     return data
             except CheckoAPIError as exc:
@@ -142,10 +157,7 @@ class CheckoAPI:
 
         for law in ("44", "94", "223"):
             response = await self._get("contracts", law=law, **params)
-            data = response.get("data", response)
-            items = data if isinstance(data, list) else data.get("items", [])
-            if isinstance(items, list):
-                all_items.extend(items)
+            all_items.extend(extract_items(response, "Р—Р°РїРёСЃРё", "РљРѕРЅС‚СЂР°РєС‚С‹", "items"))
 
         return {"data": {"items": all_items}}
 
