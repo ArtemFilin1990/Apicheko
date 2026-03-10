@@ -73,6 +73,34 @@ DATABASE_SOURCE_URL=https://f10dfe6833ed9c07519e4f0b5be647e5.r2.cloudflarestorag
 python -m bot.main
 ```
 
+## Деплой Cloudflare Worker (из корня репозитория)
+
+Worker-рантайм вынесен в корневой `worker.js`, а `wrangler.toml` указывает на него через `main = "worker.js"`.
+
+### Обязательные secrets
+
+```bash
+npx wrangler secret put TELEGRAM_BOT_TOKEN
+npx wrangler secret put CHECKO_API_KEY
+```
+
+### Опциональные variables
+
+- `CHECKO_API_URL` (по умолчанию `https://api.checko.ru/v2`)
+- `WEBHOOK_PATH` (по умолчанию `/webhook`)
+
+### Поведение Worker
+
+- `GET /` — healthcheck JSON.
+- `POST ${WEBHOOK_PATH}` — обработка Telegram webhook update.
+- Поддержаны команды `/start`, `/help`, а также поиск по ИНН: `10` цифр (компания) и `12` цифр (ИП).
+
+### Деплой
+
+```bash
+npx wrangler deploy
+```
+
 Если бот запускается в среде с ограниченным исходящим доступом в интернет, можно задать `POLLING_MAX_RETRIES=1`, чтобы процесс завершался после первой неудачной попытки подключения к Telegram API.
 
 ### 2) Webhook-режим (для деплоя за Cloudflare)
