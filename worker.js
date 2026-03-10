@@ -1,616 +1,618 @@
-const DEFAULT_CHECKO_API_URL = 'https://api.checko.ru/v2';
-const PAGE_SIZE = 5;
-const SESSION_TTL_SECONDS = 60 * 60 * 6;
+var __defProp = Object.defineProperty;
+var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
-const CMD = {
-  FIN: 'fin',
-  CRT: 'crt',
-  GOV: 'gov',
-  INS: 'ins',
-  FSP: 'fsp',
-  BNK: 'bnk',
-  LOG: 'log',
-  IP: 'ip',
-  PRS: 'prs',
-  BAK: 'bak',
-  MAIN: 'main',
-  NEW: 'new',
-  NOOP: 'noop',
+// worker.js
+var DEFAULT_CHECKO_API_URL = "https://api.checko.ru/v2";
+var DEFAULT_WEBHOOK_PATH = "/webhook";
+var PAGE_SIZE = 10;
+var SECTION_CONFIG = {
+  arbitration: {
+    title: "⚖️ Арбитражные дела",
+    endpoint: "legal-cases",
+    listKeys: ["Дела", "cases"],
+    countLabel: "Количество дел"
+  },
+  bankruptcy: {
+    title: "🏦 Банкротство (ЕФРСБ)",
+    endpoint: "bankruptcy-messages",
+    listKeys: ["Сообщения", "messages"],
+    countLabel: "Записей о банкротстве"
+  },
+  contracts: {
+    title: "💼 Госзакупки (44-ФЗ / 223-ФЗ)",
+    endpoint: "contracts",
+    listKeys: ["Контракты", "items"],
+    countLabel: "Всего контрактов"
+  },
+  inspections: {
+    title: "🔍 Проверки и КНМ",
+    endpoint: "inspections",
+    listKeys: ["Проверки", "items"],
+    countLabel: "Всего проверок"
+  },
+  financial: {
+    title: "📊 Финансовая отчётность",
+    endpoint: "finances",
+    listKeys: ["Отчеты", "reports"],
+    countLabel: "Лет в отчётности"
+  },
+  enforcements: {
+    title: "🏛️ Исполнительные производства",
+    endpoint: "enforcements",
+    listKeys: ["ИП", "items"],
+    countLabel: "Всего"
+  },
+  history: {
+    title: "📜 История изменений",
+    endpoint: "timeline",
+    listKeys: ["События", "events"],
+    countLabel: "Всего записей"
+  },
+  fedresurs: {
+    title: "📋 Федресурс",
+    endpoint: "fedresurs",
+    listKeys: ["Сообщения", "messages"],
+    countLabel: "Всего сообщений"
+  }
 };
-
-const SECTION_TITLES = {
-  [CMD.FIN]: '📊 Финансы',
-  [CMD.CRT]: '⚖️ Арбитраж',
-  [CMD.GOV]: '🏛 Госзакупки',
-  [CMD.INS]: '🚨 Проверки',
-  [CMD.FSP]: '🛑 ФССП',
-  [CMD.BNK]: '📉 Банкротство',
-  [CMD.LOG]: '📜 История',
-};
-
-export default {
+var worker_default = {
   async fetch(request, env) {
     const url = new URL(request.url);
-
-    if (request.method === 'GET' && url.pathname === '/') {
-      return json({ ok: true, service: 'apicheko-worker', runtime: 'cloudflare-worker' });
+    const webhookPath = normalizeWebhookPath(env.WEBHOOK_PATH);
+    if (request.method === "GET" && url.pathname === "/") {
+      return jsonResponse({ ok: true, service: "telegram-checko-bot", webhookPath });
     }
-
-    if (request.method === 'POST' && url.pathname === '/') {
-      if (!isWebhookSecretValid(request, env)) {
-        return new Response('Unauthorized', { status: 401 });
-      }
-
+    if (request.method === "POST" && url.pathname === webhookPath) {
       try {
-        const update = await request.json();
-        await processUpdate(update, env);
-        return json({ ok: true });
+        return await handleTelegramUpdate(request, env);
       } catch (error) {
-        return json({ ok: false, error: String(error.message || error) }, 400);
+        return jsonResponse({ ok: false, error: String(error.message || error) }, 400);
       }
     }
-
-    return new Response('Not found', { status: 404 });
-  },
+    return new Response("Not Found", { status: 404 });
+  }
 };
-
-async function processUpdate(update, env) {
+async function handleTelegramUpdate(request, env) {
+  ensureSecrets(env);
+  const update = await parseJsonOrThrow(request);
   if (update.callback_query) {
-    await handleCallback(update.callback_query, env);
-    return;
+    await handleCallbackQuery(update.callback_query, env);
+    return jsonResponse({ ok: true });
   }
-
   const message = update.message;
-  if (!message || typeof message.text !== 'string') {
-    return;
+  if (!message || typeof message.text !== "string") {
+    return jsonResponse({ ok: true, skipped: "Unsupported update type." });
   }
-
   const chatId = message.chat?.id;
-  if (!chatId) {
-    return;
-  }
-
   const text = message.text.trim();
-  if (text === '/start') {
+  if (!chatId) {
+    return jsonResponse({ ok: true, skipped: "No chat id in message." });
+  }
+  if (text === "/start" || text === "/help") {
     await sendMessage(env, {
       chat_id: chatId,
-      text: '👋 Отправьте ИНН, ОГРН, ОГРНИП или БИК для проверки контрагента.',
+      text: "Отправьте ИНН (10 цифр для компании, 12 цифр для ИП).\nЯ покажу карточку и детали по кнопкам."
     });
-    return;
+    return jsonResponse({ ok: true });
   }
-
-  if (text === '/help') {
+  if (!/^\d{10,12}$/.test(text) || ![10, 12].includes(text.length)) {
     await sendMessage(env, {
       chat_id: chatId,
-      text: 'Поддерживаются: 10 цифр ИНН юрлица, 12 цифр ИНН ИП/физлица, 13 цифр ОГРН, 15 цифр ОГРНИП, 9 цифр БИК.',
+      text: "Введите корректный ИНН: 10 или 12 цифр."
     });
-    return;
+    return jsonResponse({ ok: true });
   }
-
-  if (/^\d{12}$/.test(text)) {
+  try {
+    const view = await buildMainCardView(env, text);
     await sendMessage(env, {
       chat_id: chatId,
-      text: 'Выберите режим проверки для 12-значного ИНН:',
-      reply_markup: {
-        inline_keyboard: [
-          [kb('🧑 ИП', cb(CMD.IP, text, 1)), kb('👤 Физлицо', cb(CMD.PRS, text, 1))],
-        ],
-      },
+      text: view.text,
+      parse_mode: "HTML",
+      reply_markup: view.reply_markup
     });
-    return;
+  } catch (error) {
+    await sendMessage(env, {
+      chat_id: chatId,
+      text: `Ошибка Checko: ${error.message}`
+    });
   }
-
-  const parsed = parseIdentifier(text);
-  if (!parsed) {
-    await sendMessage(env, { chat_id: chatId, text: 'Введите ИНН, ОГРН, ОГРНИП или БИК.' });
-    return;
-  }
-
-  const view = await buildEntryView(env, parsed, chatId);
-  await sendMessage(env, {
-    chat_id: chatId,
-    text: view.text,
-    parse_mode: 'HTML',
-    reply_markup: view.reply_markup,
-  });
+  return jsonResponse({ ok: true });
 }
-
-function parseIdentifier(text) {
-  if (/^\d{10}$/.test(text)) {
-    return { type: 'company', id: text, params: { inn: text } };
-  }
-  if (/^\d{13}$/.test(text)) {
-    return { type: 'company', id: text, params: { ogrn: text } };
-  }
-  if (/^\d{15}$/.test(text)) {
-    return { type: 'entrepreneur', id: text, params: { ogrnip: text } };
-  }
-  if (/^\d{9}$/.test(text)) {
-    return { type: 'bank', id: text, params: { bic: text } };
-  }
-  return null;
-}
-
-async function buildEntryView(env, parsed, chatId) {
-  if (parsed.type === 'bank') {
-    const bankPayload = await checkoRequest(env, 'bank', parsed.params);
-    return { text: renderBankCard(bankPayload), reply_markup: searchAgainKeyboard() };
-  }
-
-  if (parsed.type === 'entrepreneur') {
-    const payload = await checkoRequest(env, 'entrepreneur', parsed.params);
-    return { text: renderEntrepreneurCard(payload), reply_markup: ipPersonBackKeyboard(parsed.id) };
-  }
-
-  const payload = await checkoRequest(env, 'company', parsed.params);
-  const counts = await collectMainCounts(env, parsed.id, parsed.params);
-  return {
-    text: renderCompanyCard(payload),
-    reply_markup: buildMainKeyboard(parsed.id, counts, chatId),
-  };
-}
-
-async function handleCallback(callbackQuery, env) {
+__name(handleTelegramUpdate, "handleTelegramUpdate");
+async function handleCallbackQuery(callbackQuery, env) {
+  const callbackId = callbackQuery.id;
   const message = callbackQuery.message;
-  const chatId = message?.chat?.id;
   const messageId = message?.message_id;
+  const chatId = message?.chat?.id;
+  const data = String(callbackQuery.data || "");
+  await telegramRequest(env, "answerCallbackQuery", { callback_query_id: callbackId });
   if (!chatId || !messageId) {
     return;
   }
-
-  await telegram(env, 'answerCallbackQuery', { callback_query_id: callbackQuery.id });
-
-  const [cmd, id, pageRaw, extraRaw] = String(callbackQuery.data || '').split(':');
-  if (cmd === CMD.NOOP) {
+  const [action, inn, rawPage] = data.split(":");
+  if (!inn || !/^\d{10,12}$/.test(inn)) {
     return;
   }
-
-  if (cmd === CMD.NEW) {
-    await safeEditMessage(env, chatId, messageId, 'Введите новый ИНН, ОГРН, ОГРНИП или БИК.', searchAgainKeyboard());
-    return;
-  }
-
-  const page = Number.parseInt(pageRaw || '1', 10);
-  const safePage = Number.isFinite(page) && page > 0 ? page : 1;
-
   try {
-    if (cmd === CMD.MAIN) {
-      const parsed = parseIdentifier(id);
-      if (!parsed || parsed.type !== 'company') {
-        return;
-      }
-      const payload = await checkoRequest(env, 'company', parsed.params);
-      const counts = await collectMainCounts(env, id, parsed.params);
-      await safeEditMessage(env, chatId, messageId, renderCompanyCard(payload), buildMainKeyboard(id, counts, chatId));
+    if (action === "main") {
+      const view = await buildMainCardView(env, inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
       return;
     }
-
-    if (cmd === CMD.IP) {
-      const payload = await checkoRequest(env, 'entrepreneur', { inn: id });
-      await safeEditMessage(env, chatId, messageId, renderEntrepreneurCard(payload), ipPersonBackKeyboard(id));
+    if (action === "affiliates") {
+      const page = Number.parseInt(rawPage || "1", 10);
+      const view = await buildAffiliatesView(env, inn, Number.isNaN(page) ? 1 : page);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
       return;
     }
-
-    if (cmd === CMD.PRS) {
-      const payload = await checkoRequest(env, 'person', { inn: id });
-      await safeEditMessage(env, chatId, messageId, renderPersonCard(payload), ipPersonBackKeyboard(id));
+    if (action === "bank") {
+      const view = await buildBankView(env, inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
       return;
     }
-
-    if (cmd === CMD.BAK) {
-      const payload = await checkoRequest(env, 'bank', { bic: id });
-      await safeEditMessage(env, chatId, messageId, renderBankCard(payload), searchAgainKeyboard());
+    if (action === "person") {
+      const view = await buildPersonView(env, inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
       return;
     }
-
-    if (cmd === CMD.CRT && !extraRaw) {
-      await safeEditMessage(env, chatId, messageId, '<b>⚖️ Арбитраж</b>\n\nВыберите роль:', arbitrationRoleKeyboard(id));
-      return;
+    if (SECTION_CONFIG[action]) {
+      const view = await buildSectionView(env, action, inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
     }
-
-    if (cmd === CMD.GOV && !extraRaw) {
-      await safeEditMessage(env, chatId, messageId, '<b>🏛 Госзакупки</b>\n\nВыберите тип выборки:', govRoleKeyboard(id));
-      return;
-    }
-
-    const view = await buildSectionPageView(env, { cmd, id, page: safePage, extra: extraRaw || '' }, chatId, messageId);
-    await safeEditMessage(env, chatId, messageId, view.text, view.reply_markup);
   } catch (error) {
-    await safeEditMessage(
+    await editMessage(
       env,
       chatId,
       messageId,
-      `⚠️ <b>Ошибка</b>\n\n${escapeHtml(String(error.message || error))}`,
-      searchAgainKeyboard(),
+      `⚠️ <b>Ошибка загрузки раздела</b>\n\n<code>${escapeHtml(String(error.message || error))}</code>`,
+      backKeyboard(inn)
     );
   }
 }
-
-async function buildSectionPageView(env, sectionRef, chatId, messageId) {
-  const records = await ensureSectionRecords(env, sectionRef, chatId, messageId);
-  const totalPages = Math.max(1, Math.ceil(records.length / PAGE_SIZE));
-  const page = Math.min(Math.max(1, sectionRef.page), totalPages);
-  const chunk = records.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  const text = renderSection(sectionRef.cmd, chunk, {
-    total: records.length,
-    page,
-    totalPages,
-    extra: sectionRef.extra,
-  });
-
-  return {
-    text,
-    reply_markup: paginationKeyboard(sectionRef, page, totalPages),
-  };
+__name(handleCallbackQuery, "handleCallbackQuery");
+async function buildMainCardView(env, inn) {
+  const endpoint = inn.length === 10 ? "company" : "entrepreneur";
+  const payload = await checkoRequest(env, endpoint, { inn });
+  const data = takeEntity(payload);
+  if (!data || typeof data !== "object") {
+    throw new Error("Карточка компании пуста: data отсутствует.");
+  }
+  const counts = await collectCounts(env, inn, data);
+  const title = pick(data, ["НаимПолн", "НаимСокр", "ФИО"]) || "Без названия";
+  const ogrn = pick(data, ["ОГРН", "ОГРНИП"]) || "—";
+  const address = pickNested(data, [["ЮрАдрес", "АдресРФ"], ["АдрМЖ", "АдресРФ"], ["Адрес"]]) || "—";
+  const director = pickNested(data, [["Руковод", 0, "ФИО"]]) || "—";
+  const capital = pickNested(data, [["УстКап", "Сумма"]]) || "—";
+  const okvedCode = pickNested(data, [["ОКВЭД", "Код"]]) || "—";
+  const okvedName = pickNested(data, [["ОКВЭД", "Наим"]]) || "—";
+  const staff = pick(data, ["СрСпЧисл", "ЧислСотр"]) || "—";
+  const founders = Array.isArray(data.Учред) ? data.Учред : [];
+  const founderNote = founders.length ? `${founders.length}` : "0";
+  const risk = assessOverallRisk(counts);
+  const text = [
+    `🏦 <b>${escapeHtml(title)}</b>`,
+    `<code>ИНН ${escapeHtml(String(data.ИНН || inn))} | ОГРН ${escapeHtml(String(ogrn))}</code>`,
+    "",
+    `📍 ${escapeHtml(String(address))}`,
+    `📅 Дата регистрации: <b>${escapeHtml(String(data.ДатаРег || "—"))}</b>`,
+    `💰 Уставный капитал: <b>${escapeHtml(String(capital))} ₽</b>`,
+    `👤 Руководитель: ${escapeHtml(String(director))}`,
+    `👥 Учредители: <b>${escapeHtml(founderNote)}</b>`,
+    `📊 Основной ОКВЭД: <b>${escapeHtml(okvedCode)} (${escapeHtml(okvedName)})</b>`,
+    `👤 Численность: <b>${escapeHtml(String(staff))} человек</b>`,
+    "",
+    `${risk.icon} Общий риск компании: <b>${risk.level}</b>`,
+    `${risk.note}`,
+    `🔄 Обновлено: ${formatDate(/* @__PURE__ */ new Date())}`
+  ].join("\n");
+  return { text, reply_markup: buildMainKeyboard(inn, counts) };
 }
-
-async function ensureSectionRecords(env, sectionRef, chatId, messageId) {
-  const key = buildSessionKey(chatId, messageId, sectionRef.cmd, sectionRef.id, sectionRef.extra);
-  const cached = await kvGetJson(env, key);
-  if (cached && Array.isArray(cached.records)) {
-    return cached.records;
-  }
-
-  const records = await fetchSectionRecords(env, sectionRef);
-  await kvPutJson(env, key, { records, updated_at: Date.now() }, SESSION_TTL_SECONDS);
-  return records;
-}
-
-async function fetchSectionRecords(env, sectionRef) {
-  const idParams = inferIdParams(sectionRef.id);
-  if (!idParams) {
-    throw new Error('Неверный идентификатор.');
-  }
-
-  if (sectionRef.cmd === CMD.FIN) {
-    const payload = await checkoRequest(env, 'finances', { ...idParams, limit: 100 });
-    const data = takeData(payload);
-    return Array.isArray(data) ? data : toArrayByKeys(data, ['Отчеты', 'reports', 'Записи']);
-  }
-
-  if (sectionRef.cmd === CMD.CRT) {
-    const role = sectionRef.extra === 'd' ? 'defendant' : 'plaintiff';
-    const payload = await checkoRequest(env, 'legal-cases', {
-      ...idParams,
-      role,
-      actual: true,
-      sort: '-date',
-      limit: 100,
-    });
-    return toArrayByKeys(takeData(payload), ['Записи', 'Дела', 'cases']);
-  }
-
-  if (sectionRef.cmd === CMD.GOV) {
-    const [law, role] = parseGovExtra(sectionRef.extra);
-    const payload = await checkoRequest(env, 'contracts', { ...idParams, law, role, limit: 100 });
-    return toArrayByKeys(takeData(payload), ['Записи', 'Контракты', 'items']);
-  }
-
-  if (sectionRef.cmd === CMD.INS) {
-    const payload = await checkoRequest(env, 'inspections', { ...idParams, limit: 100 });
-    return toArrayByKeys(takeData(payload), ['Записи', 'Проверки', 'items']);
-  }
-
-  if (sectionRef.cmd === CMD.FSP) {
-    const payload = await checkoRequest(env, 'enforcements', { ...idParams, limit: 100 });
-    return toArrayByKeys(takeData(payload), ['Записи', 'ИП', 'items']);
-  }
-
-  if (sectionRef.cmd === CMD.BNK) {
-    const payload = await checkoRequest(env, 'bankruptcy-messages', { ...idParams, limit: 100 });
-    return toArrayByKeys(takeData(payload), ['Записи', 'Сообщения', 'messages']);
-  }
-
-  if (sectionRef.cmd === CMD.LOG) {
-    const payload = await checkoRequest(env, 'timeline', { ...idParams, limit: 100 });
-    return toArrayByKeys(takeData(payload), ['Записи', 'События', 'events']);
-  }
-
-  return [];
-}
-
-function parseGovExtra(extra) {
-  if (extra === '44c') return ['44', 'customer'];
-  if (extra === '44s') return ['44', 'supplier'];
-  if (extra === '223c') return ['223', 'customer'];
-  throw new Error('Неверный тип закупок.');
-}
-
-function inferIdParams(id) {
-  if (/^\d{10}$/.test(id)) return { inn: id };
-  if (/^\d{13}$/.test(id)) return { ogrn: id };
-  return null;
-}
-
-async function collectMainCounts(env, id, idParams) {
-  const tasks = [
-    [CMD.FIN, () => fetchSectionRecords(env, { cmd: CMD.FIN, id, page: 1, extra: '' })],
-    [CMD.CRT, () => fetchSectionRecords(env, { cmd: CMD.CRT, id, page: 1, extra: 'p' })],
-    [CMD.GOV, () => fetchSectionRecords(env, { cmd: CMD.GOV, id, page: 1, extra: '44s' })],
-    [CMD.INS, () => fetchSectionRecords(env, { cmd: CMD.INS, id, page: 1, extra: '' })],
-    [CMD.FSP, () => fetchSectionRecords(env, { cmd: CMD.FSP, id, page: 1, extra: '' })],
-    [CMD.BNK, () => fetchSectionRecords(env, { cmd: CMD.BNK, id, page: 1, extra: '' })],
-  ];
-
-  const settled = await Promise.allSettled(tasks.map(([, fn]) => fn()));
+__name(buildMainCardView, "buildMainCardView");
+async function collectCounts(env, inn, cardData) {
   const result = {};
-  settled.forEach((entry, idx) => {
-    const key = tasks[idx][0];
-    result[key] = entry.status === 'fulfilled' ? entry.value.length : 0;
+  const jobs = [
+    ["arbitration", () => fetchSectionCount(env, "arbitration", inn)],
+    ["bankruptcy", () => fetchSectionCount(env, "bankruptcy", inn)],
+    ["contracts", () => fetchSectionCount(env, "contracts", inn)],
+    ["inspections", () => fetchSectionCount(env, "inspections", inn)],
+    ["financial", () => fetchSectionCount(env, "financial", inn)],
+    ["enforcements", () => fetchSectionCount(env, "enforcements", inn)],
+    ["history", () => fetchSectionCount(env, "history", inn)],
+    ["fedresurs", () => fetchSectionCount(env, "fedresurs", inn)],
+    ["person", async () => Number(pick(cardData, ["КолСвязейФЛ"]) || 0)],
+    ["affiliates", async () => countAffiliates(cardData)]
+  ];
+  const settled = await Promise.allSettled(jobs.map(([, fn]) => fn()));
+  jobs.forEach(([name], idx) => {
+    result[name] = settled[idx].status === "fulfilled" ? settled[idx].value : "?";
   });
-
-  const timeline = await checkoRequest(env, 'timeline', { ...idParams, limit: 1 }).catch(() => null);
-  result[CMD.LOG] = Array.isArray(takeData(timeline)) ? takeData(timeline).length : toArrayByKeys(takeData(timeline), ['Записи']).length;
   return result;
 }
-
-function renderCompanyCard(payload) {
-  const data = takeData(payload);
-  if (!data || typeof data !== 'object') {
-    throw new Error('Карточка компании пуста: data отсутствует.');
+__name(collectCounts, "collectCounts");
+function countAffiliates(cardData) {
+  const founders = Array.isArray(cardData?.Учред) ? cardData.Учред.length : 0;
+  const managers = Array.isArray(cardData?.Руковод) ? cardData.Руковод.length : 0;
+  return founders + managers;
+}
+__name(countAffiliates, "countAffiliates");
+async function fetchSectionCount(env, section, inn) {
+  if (section === "contracts") {
+    const laws = ["44", "94", "223"];
+    let total = 0;
+    for (const law of laws) {
+      const payload2 = await checkoRequest(env, SECTION_CONFIG.contracts.endpoint, { inn, law });
+      total += takeItems(payload2, SECTION_CONFIG.contracts.listKeys).length;
+    }
+    return total;
   }
-
-  const statusName = pickNested(data, [['Статус', 'Наим'], ['Статус']]) || '—';
-  const text = [
-    '🏢 <b>Основная информация</b>',
-    '',
-    `<b>Наименование:</b> ${escapeHtml(String(pick(data, ['НаимПолн', 'НаимСокр']) || '—'))}`,
-    `<b>ИНН:</b> <code>${escapeHtml(String(pick(data, ['ИНН']) || '—'))}</code>`,
-    `<b>ОГРН:</b> <code>${escapeHtml(String(pick(data, ['ОГРН']) || '—'))}</code>`,
-    `<b>КПП:</b> <code>${escapeHtml(String(pick(data, ['КПП']) || '—'))}</code>`,
-    `<b>Статус:</b> ${escapeHtml(String(statusName))}`,
-    `<b>Дата регистрации:</b> ${escapeHtml(String(pick(data, ['ДатаРег']) || '—'))}`,
-    '',
-    `📍 <b>Адрес:</b> ${escapeHtml(String(pickNested(data, [['ЮрАдрес', 'АдресРФ']]) || '—'))}`,
-    `👤 <b>Руководитель:</b> ${escapeHtml(String(pickNested(data, [['Руковод', 0, 'ФИО']]) || '—'))}`,
-    `🏛️ <b>Уставный капитал:</b> ${escapeHtml(formatMoney(pickNested(data, [['УстКап', 'Сумма']])))}`,
-    `📋 <b>Основной ОКВЭД:</b> ${escapeHtml(String(pickNested(data, [['ОКВЭД', 'Код']]) || '—'))}`,
-    '',
-    `📞 <b>Телефон:</b> ${escapeHtml(String(pickNested(data, [['Контакты', 'Тел']]) || '—'))}`,
-    `📧 <b>Email:</b> ${escapeHtml(String(pickNested(data, [['Контакты', 'Емэйл']]) || '—'))}`,
-    `🌐 <b>Сайт:</b> ${escapeHtml(String(pickNested(data, [['Контакты', 'ВебСайт']]) || '—'))}`,
-  ].join('\n');
-  return text;
+  const cfg = SECTION_CONFIG[section];
+  const payload = await checkoRequest(env, cfg.endpoint, { inn });
+  return takeItems(payload, cfg.listKeys).length;
 }
-
-function renderEntrepreneurCard(payload) {
-  const data = takeData(payload);
-  return [
-    '🧑 <b>Карточка ИП</b>',
-    '',
-    `<b>ФИО:</b> ${escapeHtml(String(pick(data, ['ФИО', 'НаимПолн']) || '—'))}`,
-    `<b>ИНН:</b> <code>${escapeHtml(String(pick(data, ['ИНН']) || '—'))}</code>`,
-    `<b>ОГРНИП:</b> <code>${escapeHtml(String(pick(data, ['ОГРНИП']) || '—'))}</code>`,
-    `<b>Статус:</b> ${escapeHtml(String(pickNested(data, [['Статус', 'Наим'], ['Статус']]) || '—'))}`,
-    `<b>Дата регистрации:</b> ${escapeHtml(String(pick(data, ['ДатаРег']) || '—'))}`,
-    `<b>ОКВЭД:</b> ${escapeHtml(String(pickNested(data, [['ОКВЭД', 'Код']]) || '—'))}`,
-  ].join('\n');
+__name(fetchSectionCount, "fetchSectionCount");
+function buildMainKeyboard(inn, counts) {
+  const c = /* @__PURE__ */ __name((key) => counts[key] ?? "?", "c");
+  return {
+    inline_keyboard: [
+      [
+        kb(`⚖️ Арбитраж (${c("arbitration")})`, `arbitration:${inn}`),
+        kb(`🏦 Банкротство (${c("bankruptcy")})`, `bankruptcy:${inn}`),
+        kb(`💼 Госзакупки (${c("contracts")})`, `contracts:${inn}`)
+      ],
+      [
+        kb(`🔍 Проверки (${c("inspections")})`, `inspections:${inn}`),
+        kb(`📊 Финансы (${c("financial")})`, `financial:${inn}`),
+        kb(`🏛️ ФССП (${c("enforcements")})`, `enforcements:${inn}`)
+      ],
+      [
+        kb(`📜 История (${c("history")})`, `history:${inn}`),
+        kb(`📋 Федресурс (${c("fedresurs")})`, `fedresurs:${inn}`),
+        kb(`👤 Физлицо (${c("person")})`, `person:${inn}`)
+      ],
+      [
+        kb("🏦 Банк", `bank:${inn}`),
+        kb(`👥 Аффилированные лица (${c("affiliates")})`, `affiliates:${inn}:1`)
+      ],
+      [kb("⬅️ Назад к главной", `main:${inn}`)]
+    ]
+  };
 }
-
-function renderPersonCard(payload) {
-  const data = takeData(payload);
-  return [
-    '👤 <b>Карточка физлица</b>',
-    '',
-    `<b>ФИО:</b> ${escapeHtml(String(pick(data, ['ФИО']) || '—'))}`,
-    `<b>ИНН:</b> <code>${escapeHtml(String(pick(data, ['ИНН']) || '—'))}</code>`,
-    `<b>Компаний как руководитель:</b> ${escapeHtml(String(pick(data, ['КолРуковод']) || '0'))}`,
-    `<b>Компаний как учредитель:</b> ${escapeHtml(String(pick(data, ['КолУчред']) || '0'))}`,
-    `<b>Статус ИП:</b> ${escapeHtml(String(pick(data, ['СтатусИП']) || '—'))}`,
-  ].join('\n');
-}
-
-function renderBankCard(payload) {
-  const data = takeData(payload);
-  return [
-    '🏦 <b>Карточка банка</b>',
-    '',
-    `<b>БИК:</b> <code>${escapeHtml(String(pick(data, ['БИК']) || '—'))}</code>`,
-    `<b>Название:</b> ${escapeHtml(String(pick(data, ['Наим']) || '—'))}`,
-    `<b>Тип:</b> ${escapeHtml(String(pick(data, ['Тип']) || '—'))}`,
-    `<b>Адрес:</b> ${escapeHtml(String(pick(data, ['Адрес']) || '—'))}`,
-    `<b>Корр. счёт:</b> ${escapeHtml(String(pickNested(data, [['КорСчет', 'Номер']]) || '—'))}`,
-  ].join('\n');
-}
-
-function renderSection(cmd, rows, meta) {
-  const lines = [
-    `<b>${SECTION_TITLES[cmd] || 'Раздел'}</b>`,
-    '',
-    `Записей: <b>${rows.length ? meta.total : 0}</b>`,
-    '',
-  ];
-
-  if (!rows.length) {
-    lines.push('Данные отсутствуют.');
+__name(buildMainKeyboard, "buildMainKeyboard");
+async function buildSectionView(env, section, inn) {
+  const cfg = SECTION_CONFIG[section];
+  if (!cfg) {
+    throw new Error("Неизвестный раздел");
+  }
+  let rows = [];
+  if (section === "contracts") {
+    for (const law of ["44", "94", "223"]) {
+      const payload = await checkoRequest(env, cfg.endpoint, { inn, law });
+      rows.push(...takeItems(payload, cfg.listKeys));
+    }
   } else {
-    lines.push(...rows.map((item, index) => `• ${formatSectionRow(cmd, item, (meta.page - 1) * PAGE_SIZE + index + 1, meta.extra)}`));
+    const payload = await checkoRequest(env, cfg.endpoint, { inn });
+    rows = takeItems(payload, cfg.listKeys);
   }
-
-  if (cmd === CMD.FSP) {
-    lines.push('', '⚠️ Возможны ложные совпадения по ФССП.');
-  }
-
-  return lines.join('\n');
-}
-
-function formatSectionRow(cmd, row, index, extra) {
-  if (cmd === CMD.FIN) {
-    return `${escapeHtml(String(pick(row, ['Год', 'year']) || '—'))}: выручка ${escapeHtml(formatMoney(pick(row, ['2110'])))}, прибыль ${escapeHtml(formatMoney(pick(row, ['2400'])))}.`;
-  }
-  if (cmd === CMD.CRT) {
-    return `${index}) дело ${escapeHtml(String(pick(row, ['НомерДела', 'Номер']) || '—'))}, ${escapeHtml(String(pick(row, ['Дата', 'date']) || '—'))}, сумма ${escapeHtml(formatMoney(pick(row, ['СуммаТреб', 'Сумма'])))}.`;
-  }
-  if (cmd === CMD.GOV) {
-    return `${index}) ${extra || ''} контракт ${escapeHtml(String(pick(row, ['НомерКонтракта', 'Номер']) || '—'))}, цена ${escapeHtml(formatMoney(pick(row, ['СуммаКонтракта', 'Цена'])))}.`;
-  }
-  if (cmd === CMD.INS) {
-    return `${index}) проверка ${escapeHtml(String(pick(row, ['Номер', 'НомерПроверки']) || '—'))}, статус ${escapeHtml(String(pick(row, ['Статус']) || '—'))}.`;
-  }
-  if (cmd === CMD.FSP) {
-    return `${index}) ИП ${escapeHtml(String(pick(row, ['НомерИП', 'Номер']) || '—'))}, долг ${escapeHtml(formatMoney(pick(row, ['СуммаДолга', 'Сумма'])))}.`;
-  }
-  if (cmd === CMD.BNK) {
-    return `${index}) ${escapeHtml(String(pick(row, ['ТипСообщ', 'Тип']) || '—'))}, ${escapeHtml(String(pick(row, ['Дата', 'ДатаПубл']) || '—'))}.`;
-  }
-  if (cmd === CMD.LOG) {
-    return `${index}) ${escapeHtml(String(pick(row, ['Дата', 'date']) || '—'))}: ${escapeHtml(String(pick(row, ['Событие', 'event']) || '—'))}.`;
-  }
-  return `${index}) ${escapeHtml(String(row?.toString?.() || 'Запись'))}`;
-}
-
-function buildMainKeyboard(id, counts) {
-  const c = (key) => Number.isFinite(Number(counts?.[key])) ? Number(counts[key]) : 0;
+  const text = formatSectionByType(section, rows);
+  const extra = sectionExtraButton(section, rows.length, inn);
   return {
+    text,
+    reply_markup: extra ? { inline_keyboard: [[extra], [kb("⬅️ Назад к главной", `main:${inn}`)]] } : backKeyboard(inn)
+  };
+}
+__name(buildSectionView, "buildSectionView");
+function formatSectionByType(section, rows) {
+  if (section === "arbitration") {
+    const totalAmount = sumByKeys(rows, ["СуммаТреб", "Сумма", "amount"]);
+    return [
+      "<b>⚖️ Арбитражные дела</b>",
+      "",
+      `📊 Всего дел: <b>${rows.length}</b>`,
+      `💰 Общая сумма: <b>${formatMoney(totalAmount)}</b>`,
+      `${rows.length > 0 ? "🔴" : "✅"} Статус риска: <b>${rows.length > 5 ? "Высокий" : rows.length > 0 ? "Средний" : "Низкий"}</b>`,
+      "",
+      "Последние дела:",
+      previewRows(rows, ["Дата", "ДатаРег", "date"], ["НомерДела", "Номер", "number"], ["СуммаТреб", "Сумма", "amount"])
+    ].join("\n");
+  }
+  if (section === "bankruptcy") {
+    return [
+      "<b>🏦 Банкротство (ЕФРСБ)</b>",
+      "",
+      `📊 Записей: <b>${rows.length}</b>`,
+      rows.length === 0 ? "✅ Статус риска: <b>Отлично</b>" : "⚠️ Статус риска: <b>Требует проверки</b>",
+      "",
+      rows.length === 0 ? "Нет сведений о процедурах банкротства за всё время." : previewRows(rows, ["Дата", "ДатаПубл", "date"], ["ТипСообщ", "Тип", "type"], ["Сумма", "amount"])
+    ].join("\n");
+  }
+  if (section === "contracts") {
+    const totalAmount = sumByKeys(rows, ["СуммаКонтракта", "Цена", "Сумма", "amount"]);
+    return [
+      "<b>💼 Госзакупки 44-ФЗ / 223-ФЗ</b>",
+      "",
+      `📊 Всего контрактов: <b>${rows.length}</b>`,
+      `💰 Сумма контрактов: <b>${formatMoney(totalAmount)}</b>`,
+      rows.length > 0 ? "✅ Статус риска: <b>Низкий</b>" : "⚠️ Статус риска: <b>Нет данных</b>",
+      "",
+      "Последние контракты:",
+      previewRows(rows, ["ДатаЗакл", "Дата", "date"], ["НомерКонтракта", "Номер", "number"], ["СуммаКонтракта", "Цена", "amount"])
+    ].join("\n");
+  }
+  if (section === "inspections") {
+    return [
+      "<b>🔍 Проверки и КНМ</b>",
+      "",
+      `📊 Всего проверок: <b>${rows.length}</b>`,
+      rows.length <= 3 ? "✅ Статус риска: <b>Низкий</b>" : "⚠️ Статус риска: <b>Средний</b>",
+      "",
+      "Последние проверки:",
+      previewRows(rows, ["ДатаНач", "Дата", "date"], ["Орган", "ВидПроверки", "type"], [])
+    ].join("\n");
+  }
+  if (section === "financial") {
+    const last = rows[0] || {};
+    const revenue = pick(last, ["2110", "Выручка", "revenue"]);
+    const profit = pick(last, ["2400", "ЧистПриб", "netProfit"]);
+    const assets = pick(last, ["1600", "Активы", "assets"]);
+    return [
+      "<b>📊 Финансовая отчётность</b>",
+      "",
+      `📊 Периодов в отчётности: <b>${rows.length}</b>`,
+      `• Выручка: <b>${formatMoney(revenue)}</b>`,
+      `• Чистая прибыль: <b>${formatMoney(profit)}</b>`,
+      `• Активы: <b>${formatMoney(assets)}</b>`,
+      Number(profit || 0) > 0 ? "✅ Статус риска: <b>Отлично</b>" : "⚠️ Статус риска: <b>Требует проверки</b>"
+    ].join("\n");
+  }
+  if (section === "enforcements") {
+    const totalAmount = sumByKeys(rows, ["СуммаДолга", "Сумма", "amount"]);
+    return [
+      "<b>🏛️ Исполнительные производства</b>",
+      "",
+      `📊 Всего: <b>${rows.length}</b>`,
+      `💰 Сумма к взысканию: <b>${formatMoney(totalAmount)}</b>`,
+      rows.length === 0 ? "✅ Статус риска: <b>Низкий</b>" : "⚠️ Статус риска: <b>Средний</b>",
+      "",
+      "Последние:",
+      previewRows(rows, ["ДатаВозб", "Дата", "date"], ["НомерИП", "Номер", "number"], ["СуммаДолга", "Сумма", "amount"])
+    ].join("\n");
+  }
+  if (section === "history") {
+    return [
+      "<b>📜 История изменений</b>",
+      "",
+      `📊 Всего записей: <b>${rows.length}</b>`,
+      "",
+      "Последние изменения:",
+      previewRows(rows, ["Дата", "ДатаИзм", "date"], ["Событие", "ВидИзм", "type"], [])
+    ].join("\n");
+  }
+  if (section === "fedresurs") {
+    return [
+      "<b>📋 Сообщения на Федресурсе</b>",
+      "",
+      `📊 Всего сообщений: <b>${rows.length}</b>`,
+      "",
+      "Последние:",
+      previewRows(rows, ["Дата", "ДатаПубл", "date"], ["ТипСообщ", "Тип", "type"], [])
+    ].join("\n");
+  }
+  return "<b>Данные отсутствуют</b>";
+}
+__name(formatSectionByType, "formatSectionByType");
+async function buildPersonView(env, inn) {
+  const payload = await checkoRequest(env, "person", { inn });
+  const data = takeEntity(payload);
+  const text = [
+    "<b>👤 Физическое лицо</b>",
+    "",
+    `ФИО: <b>${escapeHtml(String(pick(data || {}, ["ФИО"]) || "—"))}</b>`,
+    `ИНН: <b>${escapeHtml(String(pick(data || {}, ["ИНН"]) || inn))}</b>`,
+    `Связанные компании: <b>${escapeHtml(String(pick(data || {}, ["Связи", "КолСвязей"]) || "—"))}</b>`
+  ].join("\n");
+  return { text, reply_markup: backKeyboard(inn) };
+}
+__name(buildPersonView, "buildPersonView");
+async function buildBankView(env, inn) {
+  const companyPayload = await checkoRequest(env, "company", { inn });
+  const company = takeEntity(companyPayload);
+  const bik = pickNested(company || {}, [["Банк", "БИК"], ["БИК"]]);
+  if (!bik) {
+    return {
+      text: "<b>🏦 Реквизиты банка</b>\n\nБИК не найден в карточке компании.",
+      reply_markup: backKeyboard(inn)
+    };
+  }
+  const bankPayload = await checkoRequest(env, "bank", { bic: bik });
+  const bank = takeEntity(bankPayload);
+  const corr = pickNested(bank || {}, [["КорСчет", "Номер"]]) || "—";
+  const text = [
+    "<b>🏦 Реквизиты банка</b>",
+    "",
+    `БИК: <b>${escapeHtml(String(pick(bank || {}, ["БИК"]) || "—"))}</b>`,
+    `Название: <b>${escapeHtml(String(pick(bank || {}, ["Наим"]) || "—"))}</b>`,
+    `Корр. счёт: <b>${escapeHtml(String(corr))}</b>`
+  ].join("\n");
+  return { text, reply_markup: backKeyboard(inn) };
+}
+__name(buildBankView, "buildBankView");
+async function buildAffiliatesView(env, inn, page) {
+  const payload = await checkoRequest(env, "company", { inn });
+  const company = takeEntity(payload) || {};
+  const leaders = (Array.isArray(company.Руковод) ? company.Руковод : []).map((item) => ({
+    type: "Руководитель",
+    name: item?.ФИО || "—",
+    inn: item?.ИНН || null,
+    share: null
+  }));
+  const founders = (Array.isArray(company.Учред) ? company.Учред : []).map((item) => ({
+    type: "Учредитель",
+    name: item?.Наим || item?.ФИО || "—",
+    inn: item?.ИНН || null,
+    share: item?.Доля?.Проц || item?.Доля || item?.ДоляПроц || null
+  }));
+  const all = [...leaders, ...founders];
+  const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const start = (safePage - 1) * PAGE_SIZE;
+  const chunk = all.slice(start, start + PAGE_SIZE);
+  const rows = chunk.length ? chunk.map((item, idx) => {
+    const num = start + idx + 1;
+    const innPart = item.inn ? ` (ИНН ${item.inn})` : "";
+    const sharePart = item.share ? ` — ${item.share}%` : "";
+    return `${num}. ${escapeHtml(item.name)}${innPart}${sharePart} [${item.type}]`;
+  }) : ["Данные отсутствуют."];
+  const navRow = [];
+  if (safePage > 1) {
+    navRow.push(kb("⬅️ Назад", `affiliates:${inn}:${safePage - 1}`));
+  }
+  if (safePage < totalPages) {
+    navRow.push(kb("➡️ Дальше", `affiliates:${inn}:${safePage + 1}`));
+  }
+  const keyboard = {
     inline_keyboard: [
-      [kb(`📊 Финансы (${c(CMD.FIN)})`, cb(CMD.FIN, id, 1)), kb(`⚖️ Арбитраж (${c(CMD.CRT)})`, cb(CMD.CRT, id, 1))],
-      [kb(`🏛 Госзакупки (${c(CMD.GOV)})`, cb(CMD.GOV, id, 1)), kb(`🚨 Проверки (${c(CMD.INS)})`, cb(CMD.INS, id, 1))],
-      [kb(`🛑 ФССП (${c(CMD.FSP)})`, cb(CMD.FSP, id, 1)), kb(`📉 Банкротство (${c(CMD.BNK)})`, cb(CMD.BNK, id, 1))],
-      [kb('📜 История', cb(CMD.LOG, id, 1)), kb('🏦 Банк', cb(CMD.BAK, id, 1))],
-      [kb('🔄 Новый поиск', cb(CMD.NEW, id, 1))],
-    ],
+      ...navRow.length ? [navRow] : [],
+      [kb("⬅️ Назад к главной", `main:${inn}`)]
+    ]
   };
+  const text = [
+    `<b>👥 Аффилированные лица (${all.length})</b>`,
+    "",
+    `Страница ${safePage}/${totalPages}`,
+    "",
+    rows.join("\n")
+  ].join("\n");
+  return { text, reply_markup: keyboard };
 }
-
-function arbitrationRoleKeyboard(id) {
-  return {
-    inline_keyboard: [
-      [kb('🟢 Истец', cb(CMD.CRT, id, 1, 'p')), kb('🔴 Ответчик', cb(CMD.CRT, id, 1, 'd'))],
-      [kb('⬅️ Назад', cb(CMD.MAIN, id, 1))],
-    ],
-  };
+__name(buildAffiliatesView, "buildAffiliatesView");
+function sectionExtraButton(section, count, inn) {
+  if (section === "arbitration") {
+    return kb(`📋 Все ${count} дел`, `arbitration:${inn}`);
+  }
+  if (section === "financial") {
+    return kb("📈 Полная отчётность", `financial:${inn}`);
+  }
+  if (section === "enforcements") {
+    return kb("📋 Все производства", `enforcements:${inn}`);
+  }
+  return null;
 }
-
-function govRoleKeyboard(id) {
-  return {
-    inline_keyboard: [
-      [kb('🛒 44-ФЗ Заказчик', cb(CMD.GOV, id, 1, '44c')), kb('💼 44-ФЗ Поставщик', cb(CMD.GOV, id, 1, '44s'))],
-      [kb('🏢 223-ФЗ Заказчик', cb(CMD.GOV, id, 1, '223c'))],
-      [kb('⬅️ Назад', cb(CMD.MAIN, id, 1))],
-    ],
-  };
+__name(sectionExtraButton, "sectionExtraButton");
+function previewRows(rows, dateKeys, nameKeys, amountKeys) {
+  if (!rows.length) {
+    return "Данные отсутствуют.";
+  }
+  return rows.slice(0, 5).map((row) => {
+    const date = pick(row, dateKeys) || "—";
+    const name = pick(row, nameKeys) || "Запись";
+    const amount = amountKeys.length ? pick(row, amountKeys) : null;
+    const suffix = amount ? ` — <b>${escapeHtml(formatMoney(amount))}</b>` : "";
+    return `• ${escapeHtml(String(date))} — ${escapeHtml(String(name))}${suffix}`;
+  }).join("\n");
 }
-
-function paginationKeyboard(sectionRef, page, totalPages) {
-  const nav = [
-    kb('⬅️ Назад', cb(sectionRef.cmd, sectionRef.id, Math.max(1, page - 1), sectionRef.extra)),
-    kb(`📄 Страница ${page} из ${totalPages}`, cb(CMD.NOOP, sectionRef.id, page)),
-    kb('➡️ Дальше', cb(sectionRef.cmd, sectionRef.id, Math.min(totalPages, page + 1), sectionRef.extra)),
-  ];
-
-  return {
-    inline_keyboard: [
-      nav,
-      [kb('🏠 В главное меню', cb(CMD.MAIN, sectionRef.id, 1))],
-    ],
-  };
+__name(previewRows, "previewRows");
+function sumByKeys(rows, keys) {
+  return rows.reduce((acc, row) => acc + toNumber(pick(row, keys)), 0);
 }
-
-function ipPersonBackKeyboard(id) {
-  return {
-    inline_keyboard: [[kb('🔄 Новый поиск', cb(CMD.NEW, id, 1))]],
-  };
+__name(sumByKeys, "sumByKeys");
+function toNumber(value) {
+  if (value === null || value === void 0 || value === "") {
+    return 0;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : 0;
+  }
+  const normalized = String(value).replace(/\s+/g, "").replace(",", ".").replace(/[^\d.-]/g, "");
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
-
-function searchAgainKeyboard() {
-  return {
-    inline_keyboard: [[kb('🔄 Новый поиск', cb(CMD.NEW, '0', 1))]],
-  };
+__name(toNumber, "toNumber");
+function formatMoney(value) {
+  const num = toNumber(value);
+  if (!num) {
+    return "0 ₽";
+  }
+  return `${Math.round(num).toLocaleString("ru-RU")} ₽`;
 }
-
-function cb(cmd, id, page, extra = '') {
-  return extra ? `${cmd}:${id}:${page}:${extra}` : `${cmd}:${id}:${page}`;
+__name(formatMoney, "formatMoney");
+function assessOverallRisk(counts) {
+  const score = Number(counts.arbitration || 0) * 4 + Number(counts.bankruptcy || 0) * 10 + Number(counts.enforcements || 0) * 6;
+  if (score >= 40) {
+    return { icon: "🔴", level: "Высокий", note: "(рекомендуется проверить Арбитраж и Финансы)" };
+  }
+  if (score > 0) {
+    return { icon: "🟡", level: "Средний", note: "(есть сигналы для дополнительной проверки)" };
+  }
+  return { icon: "🟢", level: "Низкий", note: "(критичных сигналов риска не выявлено)" };
 }
-
+__name(assessOverallRisk, "assessOverallRisk");
+function backKeyboard(inn) {
+  return { inline_keyboard: [[kb("⬅️ Назад к главной", `main:${inn}`)]] };
+}
+__name(backKeyboard, "backKeyboard");
 function kb(text, callback_data) {
   return { text, callback_data };
 }
-
-function buildSessionKey(chatId, messageId, cmd, id, extra) {
-  return `session:${chatId}:${messageId}:${cmd}:${id}:${extra || '-'}`;
+__name(kb, "kb");
+async function editMessage(env, chatId, messageId, text, replyMarkup) {
+  await telegramRequest(env, "editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    parse_mode: "HTML",
+    reply_markup: replyMarkup
+  });
 }
-
-async function kvGetJson(env, key) {
-  if (!env.SESSION_KV) {
-    return null;
-  }
-  const raw = await env.SESSION_KV.get(key);
-  if (!raw) {
-    return null;
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+__name(editMessage, "editMessage");
+async function sendMessage(env, body) {
+  await telegramRequest(env, "sendMessage", body);
 }
-
-async function kvPutJson(env, key, value, expirationTtl) {
-  if (!env.SESSION_KV) {
-    return;
-  }
-  await env.SESSION_KV.put(key, JSON.stringify(value), { expirationTtl });
-}
-
-function isWebhookSecretValid(request, env) {
-  if (!env.WEBHOOK_SECRET) {
-    throw new Error('Missing WEBHOOK_SECRET.');
-  }
-  const received = request.headers.get('X-Telegram-Bot-Api-Secret-Token') || '';
-  return received === env.WEBHOOK_SECRET;
-}
-
+__name(sendMessage, "sendMessage");
 function ensureSecrets(env) {
-  if (!env.TELEGRAM_BOT_TOKEN || !env.CHECKO_API_KEY || !env.WEBHOOK_SECRET) {
-    throw new Error('Missing TELEGRAM_BOT_TOKEN/CHECKO_API_KEY/WEBHOOK_SECRET.');
+  if (!env.TELEGRAM_BOT_TOKEN || !env.CHECKO_API_KEY) {
+    throw new Error("Missing required secrets TELEGRAM_BOT_TOKEN/CHECKO_API_KEY.");
   }
 }
-
+__name(ensureSecrets, "ensureSecrets");
 async function checkoRequest(env, endpoint, params = {}) {
-  ensureSecrets(env);
-  const base = String(env.CHECKO_API_URL || DEFAULT_CHECKO_API_URL).replace(/\/$/, '');
-  const url = new URL(`${base}/${endpoint}`);
-  url.searchParams.set('key', env.CHECKO_API_KEY);
-
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== null && v !== undefined && v !== '') {
-      url.searchParams.set(k, String(v));
+  const baseUrl = (env.CHECKO_API_URL || DEFAULT_CHECKO_API_URL).replace(/\/$/, "");
+  const url = new URL(`${baseUrl}/${endpoint}`);
+  url.searchParams.set("key", env.CHECKO_API_KEY);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== void 0 && value !== null) {
+      url.searchParams.set(key, String(value));
     }
   });
-
-  const response = await fetchWithTimeout(url.toString(), { method: 'GET' }, 15000);
+  const response = await fetchWithTimeout(url.toString(), { method: "GET" }, 15e3);
   const raw = await response.text();
-
   if (response.status !== 200) {
     throw new Error(`Checko HTTP ${response.status}: ${raw.slice(0, 300)}`);
   }
-
   let payload;
   try {
     payload = JSON.parse(raw);
   } catch {
     throw new Error(`Checko non-JSON response: ${raw.slice(0, 300)}`);
   }
-
-  const status = String(payload?.meta?.status || 'ok').toLowerCase();
-  const message = String(payload?.meta?.message || '');
-  if (!['ok', 'success'].includes(status)) {
-    throw new Error(`Checko meta ${status}: ${message || 'unknown error'}`);
+  const metaStatus = payload?.meta?.status;
+  const metaMessage = payload?.meta?.message;
+  if (metaStatus && !["ok", "success"].includes(String(metaStatus).toLowerCase())) {
+    throw new Error(`Checko meta ${String(metaStatus)}: ${String(metaMessage || "unknown")}`);
   }
-
   return payload;
 }
-
-function takeData(payload) {
-  return payload?.data ?? payload;
+__name(checkoRequest, "checkoRequest");
+function takeEntity(payload) {
+  const data = payload?.data ?? payload;
+  return Array.isArray(data) ? data[0] || null : data;
 }
-
-function toArrayByKeys(data, keys) {
+__name(takeEntity, "takeEntity");
+function takeItems(payload, keys) {
+  const data = payload?.data ?? payload;
   if (Array.isArray(data)) {
     return data;
   }
-  if (!data || typeof data !== 'object') {
+  if (!data || typeof data !== "object") {
     return [];
   }
   for (const key of keys) {
@@ -620,131 +622,95 @@ function toArrayByKeys(data, keys) {
   }
   return [];
 }
-
+__name(takeItems, "takeItems");
 function pick(obj, keys) {
   for (const key of keys) {
     const value = obj?.[key];
-    if (value !== undefined && value !== null && value !== '') {
+    if (value !== void 0 && value !== null && value !== "") {
       return value;
     }
   }
   return null;
 }
-
+__name(pick, "pick");
 function pickNested(obj, paths) {
   for (const path of paths) {
     let cur = obj;
     for (const key of path) {
-      cur = cur?.[key];
-      if (cur === undefined || cur === null) {
+      if (cur === null || cur === void 0) {
+        cur = null;
         break;
       }
+      cur = cur[key];
     }
-    if (cur !== undefined && cur !== null && cur !== '') {
+    if (cur !== void 0 && cur !== null && cur !== "") {
       return cur;
     }
   }
   return null;
 }
-
-function toNumber(value) {
-  if (value === null || value === undefined || value === '') {
-    return 0;
-  }
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : 0;
-  }
-  const normalized = String(value).replace(/\s+/g, '').replace(',', '.').replace(/[^\d.-]/g, '');
-  const parsed = Number.parseFloat(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
+__name(pickNested, "pickNested");
+function formatDate(date) {
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  return `${dd}.${mm}.${yyyy}`;
 }
-
-function formatMoney(value) {
-  const num = toNumber(value);
-  if (!num) {
-    return '0 ₽';
-  }
-  return `${Math.round(num).toLocaleString('ru-RU')} ₽`;
-}
-
+__name(formatDate, "formatDate");
 function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;");
 }
-
-async function safeEditMessage(env, chatId, messageId, text, replyMarkup) {
-  try {
-    await telegram(env, 'editMessageText', {
-      chat_id: chatId,
-      message_id: messageId,
-      text,
-      parse_mode: 'HTML',
-      reply_markup: replyMarkup,
-    });
-  } catch {
-    await sendMessage(env, {
-      chat_id: chatId,
-      text,
-      parse_mode: 'HTML',
-      reply_markup: replyMarkup,
-    });
-  }
-}
-
-async function sendMessage(env, body) {
-  return telegram(env, 'sendMessage', body);
-}
-
-async function telegram(env, method, body) {
-  ensureSecrets(env);
-  const url = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`;
+__name(escapeHtml, "escapeHtml");
+async function telegramRequest(env, method, body) {
+  const endpoint = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`;
   const response = await fetchWithTimeout(
-    url,
+    endpoint,
     {
-      method: 'POST',
-      headers: { 'content-type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(body),
+      method: "POST",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(body)
     },
-    10000,
+    1e4
   );
-
-  const raw = await response.text();
   if (response.status !== 200) {
-    if (response.status === 429) {
-      throw new Error('Telegram rate limit (429). Повторите позже.');
-    }
-    throw new Error(`Telegram ${method} HTTP ${response.status}: ${raw.slice(0, 300)}`);
+    const raw = await response.text();
+    throw new Error(`Telegram API ${method} failed (${response.status}): ${raw.slice(0, 300)}`);
   }
-
-  let payload;
-  try {
-    payload = JSON.parse(raw);
-  } catch {
-    throw new Error(`Telegram ${method} non-JSON response: ${raw.slice(0, 300)}`);
-  }
-
-  if (payload?.ok !== true) {
-    throw new Error(`Telegram ${method} API error: ${String(payload?.description || 'unknown')}`);
-  }
-
-  return payload.result;
 }
-
+__name(telegramRequest, "telegramRequest");
+async function parseJsonOrThrow(request) {
+  try {
+    return await request.json();
+  } catch {
+    throw new Error("Invalid JSON in webhook request.");
+  }
+}
+__name(parseJsonOrThrow, "parseJsonOrThrow");
 async function fetchWithTimeout(url, options, timeoutMs) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort('timeout'), timeoutMs);
+  const timer = setTimeout(() => controller.abort("timeout"), timeoutMs);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
 }
-
-function json(payload, status = 200) {
+__name(fetchWithTimeout, "fetchWithTimeout");
+function normalizeWebhookPath(input) {
+  if (!input) {
+    return DEFAULT_WEBHOOK_PATH;
+  }
+  return input.startsWith("/") ? input : `/${input}`;
+}
+__name(normalizeWebhookPath, "normalizeWebhookPath");
+function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8' },
+    headers: { "content-type": "application/json; charset=utf-8" }
   });
 }
+__name(jsonResponse, "jsonResponse");
+export {
+  worker_default as default
+};
+//# sourceMappingURL=worker.js.map
