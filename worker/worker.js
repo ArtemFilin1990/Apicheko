@@ -62,14 +62,14 @@ var worker_default = {
     if (request.method === "GET" && url.pathname === "/") {
       return jsonResponse({ ok: true, service: "telegram-checko-bot", webhookPath });
     }
-    const isWebhookRequest = request.method === "POST" && (url.pathname === webhookPath || url.pathname === "/");
+    const isWebhookRequest = request.method === "POST" && url.pathname === webhookPath;
     if (isWebhookRequest) {
       try {
         verifyTelegramWebhookSecret(request, env);
         return await handleTelegramUpdate(request, env);
       } catch (error) {
         const message = String(error.message || error);
-        const status = message === "Forbidden: invalid webhook secret token." ? 403 : 400;
+        const status = message === "Unauthorized: invalid webhook secret token." ? 401 : 400;
         return jsonResponse({ ok: false, error: message }, status);
       }
     }
@@ -77,12 +77,8 @@ var worker_default = {
   }
 };
 async function handleTelegramUpdate(request, env) {
-  ensureSecrets(env);
+  ensureTelegramSecret(env);
   const update = await parseJsonOrThrow(request);
-  if (update.callback_query) {
-    await handleCallbackQuery(update.callback_query, env);
-    return jsonResponse({ ok: true });
-  }
   const message = update.message;
   if (!message || typeof message.text !== "string") {
     return jsonResponse({ ok: true, skipped: "Unsupported update type." });
@@ -95,31 +91,14 @@ async function handleTelegramUpdate(request, env) {
   if (text === "/start" || text === "/help") {
     await sendMessage(env, {
       chat_id: chatId,
-      text: "👋 Добро пожаловать в Apicheko\n\nОтправьте ИНН (10 цифр — компания, 12 цифр — ИП), и я соберу карточку с рисками, финансами и связанными разделами."
+      text: "👋 Бот работает. Отправьте ИНН, и я проверю компанию."
     });
     return jsonResponse({ ok: true });
   }
-  if (!/^\d{10,12}$/.test(text) || ![10, 12].includes(text.length)) {
-    await sendMessage(env, {
-      chat_id: chatId,
-      text: "Введите корректный ИНН: 10 или 12 цифр."
-    });
-    return jsonResponse({ ok: true });
-  }
-  try {
-    const view = await buildMainCardView(env, text);
-    await sendMessage(env, {
-      chat_id: chatId,
-      text: view.text,
-      parse_mode: "HTML",
-      reply_markup: view.reply_markup
-    });
-  } catch (error) {
-    await sendMessage(env, {
-      chat_id: chatId,
-      text: `Ошибка Checko: ${error.message}`
-    });
-  }
+  await sendMessage(env, {
+    chat_id: chatId,
+    text: "Напишите /start для проверки webhook и приветствия."
+  });
   return jsonResponse({ ok: true });
 }
 __name(handleTelegramUpdate, "handleTelegramUpdate");
@@ -576,17 +555,18 @@ async function sendMessage(env, body) {
   await telegramRequest(env, "sendMessage", body);
 }
 __name(sendMessage, "sendMessage");
-function ensureSecrets(env) {
-  if (!env.TELEGRAM_BOT_TOKEN || !env.CHECKO_API_KEY) {
-    throw new Error("Missing required secrets TELEGRAM_BOT_TOKEN/CHECKO_API_KEY.");
+function ensureTelegramSecret(env) {
+  if (!env.TELEGRAM_BOT_TOKEN) {
+    throw new Error("Missing required secret TELEGRAM_BOT_TOKEN.");
   }
 }
-__name(ensureSecrets, "ensureSecrets");
+__name(ensureTelegramSecret, "ensureTelegramSecret");
 function verifyTelegramWebhookSecret(request, env) {
-  if (!env.WEBHOOK_SECRET) return;
+  if (!env.WEBHOOK_SECRET)
+    return;
   const token = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
   if (token !== env.WEBHOOK_SECRET) {
-    throw new Error("Forbidden: invalid webhook secret token.");
+    throw new Error("Unauthorized: invalid webhook secret token.");
   }
 }
 __name(verifyTelegramWebhookSecret, "verifyTelegramWebhookSecret");
