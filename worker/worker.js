@@ -3,7 +3,7 @@ var __name = (target, value) => __defProp(target, "name", { value, configurable:
 
 // worker.js
 var DEFAULT_CHECKO_API_URL = "https://api.checko.ru/v2";
-var DEFAULT_WEBHOOK_PATH = "/webhook";
+var DEFAULT_WEBHOOK_PATH = "/";
 var PAGE_SIZE = 10;
 var SECTION_CONFIG = {
   arbitration: {
@@ -58,11 +58,11 @@ var SECTION_CONFIG = {
 var worker_default = {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const webhookPath = normalizeWebhookPath(env.WEBHOOK_PATH);
+    const webhookPaths = resolveWebhookPaths(env);
     if (request.method === "GET" && url.pathname === "/") {
-      return jsonResponse({ ok: true, service: "telegram-checko-bot", webhookPath });
+      return jsonResponse({ ok: true, service: "telegram-checko-bot", webhookPaths });
     }
-    const isWebhookRequest = request.method === "POST" && url.pathname === webhookPath;
+    const isWebhookRequest = request.method === "POST" && webhookPaths.includes(url.pathname);
     if (isWebhookRequest) {
       try {
         verifyTelegramWebhookSecret(request, env);
@@ -716,6 +716,15 @@ async function fetchWithTimeout(url, options, timeoutMs) {
   }
 }
 __name(fetchWithTimeout, "fetchWithTimeout");
+function resolveWebhookPaths(env) {
+  const configuredPath = normalizeWebhookPath(env.WEBHOOK_PATH);
+  const paths = [configuredPath];
+  if (configuredPath !== "/") {
+    paths.push("/");
+  }
+  return paths;
+}
+__name(resolveWebhookPaths, "resolveWebhookPaths");
 function normalizeWebhookPath(input) {
   if (!input) {
     return DEFAULT_WEBHOOK_PATH;
