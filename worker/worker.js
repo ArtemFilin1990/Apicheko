@@ -577,12 +577,13 @@ async function sendMessage(env, body) {
 }
 __name(sendMessage, "sendMessage");
 function ensureSecrets(env) {
-  if (!env.TELEGRAM_BOT_TOKEN || !env.CHECKO_API_KEY || !env.WEBHOOK_SECRET) {
-    throw new Error("Missing required secrets TELEGRAM_BOT_TOKEN/CHECKO_API_KEY/WEBHOOK_SECRET.");
+  if (!env.TELEGRAM_BOT_TOKEN || !env.CHECKO_API_KEY) {
+    throw new Error("Missing required secrets TELEGRAM_BOT_TOKEN/CHECKO_API_KEY.");
   }
 }
 __name(ensureSecrets, "ensureSecrets");
 function verifyTelegramWebhookSecret(request, env) {
+  if (!env.WEBHOOK_SECRET) return;
   const token = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
   if (token !== env.WEBHOOK_SECRET) {
     throw new Error("Forbidden: invalid webhook secret token.");
