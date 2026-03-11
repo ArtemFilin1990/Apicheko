@@ -48,13 +48,13 @@ DETAIL_FETCHERS: dict[str, str] = {
 }
 
 SECTION_LIST_KEYS: dict[str, tuple[str, ...]] = {
-    "arbitration": ("Р”РµР»Р°", "Р—Р°РїРёСЃРё", "cases", "items"),
-    "enforcements": ("РРџ", "Р—Р°РїРёСЃРё", "items"),
-    "contracts": ("РљРѕРЅС‚СЂР°РєС‚С‹", "Р—Р°РїРёСЃРё", "items"),
-    "inspections": ("РџСЂРѕРІРµСЂРєРё", "Р—Р°РїРёСЃРё", "items"),
-    "bankruptcy": ("РЎРѕРѕР±С‰РµРЅРёСЏ", "Р—Р°РїРёСЃРё", "messages", "items"),
-    "history": ("РЎРѕР±С‹С‚РёСЏ", "events"),
-    "fedresurs": ("РЎРѕРѕР±С‰РµРЅРёСЏ", "Р—Р°РїРёСЃРё", "messages", "items"),
+    "arbitration": ("Дела", "Записи", "cases", "items"),
+    "enforcements": ("ИП", "Записи", "items"),
+    "contracts": ("Контракты", "Записи", "items"),
+    "inspections": ("Проверки", "Записи", "items"),
+    "bankruptcy": ("Сообщения", "Записи", "messages", "items"),
+    "history": ("События", "events"),
+    "fedresurs": ("Сообщения", "Записи", "messages", "items"),
 }
 
 
@@ -67,7 +67,7 @@ def _identifier_params(identifier: str) -> dict[str, str]:
 
 
 def _normalize_financial_payload(payload: dict) -> dict:
-    reports = extract_items(payload, "РћС‚С‡РµС‚С‹", "reports")
+    reports = extract_items(payload, "Отчеты", "reports")
     if reports:
         return {"data": reports}
 

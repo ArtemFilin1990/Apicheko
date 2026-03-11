@@ -21,7 +21,7 @@ _DETAIL_FETCHERS = DETAIL_FETCHERS
 async def cb_menu(call: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await call.message.edit_text(
-        "рџЏ  Р“Р»Р°РІРЅРѕРµ РјРµРЅСЋ. Р’С‹Р±РµСЂРёС‚Рµ РґРµР№СЃС‚РІРёРµ:",
+        "🏠 Главное меню. Выберите действие:",
         reply_markup=main_menu_keyboard(),
     )
     await call.answer()
@@ -30,12 +30,12 @@ async def cb_menu(call: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "help")
 async def cb_help(call: CallbackQuery) -> None:
     help_text = (
-        "в„№пёЏ <b>РљР°Рє РїРѕР»СЊР·РѕРІР°С‚СЊСЃСЏ Р±РѕС‚РѕРј</b>\n\n"
-        "вЂў <b>РџРѕРёСЃРє РїРѕ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂСѓ</b> вЂ” РРќРќ 10/12, РћР“Р Рќ 13, РћР“Р РќРРџ 15.\n"
-        "вЂў Р”Р»СЏ РРќРќ 12 Р±РѕС‚ РїСЂРµРґР»РѕР¶РёС‚ РІС‹Р±СЂР°С‚СЊ: <b>РРџ</b> РёР»Рё <b>С„РёР·Р»РёС†Рѕ</b>.\n"
-        "вЂў РџРѕРёСЃРє РїРѕ РЅР°Р·РІР°РЅРёСЋ РїРѕРєР°Р·С‹РІР°РµС‚ СЃРїРёСЃРѕРє РЅР°Р№РґРµРЅРЅС‹С… РєРѕРјРїР°РЅРёР№.\n"
-        "вЂў Р”Р»СЏ СЋСЂР»РёС† РґРѕСЃС‚СѓРїРЅС‹ РґРµС‚Р°Р»СЊРЅС‹Рµ СЂР°Р·РґРµР»С‹: С„РёРЅР°РЅСЃС‹, Р°СЂР±РёС‚СЂР°Р¶, Р¤РЎРЎРџ Рё РґСЂ.\n\n"
-        "Р•СЃР»Рё С‡С‚Рѕ-С‚Рѕ РЅРµ СЂР°Р±РѕС‚Р°РµС‚ вЂ” РїРѕРїСЂРѕР±СѓР№С‚Рµ /start."
+        "ℹ️ <b>Как пользоваться ботом</b>\n\n"
+        "• <b>Поиск по идентификатору</b> — ИНН 10/12, ОГРН 13, ОГРНИП 15.\n"
+        "• Для ИНН 12 бот предложит выбрать: <b>ИП</b> или <b>физлицо</b>.\n"
+        "• Поиск по названию показывает список найденных компаний.\n"
+        "• Для юрлиц доступны детальные разделы: финансы, арбитраж, ФССП и др.\n\n"
+        "Если что-то не работает — попробуйте /start."
     )
     await call.message.edit_text(help_text, reply_markup=main_menu_keyboard())
     await call.answer()
@@ -45,7 +45,7 @@ async def cb_help(call: CallbackQuery) -> None:
 async def cb_search_inn(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(SearchState.waiting_for_inn)
     await call.message.edit_text(
-        "Р’РІРµРґРёС‚Рµ РРќРќ (10/12), РћР“Р Рќ (13) РёР»Рё РћР“Р РќРРџ (15):",
+        "Введите ИНН (10/12), ОГРН (13) или ОГРНИП (15):",
         reply_markup=cancel_keyboard(),
     )
     await call.answer()
@@ -55,7 +55,7 @@ async def cb_search_inn(call: CallbackQuery, state: FSMContext) -> None:
 async def cb_search_name(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(SearchState.waiting_for_name)
     await call.message.edit_text(
-        "Р’РІРµРґРёС‚Рµ РЅР°Р·РІР°РЅРёРµ РєРѕРјРїР°РЅРёРё РёР»Рё Р¤РРћ РРџ:",
+        "Введите название компании или ФИО ИП:",
         reply_markup=cancel_keyboard(),
     )
     await call.answer()
@@ -71,16 +71,16 @@ async def cb_history(call: CallbackQuery, db: Database) -> None:
     rows = await db.get_user_history(user.id, limit=10)
     if not rows:
         await call.message.edit_text(
-            "рџ“­ РСЃС‚РѕСЂРёСЏ Р·Р°РїСЂРѕСЃРѕРІ РїСѓСЃС‚Р°.", reply_markup=main_menu_keyboard()
+            "📭 История запросов пуста.", reply_markup=main_menu_keyboard()
         )
         await call.answer()
         return
 
-    lines = ["рџ“‹ <b>РџРѕСЃР»РµРґРЅРёРµ Р·Р°РїСЂРѕСЃС‹:</b>", ""]
+    lines = ["📋 <b>Последние запросы:</b>", ""]
     for row in rows:
         query = html.escape(str(row["query"]))
         created = html.escape(str(row["searched_at"]))
-        lines.append(f"вЂў {query} <i>({created})</i>")
+        lines.append(f"• {query} <i>({created})</i>")
 
     await call.message.edit_text("\n".join(lines), reply_markup=main_menu_keyboard())
     await call.answer()
@@ -90,12 +90,12 @@ async def cb_history(call: CallbackQuery, db: Database) -> None:
 async def cb_resolve_12digit(call: CallbackQuery, checko_api: CheckoAPI) -> None:
     parts = call.data.split(":", 2)
     if len(parts) != 3:
-        await call.answer("РќРµРІРµСЂРЅС‹Р№ Р·Р°РїСЂРѕСЃ", show_alert=True)
+        await call.answer("Неверный запрос", show_alert=True)
         return
 
     _, mode, inn = parts
 
-    await call.message.edit_text("рџ”„ Р—Р°РіСЂСѓР¶Р°СЋвЂ¦")
+    await call.message.edit_text("🔄 Загружаю…")
     try:
         if mode == "entrepreneur":
             data = await checko_api.get_entrepreneur(inn=inn)
@@ -106,13 +106,13 @@ async def cb_resolve_12digit(call: CallbackQuery, checko_api: CheckoAPI) -> None
             text = format_person(data)
             markup = cancel_keyboard()
         else:
-            await call.answer("РќРµРёР·РІРµСЃС‚РЅС‹Р№ СЂРµР¶РёРј", show_alert=True)
+            await call.answer("Неизвестный режим", show_alert=True)
             return
 
         await call.message.edit_text(text, reply_markup=markup)
     except CheckoAPIError as exc:
         await call.message.edit_text(
-            f"вљ пёЏ РћС€РёР±РєР° РїСЂРё Р·Р°РіСЂСѓР·РєРµ РґР°РЅРЅС‹С…:\n<i>{html.escape(str(exc))}</i>",
+            f"⚠️ Ошибка при загрузке данных:\n<i>{html.escape(str(exc))}</i>",
             reply_markup=main_menu_keyboard(),
         )
     await call.answer()
@@ -122,12 +122,12 @@ async def cb_resolve_12digit(call: CallbackQuery, checko_api: CheckoAPI) -> None
 async def cb_select_search_result(call: CallbackQuery, checko_api: CheckoAPI) -> None:
     parts = call.data.split(":", 2)
     if len(parts) != 3:
-        await call.answer("РќРµРІРµСЂРЅС‹Р№ Р·Р°РїСЂРѕСЃ", show_alert=True)
+        await call.answer("Неверный запрос", show_alert=True)
         return
 
     _, entity_type, identifier = parts
 
-    await call.message.edit_text("рџ”„ Р—Р°РіСЂСѓР¶Р°СЋвЂ¦")
+    await call.message.edit_text("🔄 Загружаю…")
     try:
         if entity_type == "entrepreneur":
             data = await checko_api.get_entrepreneur(inn=identifier)
@@ -142,7 +142,7 @@ async def cb_select_search_result(call: CallbackQuery, checko_api: CheckoAPI) ->
         )
     except CheckoAPIError as exc:
         await call.message.edit_text(
-            f"вљ пёЏ РћС€РёР±РєР° РїСЂРё Р·Р°РіСЂСѓР·РєРµ РєР°СЂС‚РѕС‡РєРё:\n<i>{html.escape(str(exc))}</i>",
+            f"⚠️ Ошибка при загрузке карточки:\n<i>{html.escape(str(exc))}</i>",
             reply_markup=main_menu_keyboard(),
         )
     await call.answer()
@@ -152,24 +152,24 @@ async def cb_select_search_result(call: CallbackQuery, checko_api: CheckoAPI) ->
 async def cb_detail(call: CallbackQuery, checko_api: CheckoAPI) -> None:
     parts = call.data.split(":", 2)
     if len(parts) != 3:
-        await call.answer("РќРµРІРµСЂРЅС‹Р№ Р·Р°РїСЂРѕСЃ.", show_alert=True)
+        await call.answer("Неверный запрос.", show_alert=True)
         return
 
     _, identifier, section = parts
 
     if section not in _DETAIL_FETCHERS:
         if not (section == "company" and len(identifier) == 12):
-            await call.answer("РќРµРёР·РІРµСЃС‚РЅС‹Р№ СЂР°Р·РґРµР».", show_alert=True)
+            await call.answer("Неизвестный раздел.", show_alert=True)
             return
 
-    await call.message.edit_text("рџ”„ Р—Р°РіСЂСѓР¶Р°СЋвЂ¦")
+    await call.message.edit_text("🔄 Загружаю…")
 
     try:
         text, markup = await build_detail_card(checko_api, identifier, section)
         await call.message.edit_text(text, reply_markup=markup)
     except CheckoAPIError as exc:
         await call.message.edit_text(
-            f"вљ пёЏ РћС€РёР±РєР° РїСЂРё Р·Р°РіСЂСѓР·РєРµ СЂР°Р·РґРµР»Р° В«{html.escape(section)}В»:\n<i>{html.escape(str(exc))}</i>",
+            f"⚠️ Ошибка при загрузке раздела «{html.escape(section)}»:\n<i>{html.escape(str(exc))}</i>",
             reply_markup=cancel_keyboard(),
         )
     await call.answer()

@@ -79,6 +79,10 @@ var worker_default = {
 async function handleTelegramUpdate(request, env) {
   ensureTelegramSecret(env);
   const update = await parseJsonOrThrow(request);
+  if (update.callback_query) {
+    await handleCallbackQuery(update.callback_query, env);
+    return jsonResponse({ ok: true });
+  }
   const message = update.message;
   if (!message || typeof message.text !== "string") {
     return jsonResponse({ ok: true, skipped: "Unsupported update type." });
@@ -95,9 +99,29 @@ async function handleTelegramUpdate(request, env) {
     });
     return jsonResponse({ ok: true });
   }
+  const innClean = text.replace(/\s+/g, "");
+  if (/^\d{10}$/.test(innClean) || /^\d{12}$/.test(innClean)) {
+    try {
+      const view = await buildMainCardView(env, innClean);
+      await sendMessage(env, {
+        chat_id: chatId,
+        text: view.text,
+        parse_mode: "HTML",
+        reply_markup: view.reply_markup
+      });
+    } catch (error) {
+      await sendMessage(env, {
+        chat_id: chatId,
+        text: `⚠️ <b>Ошибка получения данных</b>\n\n<code>${escapeHtml(String(error.message || error))}</code>`,
+        parse_mode: "HTML"
+      });
+    }
+    return jsonResponse({ ok: true });
+  }
   await sendMessage(env, {
     chat_id: chatId,
-    text: "Напишите /start для проверки webhook и приветствия."
+    text: "ℹ️ Отправьте ИНН компании (10 цифр) или ИП (12 цифр) для проверки.\n\nНапример: <code>7707083893</code>",
+    parse_mode: "HTML"
   });
   return jsonResponse({ ok: true });
 }
