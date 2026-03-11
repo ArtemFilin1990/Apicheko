@@ -79,6 +79,11 @@ var worker_default = {
 async function handleTelegramUpdate(request, env) {
   ensureTelegramSecret(env);
   const update = await parseJsonOrThrow(request);
+  const callbackQuery = update.callback_query;
+  if (callbackQuery) {
+    await handleCallbackQuery(callbackQuery, env);
+    return jsonResponse({ ok: true });
+  }
   const message = update.message;
   if (!message || typeof message.text !== "string") {
     return jsonResponse({ ok: true, skipped: "Unsupported update type." });
@@ -95,9 +100,27 @@ async function handleTelegramUpdate(request, env) {
     });
     return jsonResponse({ ok: true });
   }
+  if (/^\d{10}$/.test(text)) {
+    try {
+      const view = await buildMainCardView(env, text);
+      await sendMessage(env, {
+        chat_id: chatId,
+        text: view.text,
+        parse_mode: "HTML",
+        reply_markup: view.reply_markup
+      });
+    } catch (error) {
+      await sendMessage(env, {
+        chat_id: chatId,
+        text: `⚠️ <b>Ошибка загрузки карточки компании</b>\n\n<code>${escapeHtml(String(error.message || error))}</code>`,
+        parse_mode: "HTML"
+      });
+    }
+    return jsonResponse({ ok: true });
+  }
   await sendMessage(env, {
     chat_id: chatId,
-    text: "Напишите /start для проверки webhook и приветствия."
+    text: "Сейчас бот поддерживает только ИНН юрлица из 10 цифр. Отправьте 10 цифр или используйте /start."
   });
   return jsonResponse({ ok: true });
 }
@@ -196,14 +219,7 @@ async function collectCounts(env, inn, cardData) {
   const jobs = [
     ["arbitration", () => fetchSectionCount(env, "arbitration", inn)],
     ["bankruptcy", () => fetchSectionCount(env, "bankruptcy", inn)],
-    ["contracts", () => fetchSectionCount(env, "contracts", inn)],
-    ["inspections", () => fetchSectionCount(env, "inspections", inn)],
-    ["financial", () => fetchSectionCount(env, "financial", inn)],
-    ["enforcements", () => fetchSectionCount(env, "enforcements", inn)],
-    ["history", () => fetchSectionCount(env, "history", inn)],
-    ["fedresurs", () => fetchSectionCount(env, "fedresurs", inn)],
-    ["person", async () => Number(pick(cardData, ["КолСвязейФЛ"]) || 0)],
-    ["affiliates", async () => countAffiliates(cardData)]
+    ["financial", () => fetchSectionCount(env, "financial", inn)]
   ];
   const settled = await Promise.allSettled(jobs.map(([, fn]) => fn()));
   jobs.forEach(([name], idx) => {
@@ -239,26 +255,10 @@ function buildMainKeyboard(inn, counts) {
     inline_keyboard: [
       [
         kb(`⚖️ Суды и арбитраж (${c("arbitration")})`, `arbitration:${inn}`),
-        kb(`🏦 ЕФРСБ / Банкротство (${c("bankruptcy")})`, `bankruptcy:${inn}`)
+        kb(`📊 Финансовая отчётность (${c("financial")})`, `financial:${inn}`)
       ],
       [
-        kb(`💼 Госзакупки (${c("contracts")})`, `contracts:${inn}`),
-        kb(`🔍 Проверки и КНМ (${c("inspections")})`, `inspections:${inn}`)
-      ],
-      [
-        kb(`📊 Финансовая отчётность (${c("financial")})`, `financial:${inn}`),
-        kb(`🏛️ ФССП (${c("enforcements")})`, `enforcements:${inn}`)
-      ],
-      [
-        kb(`📜 История изменений (${c("history")})`, `history:${inn}`),
-        kb(`📋 Федресурс (${c("fedresurs")})`, `fedresurs:${inn}`)
-      ],
-      [
-        kb(`👥 Аффилированные лица (${c("affiliates")})`, `affiliates:${inn}:1`),
-        kb(`👤 Проверка физлица (${c("person")})`, `person:${inn}`)
-      ],
-      [
-        kb("🏦 Проверка банка", `bank:${inn}`),
+        kb(`🏦 ЕФРСБ / Банкротство (${c("bankruptcy")})`, `bankruptcy:${inn}`),
         kb("🔄 Обновить карточку", `main:${inn}`)
       ]
     ]
@@ -290,6 +290,13 @@ async function buildSectionView(env, section, inn) {
 __name(buildSectionView, "buildSectionView");
 function formatSectionByType(section, rows) {
   if (section === "arbitration") {
+    if (rows.length === 0) {
+      return [
+        "<b>⚖️ Арбитражные дела</b>",
+        "",
+        "✅ Арбитражные дела по компании не найдены."
+      ].join("\n");
+    }
     const totalAmount = sumByKeys(rows, ["СуммаТреб", "Сумма", "amount"]);
     return [
       "<b>⚖️ Арбитражные дела</b>",
@@ -337,6 +344,13 @@ function formatSectionByType(section, rows) {
     ].join("\n");
   }
   if (section === "financial") {
+    if (rows.length === 0) {
+      return [
+        "<b>📊 Финансовая отчётность</b>",
+        "",
+        "⚠️ Финансовая отчётность по компании не найдена."
+      ].join("\n");
+    }
     const last = rows[0] || {};
     const revenue = pick(last, ["2110", "Выручка", "revenue"]);
     const profit = pick(last, ["2400", "ЧистПриб", "netProfit"]);
@@ -473,15 +487,6 @@ async function buildAffiliatesView(env, inn, page) {
 }
 __name(buildAffiliatesView, "buildAffiliatesView");
 function sectionExtraButton(section, count, inn) {
-  if (section === "arbitration") {
-    return kb(`📋 Все ${count} дел`, `arbitration:${inn}`);
-  }
-  if (section === "financial") {
-    return kb("📈 Полная отчётность", `financial:${inn}`);
-  }
-  if (section === "enforcements") {
-    return kb("📋 Все производства", `enforcements:${inn}`);
-  }
   return null;
 }
 __name(sectionExtraButton, "sectionExtraButton");
