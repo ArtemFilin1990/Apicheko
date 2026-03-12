@@ -28,5 +28,8 @@ env/
 # Environment
 .env
 
+# Node
+node_modules/
+
 # Local AI/dev tools
 .codex/
