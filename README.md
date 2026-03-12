@@ -65,19 +65,26 @@ Python-бот в `bot/` сохранён как отдельный runtime, но
 
 - `NODE_ENV=production`
 - `CHECKO_API_URL=https://api.checko.ru/v2`
+- `WEBHOOK_PATH=/webhook`
 
 ## Настройка webhook
 
 Установка webhook:
 
 ```bash
-curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=<WORKER_URL>&secret_token=<WEBHOOK_SECRET>&drop_pending_updates=true"
+curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=<WORKER_URL>/webhook&secret_token=<WEBHOOK_SECRET>&drop_pending_updates=true"
 ```
 
 Проверка:
 
 ```bash
 curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo"
+```
+
+Ожидаемый `url` в ответе `getWebhookInfo`:
+
+```text
+https://<worker-domain>/webhook
 ```
 
 ## Деплой Worker
@@ -92,9 +99,27 @@ npx wrangler deploy
 
 После деплоя:
 
-- проверьте `GET /`;
-- установите webhook на URL Worker `/webhook` или на путь из `WEBHOOK_PATH`;
-- проверьте `/start`, поиск по тестовому ИНН и 3 detail-кнопки.
+- проверьте `GET /` как healthcheck;
+- установите webhook на `POST /webhook` или на путь из `WEBHOOK_PATH`;
+- проверьте `/start`;
+- отправьте тестовый 10-значный ИНН юрлица;
+- откройте 3 detail-кнопки: `Арбитраж`, `Финансы`, `ЕФРСБ / Банкротство`.
+
+## Основной сценарий v1
+
+1. Telegram отправляет `POST` update в Worker на `/webhook`.
+2. Worker принимает `update.message.text`.
+3. Если сообщение содержит `10` цифр, бот запрашивает `Checko /v2/company`.
+4. В основной карточке бот гарантированно показывает:
+   - название компании;
+   - ИНН;
+   - ОГРН;
+   - статус;
+   - дату регистрации;
+   - директора;
+   - регион.
+5. Если компания не найдена, бот отвечает: `❌ Компания не найдена`.
+6. Если Checko вернул HTTP != 200, non-JSON или `meta.status != ok/success`, бот отвечает: `⚠️ Ошибка сервиса Checko`.
 
 ## Локальные проверки
 
@@ -120,4 +145,4 @@ node --test tests/worker_smoke.test.mjs
 
 - Не храните секреты в исходниках.
 - Проверяйте `meta.status` и `meta.message` ответа Checko.
-- При HTTP != 200, non-JSON и `meta.status != ok/success` бот должен отдавать явную ошибку.
+- При HTTP != 200, non-JSON и `meta.status != ok/success` бот должен отдавать безопасное сообщение `⚠️ Ошибка сервиса Checko`.

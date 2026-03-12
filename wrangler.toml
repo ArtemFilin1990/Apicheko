@@ -6,4 +6,5 @@ workers_dev = true
 [vars]
 NODE_ENV = "production"
 CHECKO_API_URL = "https://api.checko.ru/v2"
+WEBHOOK_PATH = "/webhook"
 

@@ -30,8 +30,20 @@ function makeEnv(overrides = {}) {
     CHECKO_API_KEY: "checko-key",
     WEBHOOK_SECRET: "secret-token",
     CHECKO_API_URL: "https://api.checko.ru/v2",
+    WEBHOOK_PATH: "/webhook",
     ...overrides
   };
+}
+
+function makeWebhookRequest(payload, secret = "secret-token") {
+  return new Request("https://example.com/webhook", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "X-Telegram-Bot-Api-Secret-Token": secret
+    },
+    body: JSON.stringify(payload)
+  });
 }
 
 let originalFetch;
@@ -62,16 +74,7 @@ test("GET / returns healthcheck with webhookPath", async () => {
 });
 
 test("POST /webhook with invalid secret returns 401", async () => {
-  const request = new Request("https://example.com/webhook", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "X-Telegram-Bot-Api-Secret-Token": "wrong-secret"
-    },
-    body: JSON.stringify({})
-  });
-
-  const response = await worker.fetch(request, makeEnv());
+  const response = await worker.fetch(makeWebhookRequest({}, "wrong-secret"), makeEnv());
   assert.equal(response.status, 401);
   const payload = await response.json();
   assert.equal(payload.ok, false);
@@ -85,18 +88,11 @@ test("POST /webhook with /start sends greeting", async () => {
     return jsonResponse({ ok: true });
   };
 
-  const request = new Request("https://example.com/webhook", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "X-Telegram-Bot-Api-Secret-Token": "secret-token"
-    },
-    body: JSON.stringify({
-      message: {
-        text: "/start",
-        chat: { id: 123 }
-      }
-    })
+  const request = makeWebhookRequest({
+    message: {
+      text: "/start",
+      chat: { id: 123 }
+    }
   });
 
   const response = await worker.fetch(request, makeEnv());
@@ -124,11 +120,10 @@ test("POST /webhook with 10-digit INN sends non-empty company card", async () =>
             ИНН: "7707083893",
             ОГРН: "1027700132195",
             НаимПолн: "ПАО Сбербанк",
+            Статус: { Наим: "Действующее" },
             ДатаРег: "1991-01-01",
-            ЮрАдрес: { АдресРФ: "Москва" },
+            ЮрАдрес: { АдресРФ: "г. Москва, ул. Тверская, д. 1", Регион: { Наим: "г. Москва" } },
             Руковод: [{ ФИО: "Иванов И.И." }],
-            УстКап: { Сумма: "100000" },
-            ОКВЭД: { Код: "64.19", Наим: "Банковская деятельность" },
             Учред: [{ Наим: "Учредитель 1" }]
           }
         });
@@ -169,18 +164,11 @@ test("POST /webhook with 10-digit INN sends non-empty company card", async () =>
     throw new Error(`Unexpected URL ${requestUrl}`);
   };
 
-  const request = new Request("https://example.com/webhook", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "X-Telegram-Bot-Api-Secret-Token": "secret-token"
-    },
-    body: JSON.stringify({
-      message: {
-        text: "7707083893",
-        chat: { id: 321 }
-      }
-    })
+  const request = makeWebhookRequest({
+    message: {
+      text: "7707083893",
+      chat: { id: 321 }
+    }
   });
 
   const response = await worker.fetch(request, makeEnv());
@@ -191,13 +179,163 @@ test("POST /webhook with 10-digit INN sends non-empty company card", async () =>
 
   const body = JSON.parse(telegramCall.options.body);
   assert.match(body.text, /ПАО Сбербанк/);
-  assert.match(body.text, /ИНН 7707083893/);
+  assert.match(body.text, /ИНН: <b>7707083893<\/b>/);
+  assert.match(body.text, /ОГРН: <b>1027700132195<\/b>/);
+  assert.match(body.text, /Статус: <b>Действующее<\/b>/);
+  assert.match(body.text, /Регистрация: <b>1991-01-01<\/b>/);
+  assert.match(body.text, /Директор: <b>Иванов И\.И\.<\/b>/);
+  assert.match(body.text, /Регион: <b>г\. Москва<\/b>/);
   assert.equal(body.parse_mode, "HTML");
   assert.equal(body.reply_markup.inline_keyboard.length, 2);
   assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "arbitration:7707083893");
   assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "financial:7707083893");
   assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "bankruptcy:7707083893");
   assert.equal(body.reply_markup.inline_keyboard[1][1].callback_data, "main:7707083893");
+});
+
+test("POST /webhook with empty company payload sends not-found message", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = new URL(String(url));
+    calls.push({ url: requestUrl.toString(), options });
+
+    if (requestUrl.hostname === "api.checko.ru") {
+      return jsonResponse({
+        meta: { status: "ok" },
+        data: {}
+      });
+    }
+
+    if (requestUrl.hostname === "api.telegram.org") {
+      return jsonResponse({ ok: true });
+    }
+
+    throw new Error(`Unexpected URL ${requestUrl}`);
+  };
+
+  const response = await worker.fetch(
+    makeWebhookRequest({
+      message: {
+        text: "7707083893",
+        chat: { id: 321 }
+      }
+    }),
+    makeEnv()
+  );
+
+  assert.equal(response.status, 200);
+  const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
+  assert.ok(telegramCall, "sendMessage must be called");
+  const body = JSON.parse(telegramCall.options.body);
+  assert.equal(body.text, "❌ Компания не найдена");
+});
+
+test("POST /webhook with Checko HTTP error sends safe service message", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = new URL(String(url));
+    calls.push({ url: requestUrl.toString(), options });
+
+    if (requestUrl.hostname === "api.checko.ru") {
+      return new Response("upstream exploded", { status: 502 });
+    }
+
+    if (requestUrl.hostname === "api.telegram.org") {
+      return jsonResponse({ ok: true });
+    }
+
+    throw new Error(`Unexpected URL ${requestUrl}`);
+  };
+
+  const response = await worker.fetch(
+    makeWebhookRequest({
+      message: {
+        text: "7707083893",
+        chat: { id: 321 }
+      }
+    }),
+    makeEnv()
+  );
+
+  assert.equal(response.status, 200);
+  const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
+  assert.ok(telegramCall, "sendMessage must be called");
+  const body = JSON.parse(telegramCall.options.body);
+  assert.equal(body.text, "⚠️ Ошибка сервиса Checko");
+});
+
+test("POST /webhook with Checko non-JSON response sends safe service message", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = new URL(String(url));
+    calls.push({ url: requestUrl.toString(), options });
+
+    if (requestUrl.hostname === "api.checko.ru") {
+      return new Response("<html>bad gateway</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" }
+      });
+    }
+
+    if (requestUrl.hostname === "api.telegram.org") {
+      return jsonResponse({ ok: true });
+    }
+
+    throw new Error(`Unexpected URL ${requestUrl}`);
+  };
+
+  const response = await worker.fetch(
+    makeWebhookRequest({
+      message: {
+        text: "7707083893",
+        chat: { id: 321 }
+      }
+    }),
+    makeEnv()
+  );
+
+  assert.equal(response.status, 200);
+  const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
+  assert.ok(telegramCall, "sendMessage must be called");
+  const body = JSON.parse(telegramCall.options.body);
+  assert.equal(body.text, "⚠️ Ошибка сервиса Checko");
+});
+
+test("POST /webhook with Checko meta error sends safe service message", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = new URL(String(url));
+    calls.push({ url: requestUrl.toString(), options });
+
+    if (requestUrl.hostname === "api.checko.ru") {
+      return jsonResponse({
+        meta: { status: "error", message: "rate limit" },
+        data: null
+      });
+    }
+
+    if (requestUrl.hostname === "api.telegram.org") {
+      return jsonResponse({ ok: true });
+    }
+
+    throw new Error(`Unexpected URL ${requestUrl}`);
+  };
+
+  const response = await worker.fetch(
+    makeWebhookRequest({
+      message: {
+        text: "7707083893",
+        chat: { id: 321 }
+      }
+    }),
+    makeEnv()
+  );
+
+  assert.equal(response.status, 200);
+  const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
+  assert.ok(telegramCall, "sendMessage must be called");
+  const body = JSON.parse(telegramCall.options.body);
+  assert.equal(body.text, "⚠️ Ошибка сервиса Checko");
 });
 
 test("callback_query for arbitration answers callback and edits message", async () => {
@@ -222,22 +360,15 @@ test("callback_query for arbitration answers callback and edits message", async 
     throw new Error(`Unexpected URL ${requestUrl}`);
   };
 
-  const request = new Request("https://example.com/webhook", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "X-Telegram-Bot-Api-Secret-Token": "secret-token"
-    },
-    body: JSON.stringify({
-      callback_query: {
-        id: "cb-1",
-        data: "arbitration:7707083893",
-        message: {
-          message_id: 77,
-          chat: { id: 99 }
-        }
+  const request = makeWebhookRequest({
+    callback_query: {
+      id: "cb-1",
+      data: "arbitration:7707083893",
+      message: {
+        message_id: 77,
+        chat: { id: 99 }
       }
-    })
+    }
   });
 
   const response = await worker.fetch(request, makeEnv());

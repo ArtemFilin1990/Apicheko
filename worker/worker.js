@@ -4,6 +4,8 @@ var __name = (target, value) => __defProp(target, "name", { value, configurable:
 // worker.js
 var DEFAULT_CHECKO_API_URL = "https://api.checko.ru/v2";
 var DEFAULT_WEBHOOK_PATH = "/webhook";
+var COMPANY_NOT_FOUND_MESSAGE = "❌ Компания не найдена";
+var CHECKO_SERVICE_ERROR_MESSAGE = "⚠️ Ошибка сервиса Checko";
 var PAGE_SIZE = 10;
 var SECTION_CONFIG = {
   arbitration: {
@@ -112,8 +114,7 @@ async function handleTelegramUpdate(request, env) {
     } catch (error) {
       await sendMessage(env, {
         chat_id: chatId,
-        text: `⚠️ <b>Ошибка загрузки карточки компании</b>\n\n<code>${escapeHtml(String(error.message || error))}</code>`,
-        parse_mode: "HTML"
+        text: isCheckoNotFoundError(error) ? COMPANY_NOT_FOUND_MESSAGE : CHECKO_SERVICE_ERROR_MESSAGE
       });
     }
     return jsonResponse({ ok: true });
@@ -170,42 +171,40 @@ async function handleCallbackQuery(callbackQuery, env) {
       env,
       chatId,
       messageId,
-      `⚠️ <b>Ошибка загрузки раздела</b>\n\n<code>${escapeHtml(String(error.message || error))}</code>`,
+      isCheckoNotFoundError(error) ? COMPANY_NOT_FOUND_MESSAGE : CHECKO_SERVICE_ERROR_MESSAGE,
       backKeyboard(inn)
     );
   }
 }
 __name(handleCallbackQuery, "handleCallbackQuery");
 async function buildMainCardView(env, inn) {
-  const endpoint = inn.length === 10 ? "company" : "entrepreneur";
-  const payload = await checkoRequest(env, endpoint, { inn });
+  const payload = await checkoRequest(env, "company", { inn });
   const data = takeEntity(payload);
-  if (!data || typeof data !== "object") {
-    throw new Error("Карточка компании пуста: data отсутствует.");
+  if (!data || typeof data !== "object" || !hasCompanyIdentity(data)) {
+    throw createCheckoNotFoundError();
   }
   const counts = await collectCounts(env, inn, data);
   const title = pick(data, ["НаимПолн", "НаимСокр", "ФИО"]) || "Без названия";
+  const innValue = pick(data, ["ИНН"]) || inn;
   const ogrn = pick(data, ["ОГРН", "ОГРНИП"]) || "—";
   const address = pickNested(data, [["ЮрАдрес", "АдресРФ"], ["АдрМЖ", "АдресРФ"], ["Адрес"]]) || "—";
+  const region = pickNested(
+    data,
+    [["ЮрАдрес", "Регион", "Наим"], ["ЮрАдрес", "Регион"], ["Регион", "Наим"], ["Регион"], ["АдрМЖ", "Регион", "Наим"], ["АдрМЖ", "Регион"]]
+  ) || deriveRegionFromAddress(address) || "—";
+  const status = pickNested(data, [["Статус", "Наим"], ["Статус", "Текст"], ["Статус"]]) || "—";
   const director = pickNested(data, [["Руковод", 0, "ФИО"]]) || "—";
-  const capital = pickNested(data, [["УстКап", "Сумма"]]) || "—";
-  const okvedCode = pickNested(data, [["ОКВЭД", "Код"]]) || "—";
-  const okvedName = pickNested(data, [["ОКВЭД", "Наим"]]) || "—";
-  const staff = pick(data, ["СрСпЧисл", "ЧислСотр"]) || "—";
-  const founders = Array.isArray(data.Учред) ? data.Учред : [];
-  const founderNote = founders.length ? `${founders.length}` : "0";
   const risk = assessOverallRisk(counts);
   const text = [
-    `🏦 <b>${escapeHtml(title)}</b>`,
-    `<code>ИНН ${escapeHtml(String(data.ИНН || inn))} | ОГРН ${escapeHtml(String(ogrn))}</code>`,
+    `🏢 <b>Компания: ${escapeHtml(title)}</b>`,
     "",
-    `📍 ${escapeHtml(String(address))}`,
-    `📅 Дата регистрации: <b>${escapeHtml(String(data.ДатаРег || "—"))}</b>`,
-    `💰 Уставный капитал: <b>${escapeHtml(String(capital))} ₽</b>`,
-    `👤 Руководитель: ${escapeHtml(String(director))}`,
-    `👥 Учредители: <b>${escapeHtml(founderNote)}</b>`,
-    `📊 Основной ОКВЭД: <b>${escapeHtml(okvedCode)} (${escapeHtml(okvedName)})</b>`,
-    `👤 Численность: <b>${escapeHtml(String(staff))} человек</b>`,
+    `ИНН: <b>${escapeHtml(String(innValue))}</b>`,
+    `ОГРН: <b>${escapeHtml(String(ogrn))}</b>`,
+    "",
+    `Статус: <b>${escapeHtml(String(status))}</b>`,
+    `Регистрация: <b>${escapeHtml(String(data.ДатаРег || "—"))}</b>`,
+    `Директор: <b>${escapeHtml(String(director))}</b>`,
+    `Регион: <b>${escapeHtml(String(region))}</b>`,
     "",
     `${risk.icon} Общий риск компании: <b>${risk.level}</b>`,
     `${risk.note}`,
@@ -576,6 +575,9 @@ function verifyTelegramWebhookSecret(request, env) {
 }
 __name(verifyTelegramWebhookSecret, "verifyTelegramWebhookSecret");
 async function checkoRequest(env, endpoint, params = {}) {
+  if (!env.CHECKO_API_KEY) {
+    throw createCheckoServiceError("Missing required secret CHECKO_API_KEY.");
+  }
   const baseUrl = (env.CHECKO_API_URL || DEFAULT_CHECKO_API_URL).replace(/\/$/, "");
   const url = new URL(`${baseUrl}/${endpoint}`);
   url.searchParams.set("key", env.CHECKO_API_KEY);
@@ -584,21 +586,26 @@ async function checkoRequest(env, endpoint, params = {}) {
       url.searchParams.set(key, String(value));
     }
   });
-  const response = await fetchWithTimeout(url.toString(), { method: "GET" }, 15e3);
+  let response;
+  try {
+    response = await fetchWithTimeout(url.toString(), { method: "GET" }, 15e3);
+  } catch (error) {
+    throw createCheckoServiceError(`Checko request failed: ${String(error.message || error)}`);
+  }
   const raw = await response.text();
   if (response.status !== 200) {
-    throw new Error(`Checko HTTP ${response.status}: ${raw.slice(0, 300)}`);
+    throw createCheckoServiceError(`Checko HTTP ${response.status}: ${raw.slice(0, 300)}`);
   }
   let payload;
   try {
     payload = JSON.parse(raw);
   } catch {
-    throw new Error(`Checko non-JSON response: ${raw.slice(0, 300)}`);
+    throw createCheckoServiceError(`Checko non-JSON response: ${raw.slice(0, 300)}`);
   }
   const metaStatus = payload?.meta?.status;
   const metaMessage = payload?.meta?.message;
   if (metaStatus && !["ok", "success"].includes(String(metaStatus).toLowerCase())) {
-    throw new Error(`Checko meta ${String(metaStatus)}: ${String(metaMessage || "unknown")}`);
+    throw createCheckoServiceError(`Checko meta ${String(metaStatus)}: ${String(metaMessage || "unknown")}`);
   }
   return payload;
 }
@@ -651,6 +658,18 @@ function pickNested(obj, paths) {
   return null;
 }
 __name(pickNested, "pickNested");
+function hasCompanyIdentity(data) {
+  return Boolean(pick(data, ["НаимПолн", "НаимСокр", "ИНН", "ОГРН"]));
+}
+__name(hasCompanyIdentity, "hasCompanyIdentity");
+function deriveRegionFromAddress(address) {
+  if (!address || address === "—") {
+    return null;
+  }
+  const parts = String(address).split(",").map((part) => part.trim()).filter(Boolean);
+  return parts[0] || null;
+}
+__name(deriveRegionFromAddress, "deriveRegionFromAddress");
 function formatDate(date) {
   const dd = String(date.getDate()).padStart(2, "0");
   const mm = String(date.getMonth() + 1).padStart(2, "0");
@@ -662,6 +681,22 @@ function escapeHtml(value) {
   return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;");
 }
 __name(escapeHtml, "escapeHtml");
+function createCheckoNotFoundError(message = COMPANY_NOT_FOUND_MESSAGE) {
+  const error = new Error(message);
+  error.name = "CheckoNotFoundError";
+  return error;
+}
+__name(createCheckoNotFoundError, "createCheckoNotFoundError");
+function createCheckoServiceError(message = CHECKO_SERVICE_ERROR_MESSAGE) {
+  const error = new Error(message);
+  error.name = "CheckoServiceError";
+  return error;
+}
+__name(createCheckoServiceError, "createCheckoServiceError");
+function isCheckoNotFoundError(error) {
+  return error instanceof Error && error.name === "CheckoNotFoundError";
+}
+__name(isCheckoNotFoundError, "isCheckoNotFoundError");
 async function telegramRequest(env, method, body) {
   const endpoint = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`;
   const response = await fetchWithTimeout(
