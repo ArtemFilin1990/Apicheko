@@ -6,6 +6,7 @@ var DEFAULT_CHECKO_API_URL = "https://api.checko.ru/v2";
 var DEFAULT_WEBHOOK_PATH = "/webhook";
 var COMPANY_NOT_FOUND_MESSAGE = "❌ Компания не найдена";
 var CHECKO_SERVICE_ERROR_MESSAGE = "⚠️ Ошибка сервиса Checko";
+var START_MESSAGE_TEXT = "👋 <b>Здравствуйте! Это сервис оперативной проверки контрагентов и банков.</b>\n\nВыберите тип поиска ниже или отправьте реквизит сообщением.\n\nПоддерживаются:\n• <b>ИНН</b>\n• <b>ОГРН / ОГРНИП</b>\n• <b>БИК</b>\n\nПосле поиска откроется карточка с основными сведениями и доступом к расширенной проверке:\nфинансы, арбитраж, госзакупки, проверки, ФССП, банкротство и история изменений.";
 var PAGE_SIZE = 10;
 var SECTION_CONFIG = {
   arbitration: {
@@ -96,9 +97,12 @@ async function handleTelegramUpdate(request, env) {
     return jsonResponse({ ok: true, skipped: "No chat id in message." });
   }
   if (text === "/start" || text === "/help") {
+    const view = buildStartView();
     await sendMessage(env, {
       chat_id: chatId,
-      text: "👋 Бот работает. Отправьте ИНН, и я проверю компанию."
+      text: view.text,
+      parse_mode: "HTML",
+      reply_markup: view.reply_markup
     });
     return jsonResponse({ ok: true });
   }
@@ -108,8 +112,12 @@ async function handleTelegramUpdate(request, env) {
       let view;
       if (innClean.length === 9) {
         view = await buildBicView(env, innClean);
+      } else if (innClean.length === 12) {
+        view = buildPersonTypeChoiceView(innClean);
+      } else if (innClean.length === 15) {
+        view = await buildMainCardView(env, innClean, "entrepreneur");
       } else {
-        view = await buildMainCardView(env, innClean);
+        view = await buildMainCardView(env, innClean, "company");
       }
       await sendMessage(env, {
         chat_id: chatId,
@@ -127,7 +135,7 @@ async function handleTelegramUpdate(request, env) {
   }
   await sendMessage(env, {
     chat_id: chatId,
-    text: "ℹ️ Отправьте ИНН компании (10 цифр), ИП (12 цифр), ОГРН (13 цифр), ОГРНИП (15 цифр) или БИК банка (9 цифр) для проверки.\n\nНапример: <code>7707083893</code>",
+    text: "ℹ️ Отправьте ИНН компании (10 цифр), ИП/физлица (12 цифр), ОГРН (13 цифр), ОГРНИП (15 цифр) или БИК банка (9 цифр).",
     parse_mode: "HTML"
   });
   return jsonResponse({ ok: true });
@@ -143,11 +151,52 @@ async function handleCallbackQuery(callbackQuery, env) {
   if (!chatId || !messageId) {
     return;
   }
-  const [action, inn, rawPage] = data.split(":");
-  if (!inn || !(/^\d{10}$/.test(inn) || /^\d{12}$/.test(inn) || /^\d{13}$/.test(inn) || /^\d{15}$/.test(inn))) {
-    return;
-  }
   try {
+    if (data === "back:start" || data === "reset:start") {
+      const view = buildStartView();
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (data === "start:company") {
+      const view = buildCompanyInputView();
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (data === "start:person") {
+      const view = buildPersonInputView();
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (data === "start:bank") {
+      const view = buildBankInputView();
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (data === "start:info") {
+      const view = buildStartInfoView();
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (data.startsWith("choose:person:")) {
+      const inn2 = data.split(":")[2] || "";
+      if (/^\d{12}$/.test(inn2)) {
+        const view = await buildPersonView(env, inn2);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      }
+      return;
+    }
+    if (data.startsWith("choose:ip:")) {
+      const inn2 = data.split(":")[2] || "";
+      if (/^\d{12}$/.test(inn2)) {
+        const view = await buildMainCardView(env, inn2, "entrepreneur");
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      }
+      return;
+    }
+    const [action, inn, rawPage] = data.split(":");
+    if (!inn || !(/^\d{10}$/.test(inn) || /^\d{12}$/.test(inn) || /^\d{13}$/.test(inn) || /^\d{15}$/.test(inn))) {
+      return;
+    }
     if (action === "main") {
       const view = await buildMainCardView(env, inn);
       await editMessage(env, chatId, messageId, view.text, view.reply_markup);
@@ -179,14 +228,69 @@ async function handleCallbackQuery(callbackQuery, env) {
       chatId,
       messageId,
       isCheckoNotFoundError(error) ? COMPANY_NOT_FOUND_MESSAGE : CHECKO_SERVICE_ERROR_MESSAGE,
-      backKeyboard(inn)
+      { inline_keyboard: [[kb("🔄 Новый поиск", "reset:start")]] }
     );
   }
 }
 __name(handleCallbackQuery, "handleCallbackQuery");
-async function buildMainCardView(env, inn) {
+function buildStartView() {
+  return {
+    text: START_MESSAGE_TEXT,
+    reply_markup: {
+      inline_keyboard: [
+        [kb("🏢 Компания — ИНН / ОГРН", "start:company")],
+        [kb("👤 ИП / физлицо — ИНН / ОГРНИП", "start:person")],
+        [kb("🏦 Банк — БИК", "start:bank")],
+        [kb("ℹ️ Что входит в проверку", "start:info")]
+      ]
+    }
+  };
+}
+__name(buildStartView, "buildStartView");
+function buildCompanyInputView() {
+  return {
+    text: "<b>Поиск компании</b>\n\nОтправьте:\n• <b>ИНН</b> компании\n• или <b>ОГРН</b>",
+    reply_markup: { inline_keyboard: [[kb("⬅️ Назад", "back:start")]] }
+  };
+}
+__name(buildCompanyInputView, "buildCompanyInputView");
+function buildPersonInputView() {
+  return {
+    text: "<b>Поиск ИП или физлица</b>\n\nОтправьте:\n• <b>ИНН</b>\n• или <b>ОГРНИП</b>",
+    reply_markup: { inline_keyboard: [[kb("⬅️ Назад", "back:start")]] }
+  };
+}
+__name(buildPersonInputView, "buildPersonInputView");
+function buildBankInputView() {
+  return {
+    text: "<b>Поиск банка</b>\n\nОтправьте <b>БИК</b> банка.",
+    reply_markup: { inline_keyboard: [[kb("⬅️ Назад", "back:start")]] }
+  };
+}
+__name(buildBankInputView, "buildBankInputView");
+function buildStartInfoView() {
+  return {
+    text: "<b>Что входит в проверку</b>\n\nПосле поиска доступны:\n• основные реквизиты\n• статус и регистрационные данные\n• сведения о руководителе\n• финансовая отчётность\n• арбитражные дела\n• госзакупки\n• проверки контролирующих органов\n• исполнительные производства ФССП\n• сообщения о банкротстве\n• история изменений",
+    reply_markup: { inline_keyboard: [[kb("⬅️ Назад", "back:start")]] }
+  };
+}
+__name(buildStartInfoView, "buildStartInfoView");
+function buildPersonTypeChoiceView(inn) {
+  return {
+    text: "<b>Найден ИНН из 12 цифр</b>\n\nВыберите тип поиска:",
+    reply_markup: {
+      inline_keyboard: [
+        [kb("👤 Физлицо", `choose:person:${inn}`)],
+        [kb("🧑 ИП", `choose:ip:${inn}`)],
+        [kb("⬅️ Назад", "back:start")]
+      ]
+    }
+  };
+}
+__name(buildPersonTypeChoiceView, "buildPersonTypeChoiceView");
+async function buildMainCardView(env, inn, entityType) {
   // 10-digit INN or 13-digit OGRN → company; 12-digit INN or 15-digit OGRNIP → entrepreneur
-  const endpoint = (inn.length === 10 || inn.length === 13) ? "company" : "entrepreneur";
+  const endpoint = entityType || (inn.length === 10 || inn.length === 13 ? "company" : "entrepreneur");
   const payload = await checkoRequest(env, endpoint, identifierParams(inn));
   const data = takeEntity(payload);
   if (!data || typeof data !== "object" || !hasCompanyIdentity(data)) {
@@ -219,7 +323,7 @@ async function buildMainCardView(env, inn) {
     `${risk.note}`,
     `🔄 Обновлено: ${formatDate(/* @__PURE__ */ new Date())}`
   ].join("\n");
-  return { text, reply_markup: buildMainKeyboard(inn, counts) };
+  return { text, reply_markup: buildMainKeyboard(inn, counts, endpoint) };
 }
 __name(buildMainCardView, "buildMainCardView");
 async function collectCounts(env, inn, cardData) {
@@ -257,17 +361,33 @@ async function fetchSectionCount(env, section, inn) {
   return takeItems(payload, cfg.listKeys).length;
 }
 __name(fetchSectionCount, "fetchSectionCount");
-function buildMainKeyboard(inn, counts) {
+function buildMainKeyboard(inn, counts, entityType) {
   const c = /* @__PURE__ */ __name((key) => counts[key] ?? "?", "c");
+  if (entityType === "entrepreneur") {
+    return {
+      inline_keyboard: [
+        [kb(`⚖️ Арбитраж (${c("arbitration")})`, `arbitration:${inn}`), kb("🏛 Госзакупки", `contracts:${inn}`)],
+        [kb("📜 История", `history:${inn}`), kb("🔄 Новый поиск", "reset:start")]
+      ]
+    };
+  }
   return {
     inline_keyboard: [
       [
-        kb(`⚖️ Суды и арбитраж (${c("arbitration")})`, `arbitration:${inn}`),
-        kb(`📊 Финансовая отчётность (${c("financial")})`, `financial:${inn}`)
+        kb(`📊 Финансы (${c("financial")})`, `financial:${inn}`),
+        kb(`⚖️ Арбитраж (${c("arbitration")})`, `arbitration:${inn}`)
       ],
       [
-        kb(`🏦 ЕФРСБ / Банкротство (${c("bankruptcy")})`, `bankruptcy:${inn}`),
-        kb("🔄 Обновить карточку", `main:${inn}`)
+        kb("🏛 Госзакупки", `contracts:${inn}`),
+        kb("🚨 Проверки", `inspections:${inn}`)
+      ],
+      [
+        kb("🛑 ФССП", `enforcements:${inn}`),
+        kb(`📉 Банкротство (${c("bankruptcy")})`, `bankruptcy:${inn}`)
+      ],
+      [
+        kb("📜 История", `history:${inn}`),
+        kb("🔄 Новый поиск", "reset:start")
       ]
     ]
   };
@@ -419,7 +539,7 @@ async function buildPersonView(env, inn) {
     `ИНН: <b>${escapeHtml(String(pick(data || {}, ["ИНН"]) || inn))}</b>`,
     `Связанные компании: <b>${escapeHtml(String(pick(data || {}, ["Связи", "КолСвязей"]) || "—"))}</b>`
   ].join("\n");
-  return { text, reply_markup: backKeyboard(inn) };
+  return { text, reply_markup: { inline_keyboard: [[kb("🔄 Новый поиск", "reset:start")]] } };
 }
 __name(buildPersonView, "buildPersonView");
 async function buildBankView(env, inn) {
@@ -458,7 +578,7 @@ async function buildBicView(env, bic) {
     `Тип: <b>${escapeHtml(String(pick(bank || {}, ["Тип"]) || "—"))}</b>`,
     `Корр. счёт: <b>${escapeHtml(String(corr))}</b>`
   ].join("\n");
-  return { text, reply_markup: { inline_keyboard: [] } };
+  return { text, reply_markup: { inline_keyboard: [[kb("🔄 Новый поиск", "reset:start")]] } };
 }
 __name(buildBicView, "buildBicView");
 async function buildAffiliatesView(env, inn, page) {
