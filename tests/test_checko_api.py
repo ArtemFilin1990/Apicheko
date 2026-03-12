@@ -140,5 +140,93 @@ class BankFormatterTests(unittest.TestCase):
         self.assertIn("30101810400000000225", text)
 
 
+class CompanyFormatterTests(unittest.TestCase):
+    def test_format_company_handles_array_phone_and_email(self) -> None:
+        from bot.formatters import format_company
+
+        payload = {
+            "data": {
+                "НаимПолн": "ООО Тест",
+                "ИНН": "7707083893",
+                "ОГРН": "1027700132195",
+                "Контакты": {
+                    "Тел": ["+79001234567", "+79007654321"],
+                    "Емэйл": ["info@test.ru", "support@test.ru"],
+                },
+            }
+        }
+
+        text = format_company(payload)
+
+        self.assertIn("+79001234567", text)
+        self.assertIn("+79007654321", text)
+        self.assertIn("info@test.ru", text)
+        self.assertIn("support@test.ru", text)
+        # Must not contain Python list representation
+        self.assertNotIn("[", text)
+        self.assertNotIn("]", text)
+
+    def test_format_company_handles_scalar_phone(self) -> None:
+        from bot.formatters import format_company
+
+        payload = {
+            "data": {
+                "НаимПолн": "ООО Тест",
+                "ИНН": "7707083893",
+                "Контакты": {
+                    "Тел": "+79001234567",
+                },
+            }
+        }
+
+        text = format_company(payload)
+
+        self.assertIn("+79001234567", text)
+
+
+class IdentifierParamsTests(unittest.TestCase):
+    def test_10_digit_returns_inn(self) -> None:
+        from bot.cards import _identifier_params
+
+        self.assertEqual(_identifier_params("7707083893"), {"inn": "7707083893"})
+
+    def test_13_digit_returns_ogrn(self) -> None:
+        from bot.cards import _identifier_params
+
+        self.assertEqual(_identifier_params("1027700132195"), {"ogrn": "1027700132195"})
+
+    def test_15_digit_returns_ogrnip(self) -> None:
+        from bot.cards import _identifier_params
+
+        self.assertEqual(_identifier_params("304500116000157"), {"ogrnip": "304500116000157"})
+
+    def test_12_digit_returns_inn(self) -> None:
+        from bot.cards import _identifier_params
+
+        self.assertEqual(_identifier_params("123456789012"), {"inn": "123456789012"})
+
+
+class SearchIdentifierRegexTests(unittest.TestCase):
+    def test_accepts_9_digit_bic(self) -> None:
+        from bot.handlers.search import IDENTIFIER_RE
+
+        self.assertIsNotNone(IDENTIFIER_RE.match("044525225"))
+
+    def test_accepts_10_digit_inn(self) -> None:
+        from bot.handlers.search import IDENTIFIER_RE
+
+        self.assertIsNotNone(IDENTIFIER_RE.match("7707083893"))
+
+    def test_rejects_8_digits(self) -> None:
+        from bot.handlers.search import IDENTIFIER_RE
+
+        self.assertIsNone(IDENTIFIER_RE.match("12345678"))
+
+    def test_rejects_11_digits(self) -> None:
+        from bot.handlers.search import IDENTIFIER_RE
+
+        self.assertIsNone(IDENTIFIER_RE.match("12345678901"))
+
+
 if __name__ == "__main__":
     unittest.main()

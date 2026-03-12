@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
-from bot.formatters import format_company, format_entrepreneur, format_person, format_search_results
+from bot.formatters import format_bank, format_company, format_entrepreneur, format_person, format_search_results
 from bot.keyboards import (
     cancel_keyboard,
     company_detail_keyboard,
@@ -19,7 +19,7 @@ from utils.checko_payload import extract_search_results
 
 router = Router(name="search")
 
-IDENTIFIER_RE = re.compile(r"^\d{10}$|^\d{12}$|^\d{13}$|^\d{15}$")
+IDENTIFIER_RE = re.compile(r"^\d{9}$|^\d{10}$|^\d{12}$|^\d{13}$|^\d{15}$")
 
 
 class SearchState(StatesGroup):
@@ -37,7 +37,7 @@ async def handle_inn_input(
     if not IDENTIFIER_RE.match(identifier):
         await message.answer(
             "❌ Неверный формат идентификатора.\n"
-            "Поддерживаются: ИНН 10/12, ОГРН 13, ОГРНИП 15 цифр.\n"
+            "Поддерживаются: ИНН 10/12, ОГРН 13, ОГРНИП 15, БИК 9 цифр.\n"
             "Попробуйте ещё раз или нажмите «Отмена».",
             reply_markup=cancel_keyboard(),
         )
@@ -51,7 +51,11 @@ async def handle_inn_input(
     await message.answer("🔄 Ищу информацию…")
 
     try:
-        if len(identifier) == 10:
+        if len(identifier) == 9:
+            data = await checko_api.get_bank(bic=identifier)
+            text = format_bank(data)
+            await message.answer(text, reply_markup=cancel_keyboard())
+        elif len(identifier) == 10:
             data = await checko_api.get_company(inn=identifier)
             text = format_company(data)
             await message.answer(text, reply_markup=company_detail_keyboard(identifier))
