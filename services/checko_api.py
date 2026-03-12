@@ -156,12 +156,14 @@ class CheckoAPI:
         return await self.call_method("arbitration", **params)
 
     async def get_contracts(self, **params: Any) -> dict:
+        responses = await asyncio.gather(
+            self._get("contracts", law="44", **params),
+            self._get("contracts", law="94", **params),
+            self._get("contracts", law="223", **params),
+        )
         all_items: list[dict[str, Any]] = []
-
-        for law in ("44", "94", "223"):
-            response = await self._get("contracts", law=law, **params)
+        for response in responses:
             all_items.extend(extract_items(response, "Записи", "Контракты", "items"))
-
         return {"data": {"items": all_items}}
 
     async def get_inspections(self, **params: Any) -> dict:

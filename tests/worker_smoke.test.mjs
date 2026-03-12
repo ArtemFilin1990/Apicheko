@@ -62,14 +62,14 @@ test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test("GET / returns healthcheck with webhookPath", async () => {
+test("GET / returns healthcheck with webhookPaths", async () => {
   const response = await worker.fetch(new Request("https://example.com/"), makeEnv());
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.deepEqual(payload, {
     ok: true,
     service: "telegram-checko-bot",
-    webhookPath: "/webhook"
+    webhookPaths: ["/webhook", "/"]
   });
 });
 

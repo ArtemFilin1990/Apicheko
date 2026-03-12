@@ -56,8 +56,10 @@ def format_company(data: dict) -> str:
     tax_debt = _nested(d, "Налоги", "СумНедоим")
 
     contacts = d.get("Контакты") or {}
-    phone = contacts.get("Тел")
-    email = contacts.get("Емэйл")
+    phone_raw = contacts.get("Тел")
+    email_raw = contacts.get("Емэйл")
+    phone = ", ".join(phone_raw) if isinstance(phone_raw, list) else phone_raw
+    email = ", ".join(email_raw) if isinstance(email_raw, list) else email_raw
     website = contacts.get("ВебСайт")
 
     lines = [
