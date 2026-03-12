@@ -100,9 +100,14 @@ async function handleTelegramUpdate(request, env) {
     return jsonResponse({ ok: true });
   }
   const innClean = text.replace(/\s+/g, "");
-  if (/^\d{10}$/.test(innClean) || /^\d{12}$/.test(innClean) || /^\d{13}$/.test(innClean) || /^\d{15}$/.test(innClean)) {
+  if (/^\d{10}$/.test(innClean) || /^\d{12}$/.test(innClean) || /^\d{13}$/.test(innClean) || /^\d{15}$/.test(innClean) || /^\d{9}$/.test(innClean)) {
     try {
-      const view = await buildMainCardView(env, innClean);
+      let view;
+      if (innClean.length === 9) {
+        view = await buildBicView(env, innClean);
+      } else {
+        view = await buildMainCardView(env, innClean);
+      }
       await sendMessage(env, {
         chat_id: chatId,
         text: view.text,
@@ -120,7 +125,7 @@ async function handleTelegramUpdate(request, env) {
   }
   await sendMessage(env, {
     chat_id: chatId,
-    text: "ℹ️ Отправьте ИНН компании (10 цифр), ИП (12 цифр), ОГРН (13 цифр) или ОГРНИП (15 цифр) для проверки.\n\nНапример: <code>7707083893</code>",
+    text: "ℹ️ Отправьте ИНН компании (10 цифр), ИП (12 цифр), ОГРН (13 цифр), ОГРНИП (15 цифр) или БИК банка (9 цифр) для проверки.\n\nНапример: <code>7707083893</code>",
     parse_mode: "HTML"
   });
   return jsonResponse({ ok: true });
@@ -180,7 +185,7 @@ __name(handleCallbackQuery, "handleCallbackQuery");
 async function buildMainCardView(env, inn) {
   // 10-digit INN or 13-digit OGRN → company; 12-digit INN or 15-digit OGRNIP → entrepreneur
   const endpoint = (inn.length === 10 || inn.length === 13) ? "company" : "entrepreneur";
-  const payload = await checkoRequest(env, endpoint, { inn });
+  const payload = await checkoRequest(env, endpoint, identifierParams(inn));
   const data = takeEntity(payload);
   if (!data || typeof data !== "object") {
     throw new Error("Карточка компании пуста: data отсутствует.");
@@ -248,13 +253,13 @@ async function fetchSectionCount(env, section, inn) {
     const laws = ["44", "94", "223"];
     let total = 0;
     for (const law of laws) {
-      const payload2 = await checkoRequest(env, SECTION_CONFIG.contracts.endpoint, { inn, law });
+      const payload2 = await checkoRequest(env, SECTION_CONFIG.contracts.endpoint, { ...identifierParams(inn), law });
       total += takeItems(payload2, SECTION_CONFIG.contracts.listKeys).length;
     }
     return total;
   }
   const cfg = SECTION_CONFIG[section];
-  const payload = await checkoRequest(env, cfg.endpoint, { inn });
+  const payload = await checkoRequest(env, cfg.endpoint, identifierParams(inn));
   return takeItems(payload, cfg.listKeys).length;
 }
 __name(fetchSectionCount, "fetchSectionCount");
@@ -298,11 +303,11 @@ async function buildSectionView(env, section, inn) {
   let rows = [];
   if (section === "contracts") {
     for (const law of ["44", "94", "223"]) {
-      const payload = await checkoRequest(env, cfg.endpoint, { inn, law });
+      const payload = await checkoRequest(env, cfg.endpoint, { ...identifierParams(inn), law });
       rows.push(...takeItems(payload, cfg.listKeys));
     }
   } else {
-    const payload = await checkoRequest(env, cfg.endpoint, { inn });
+    const payload = await checkoRequest(env, cfg.endpoint, identifierParams(inn));
     rows = takeItems(payload, cfg.listKeys);
   }
   const text = formatSectionByType(section, rows);
@@ -413,7 +418,7 @@ function formatSectionByType(section, rows) {
 }
 __name(formatSectionByType, "formatSectionByType");
 async function buildPersonView(env, inn) {
-  const payload = await checkoRequest(env, "person", { inn });
+  const payload = await checkoRequest(env, "person", identifierParams(inn));
   const data = takeEntity(payload);
   const text = [
     "<b>👤 Физическое лицо</b>",
@@ -426,7 +431,7 @@ async function buildPersonView(env, inn) {
 }
 __name(buildPersonView, "buildPersonView");
 async function buildBankView(env, inn) {
-  const companyPayload = await checkoRequest(env, "company", { inn });
+  const companyPayload = await checkoRequest(env, "company", identifierParams(inn));
   const company = takeEntity(companyPayload);
   const bik = pickNested(company || {}, [["Банк", "БИК"], ["БИК"]]);
   if (!bik) {
@@ -448,8 +453,24 @@ async function buildBankView(env, inn) {
   return { text, reply_markup: backKeyboard(inn) };
 }
 __name(buildBankView, "buildBankView");
+async function buildBicView(env, bic) {
+  const bankPayload = await checkoRequest(env, "bank", { bic });
+  const bank = takeEntity(bankPayload);
+  const corr = pickNested(bank || {}, [["КорСчет", "Номер"]]) || "—";
+  const text = [
+    "<b>🏦 Банк / Кредитная организация</b>",
+    "",
+    `БИК: <b>${escapeHtml(String(bic))}</b>`,
+    `Название: <b>${escapeHtml(String(pick(bank || {}, ["Наим"]) || "—"))}</b>`,
+    `Адрес: <b>${escapeHtml(String(pick(bank || {}, ["Адрес"]) || "—"))}</b>`,
+    `Тип: <b>${escapeHtml(String(pick(bank || {}, ["Тип"]) || "—"))}</b>`,
+    `Корр. счёт: <b>${escapeHtml(String(corr))}</b>`
+  ].join("\n");
+  return { text, reply_markup: { inline_keyboard: [] } };
+}
+__name(buildBicView, "buildBicView");
 async function buildAffiliatesView(env, inn, page) {
-  const payload = await checkoRequest(env, "company", { inn });
+  const payload = await checkoRequest(env, "company", identifierParams(inn));
   const company = takeEntity(payload) || {};
   const leaders = (Array.isArray(company.Руковод) ? company.Руковод : []).map((item) => ({
     type: "Руководитель",
@@ -682,6 +703,13 @@ function escapeHtml(value) {
   return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;");
 }
 __name(escapeHtml, "escapeHtml");
+function identifierParams(id) {
+  if (id.length === 9) return { bic: id };
+  if (id.length === 13) return { ogrn: id };
+  if (id.length === 15) return { ogrnip: id };
+  return { inn: id };
+}
+__name(identifierParams, "identifierParams");
 async function telegramRequest(env, method, body) {
   const endpoint = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`;
   const response = await fetchWithTimeout(
