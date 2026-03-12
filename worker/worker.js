@@ -100,7 +100,7 @@ async function handleTelegramUpdate(request, env) {
     return jsonResponse({ ok: true });
   }
   const innClean = text.replace(/\s+/g, "");
-  if (/^\d{10}$/.test(innClean) || /^\d{12}$/.test(innClean)) {
+  if (/^\d{10}$/.test(innClean) || /^\d{12}$/.test(innClean) || /^\d{13}$/.test(innClean) || /^\d{15}$/.test(innClean)) {
     try {
       const view = await buildMainCardView(env, innClean);
       await sendMessage(env, {
@@ -120,7 +120,7 @@ async function handleTelegramUpdate(request, env) {
   }
   await sendMessage(env, {
     chat_id: chatId,
-    text: "ℹ️ Отправьте ИНН компании (10 цифр) или ИП (12 цифр) для проверки.\n\nНапример: <code>7707083893</code>",
+    text: "ℹ️ Отправьте ИНН компании (10 цифр), ИП (12 цифр), ОГРН (13 цифр) или ОГРНИП (15 цифр) для проверки.\n\nНапример: <code>7707083893</code>",
     parse_mode: "HTML"
   });
   return jsonResponse({ ok: true });
@@ -137,7 +137,7 @@ async function handleCallbackQuery(callbackQuery, env) {
     return;
   }
   const [action, inn, rawPage] = data.split(":");
-  if (!inn || !/^\d{10,12}$/.test(inn)) {
+  if (!inn || !(/^\d{10}$/.test(inn) || /^\d{12}$/.test(inn) || /^\d{13}$/.test(inn) || /^\d{15}$/.test(inn))) {
     return;
   }
   try {
@@ -178,7 +178,8 @@ async function handleCallbackQuery(callbackQuery, env) {
 }
 __name(handleCallbackQuery, "handleCallbackQuery");
 async function buildMainCardView(env, inn) {
-  const endpoint = inn.length === 10 ? "company" : "entrepreneur";
+  // 10-digit INN or 13-digit OGRN → company; 12-digit INN or 15-digit OGRNIP → entrepreneur
+  const endpoint = (inn.length === 10 || inn.length === 13) ? "company" : "entrepreneur";
   const payload = await checkoRequest(env, endpoint, { inn });
   const data = takeEntity(payload);
   if (!data || typeof data !== "object") {

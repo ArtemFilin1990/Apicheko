@@ -23,6 +23,7 @@ class Database:
         await self._ensure_database_file()
         self._conn = await aiosqlite.connect(self._path)
         self._conn.row_factory = aiosqlite.Row
+        await self._conn.execute("PRAGMA foreign_keys = ON")
         await self._create_tables()
 
     async def _ensure_database_file(self) -> None:
