@@ -48,6 +48,10 @@ async def run_polling(dp: Dispatcher, bot: Bot, max_retries: int | None = None) 
             logger.info("Restarting polling in %s sec...", backoff_seconds)
             await asyncio.sleep(backoff_seconds)
             backoff_seconds = min(backoff_seconds * 2, 60)
+            # Reset after a successful recovery wait so transient failures
+            # that resolve don't accumulate toward the max_retries limit.
+            network_failures = 0
+            backoff_seconds = 3
         except Exception as exc:  # pragma: no cover - defensive guard
             logger.exception("Polling crashed: %s", exc)
             logger.info("Restarting polling in %s sec...", backoff_seconds)
