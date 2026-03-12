@@ -460,7 +460,7 @@ async function buildBicView(env, bic) {
   const text = [
     "<b>🏦 Банк / Кредитная организация</b>",
     "",
-    `БИК: <b>${escapeHtml(String(pick(bank || {}, ["БИК"]) || bic))}</b>`,
+    `БИК: <b>${escapeHtml(String(bic))}</b>`,
     `Название: <b>${escapeHtml(String(pick(bank || {}, ["Наим"]) || "—"))}</b>`,
     `Адрес: <b>${escapeHtml(String(pick(bank || {}, ["Адрес"]) || "—"))}</b>`,
     `Тип: <b>${escapeHtml(String(pick(bank || {}, ["Тип"]) || "—"))}</b>`,
@@ -704,6 +704,7 @@ function escapeHtml(value) {
 }
 __name(escapeHtml, "escapeHtml");
 function identifierParams(id) {
+  if (id.length === 9) return { bic: id };
   if (id.length === 13) return { ogrn: id };
   if (id.length === 15) return { ogrnip: id };
   return { inn: id };
