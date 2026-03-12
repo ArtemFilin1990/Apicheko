@@ -89,6 +89,12 @@ https://<worker-domain>/webhook
 
 ## Деплой Worker
 
+Wrangler в non-interactive окружении требует Cloudflare API token:
+
+```bash
+export CLOUDFLARE_API_TOKEN=<cloudflare_api_token>
+```
+
 ```bash
 npx wrangler secret put TELEGRAM_BOT_TOKEN
 npx wrangler secret put CHECKO_API_KEY
