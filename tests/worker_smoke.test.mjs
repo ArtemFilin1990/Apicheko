@@ -561,3 +561,71 @@ test("callback_query for contracts shows submenu with law categories", async () 
   assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "con:7707083893:44s")));
   assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "con:7707083893:223c")));
 });
+
+test("company card includes website link, phone, email, ОКВЭД, capital, SME, and tax debt", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = new URL(String(url));
+    calls.push({ url: requestUrl.toString(), options });
+
+    if (requestUrl.hostname === "api.checko.ru") {
+      const endpoint = requestUrl.pathname.split("/").pop();
+      if (endpoint === "company") {
+        return jsonResponse({
+          meta: { status: "ok" },
+          data: {
+            ИНН: "7707083893",
+            ОГРН: "1027700132195",
+            НаимПолн: "ПАО Сбербанк",
+            Статус: { Наим: "Действующее" },
+            ДатаРег: "1991-01-01",
+            ЮрАдрес: { АдресРФ: "г. Москва", Регион: { Наим: "г. Москва" } },
+            Руковод: [{ ФИО: "Иванов И.И." }],
+            ОКВЭД: { Код: "64.19", Наим: "Прочее денежное посредничество" },
+            УстКап: { Сумма: 67760844000 },
+            РМСП: { Кат: "Крупное" },
+            Налоги: { СумНедоим: 12345 },
+            Контакты: {
+              Тел: ["+7 495 500-00-00", "+7 495 500-00-01"],
+              Емэйл: ["info@sberbank.ru"],
+              ВебСайт: "www.sberbank.ru"
+            }
+          }
+        });
+      }
+      if (["legal-cases", "bankruptcy-messages", "finances"].includes(endpoint)) {
+        return jsonResponse({ meta: { status: "ok" }, data: {} });
+      }
+    }
+
+    if (requestUrl.hostname === "api.telegram.org") {
+      return jsonResponse({ ok: true });
+    }
+
+    throw new Error(`Unexpected URL ${requestUrl}`);
+  };
+
+  const response = await worker.fetch(
+    makeWebhookRequest({ message: { text: "7707083893", chat: { id: 600 } } }),
+    makeEnv()
+  );
+  assert.equal(response.status, 200);
+
+  const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
+  const body = JSON.parse(telegramCall.options.body);
+
+  // Website rendered as clickable link with https:// prefix added (URL() normalizes to add trailing slash)
+  assert.match(body.text, /<a href="https:\/\/www\.sberbank\.ru\/">www\.sberbank\.ru<\/a>/);
+  // Phone numbers joined
+  assert.match(body.text, /\+7 495 500-00-00, \+7 495 500-00-01/);
+  // Email shown
+  assert.match(body.text, /info@sberbank\.ru/);
+  // ОКВЭД
+  assert.match(body.text, /64\.19 — Прочее денежное посредничество/);
+  // Capital
+  assert.match(body.text, /Уставной капитал/);
+  // SME category
+  assert.match(body.text, /Категория МСП/);
+  // Tax debt
+  assert.match(body.text, /Недоимка по налогам/);
+});

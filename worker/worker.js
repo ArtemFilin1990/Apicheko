@@ -406,8 +406,33 @@ async function buildMainCardView(env, inn, entityType) {
   const statusLookup = lookupStatus(statusCode);
   const status = pickNested(data, [["Статус", "Наим"], ["Статус", "Текст"], ["Статус"]]) || statusLookup?.name || "—";
   const director = pickNested(data, [["Руковод", 0, "ФИО"]]) || "—";
+  const okvedObj = (typeof data.ОКВЭД === "object" && data.ОКВЭД !== null) ? data.ОКВЭД : {};
+  const okvedCode = okvedObj.Код || null;
+  const okvedName = okvedObj.Наим || null;
+  const okved = okvedCode && okvedName ? `${okvedCode} — ${okvedName}` : (okvedCode || okvedName || null);
+  const capital = pickNested(data, [["УстКап", "Сумма"]]);
+  const smeCat = pickNested(data, [["РМСП", "Кат"]]);
+  const taxDebt = pickNested(data, [["Налоги", "СумНедоим"]]);
+  const contacts = (typeof data.Контакты === "object" && data.Контакты !== null) ? data.Контакты : {};
+  const phoneRaw = contacts.Тел;
+  const emailRaw = contacts.Емэйл;
+  const phone = Array.isArray(phoneRaw) ? phoneRaw.join(", ") : (phoneRaw || null);
+  const email = Array.isArray(emailRaw) ? emailRaw.join(", ") : (emailRaw || null);
+  const websiteRaw = contacts.ВебСайт || null;
+  let websiteUrl = null;
+  if (websiteRaw) {
+    try {
+      const urlStr = (/^https?:\/\//i).test(websiteRaw) ? websiteRaw : `https://${websiteRaw}`;
+      const parsed = new URL(urlStr);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        websiteUrl = parsed.toString();
+      }
+    } catch (_) {
+      // Invalid URL — omit the link
+    }
+  }
   const risk = assessOverallRisk(counts);
-  const text = [
+  const lines = [
     `🏢 <b>Карточка компании</b>`,
     "",
     `<b>Наименование:</b> ${escapeHtml(title)}`,
@@ -418,10 +443,16 @@ async function buildMainCardView(env, inn, entityType) {
     `<b>Дата регистрации:</b> ${escapeHtml(String(data.ДатаРег || "—"))}`,
     `<b>Руководитель:</b> ${escapeHtml(String(director))}`,
     `<b>Регион:</b> ${escapeHtml(String(region))}`,
-    "",
-    `${risk.icon} <b>Риск:</b> ${risk.level}`,
-    `🔄 <b>Обновлено:</b> ${formatDate(/* @__PURE__ */ new Date())}`
-  ].join("\n");
+  ];
+  if (okved) lines.push(`<b>ОКВЭД:</b> ${escapeHtml(okved)}`);
+  if (capital) lines.push(`<b>Уставной капитал:</b> ${escapeHtml(String(capital))} руб.`);
+  if (smeCat) lines.push(`<b>Категория МСП:</b> ${escapeHtml(String(smeCat))}`);
+  if (taxDebt) lines.push(`⚠️ <b>Недоимка по налогам:</b> ${escapeHtml(String(taxDebt))} руб.`);
+  if (phone) lines.push(`<b>Телефон:</b> ${escapeHtml(phone)}`);
+  if (email) lines.push(`<b>Email:</b> ${escapeHtml(email)}`);
+  if (websiteUrl) lines.push(`<b>Сайт:</b> <a href="${escapeHtml(encodeURI(websiteUrl))}">${escapeHtml(websiteRaw)}</a>`);
+  lines.push("", `${risk.icon} <b>Риск:</b> ${risk.level}`, `🔄 <b>Обновлено:</b> ${formatDate(/* @__PURE__ */ new Date())}`);
+  const text = lines.join("\n");
   return { text, reply_markup: buildMainKeyboard(inn, counts, endpoint) };
 }
 __name(buildMainCardView, "buildMainCardView");
