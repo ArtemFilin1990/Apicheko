@@ -7,6 +7,7 @@ var COMPANY_NOT_FOUND_MESSAGE = "❌ Компания не найдена";
 var CHECKO_SERVICE_ERROR_MESSAGE = "⚠️ Ошибка сервиса Checko";
 var START_MESSAGE_TEXT = "👋 <b>Здравствуйте! Это сервис оперативной проверки контрагентов и банков.</b>\n\nВыберите тип поиска ниже или отправьте реквизит сообщением.\n\nПоддерживаются:\n• <b>ИНН</b>\n• <b>ОГРН / ОГРНИП</b>\n• <b>БИК</b>\n\nПосле поиска откроется карточка с основными сведениями и доступом к расширенной проверке.";
 var PAGE_SIZE = 10;
+var SECTION_PAGE_SIZE = 5;
 var lookupStatus = /* @__PURE__ */ __name(() => null, "lookupStatus");
 var lookupBankruptcyMessageType = /* @__PURE__ */ __name(() => null, "lookupBankruptcyMessageType");
 var lookupAccountCode = /* @__PURE__ */ __name(() => null, "lookupAccountCode");
@@ -166,6 +167,9 @@ async function handleCallbackQuery(callbackQuery, env) {
     return;
   }
   try {
+    if (data.startsWith("noop")) {
+      return;
+    }
     if (data === "back:start" || data === "reset:start") {
       const view = buildStartView();
       await editMessage(env, chatId, messageId, view.text, view.reply_markup);
@@ -238,7 +242,8 @@ async function handleCallbackQuery(callbackQuery, env) {
       return;
     }
     if (action === "arb") {
-      const view = await buildSectionView(env, "arbitration", inn);
+      const page = Number.parseInt(rawPage || "1", 10);
+      const view = await buildSectionView(env, "arbitration", inn, Number.isNaN(page) ? 1 : page, "arb");
       await editMessage(env, chatId, messageId, view.text, view.reply_markup);
       return;
     }
@@ -254,7 +259,8 @@ async function handleCallbackQuery(callbackQuery, env) {
       return;
     }
     if (SECTION_CONFIG[action]) {
-      const view = await buildSectionView(env, action, inn);
+      const page = Number.parseInt(rawPage || "1", 10);
+      const view = await buildSectionView(env, action, inn, Number.isNaN(page) ? 1 : page);
       await editMessage(env, chatId, messageId, view.text, view.reply_markup);
     }
   } catch (error) {
@@ -488,11 +494,13 @@ function buildMainKeyboard(inn, counts, entityType) {
   };
 }
 __name(buildMainKeyboard, "buildMainKeyboard");
-async function buildSectionView(env, section, inn) {
+async function buildSectionView(env, section, inn, page, callbackPrefix) {
   const cfg = SECTION_CONFIG[section];
   if (!cfg) {
     throw new Error("Неизвестный раздел");
   }
+  const currentPage = page || 1;
+  const cbPrefix = callbackPrefix || section;
   let rows = [];
   if (section === "contracts") {
     for (const law of ["44", "94", "223"]) {
@@ -503,15 +511,31 @@ async function buildSectionView(env, section, inn) {
     const payload = await checkoRequest(env, cfg.endpoint, identifierParams(inn));
     rows = takeItems(payload, cfg.listKeys);
   }
-  const text = formatSectionByType(section, rows);
-  const extra = sectionExtraButton(section, rows.length, inn);
-  return {
-    text,
-    reply_markup: extra ? { inline_keyboard: [[extra], [kb("🏠 В карточку", `main:${inn}`)]] } : backKeyboard(inn)
+  const totalPages = Math.max(1, Math.ceil(rows.length / SECTION_PAGE_SIZE));
+  const safePage = Math.min(Math.max(currentPage, 1), totalPages);
+  const pageRows = rows.slice((safePage - 1) * SECTION_PAGE_SIZE, safePage * SECTION_PAGE_SIZE);
+  const text = formatSectionByType(section, rows, pageRows, safePage, totalPages);
+  const navRow = [];
+  if (safePage > 1) {
+    navRow.push(kb("⬅️ Назад", `${cbPrefix}:${inn}:${safePage - 1}`));
+  }
+  if (totalPages > 1) {
+    navRow.push(kb(`📄 ${safePage} / ${totalPages}`, "noop:0"));
+  }
+  if (safePage < totalPages) {
+    navRow.push(kb("➡️ Дальше", `${cbPrefix}:${inn}:${safePage + 1}`));
+  }
+  const keyboard = {
+    inline_keyboard: [
+      ...navRow.length ? [navRow] : [],
+      [kb("🏠 В карточку", `main:${inn}`)]
+    ]
   };
+  return { text, reply_markup: keyboard };
 }
 __name(buildSectionView, "buildSectionView");
-function formatSectionByType(section, rows) {
+function formatSectionByType(section, rows, pageRows, page, totalPages) {
+  const displayRows = pageRows || rows.slice(0, SECTION_PAGE_SIZE);
   if (section === "arbitration") {
     if (rows.length === 0) {
       return [
@@ -529,18 +553,18 @@ function formatSectionByType(section, rows) {
       `${rows.length > 0 ? "🔴" : "✅"} Статус риска: <b>${rows.length > 5 ? "Высокий" : rows.length > 0 ? "Средний" : "Низкий"}</b>`,
       "",
       "Последние дела:",
-      previewRows(rows, ["Дата", "ДатаРег", "date"], ["НомерДела", "Номер", "number"], ["СуммаТреб", "Сумма", "amount"])
+      previewRows(displayRows, ["Дата", "ДатаРег", "date"], ["НомерДела", "Номер", "number"], ["СуммаТреб", "Сумма", "amount"])
     ].join("\n");
   }
   if (section === "bankruptcy") {
-    const decodedRows = decodeBankruptcyRows(rows);
+    const decodedDisplayRows = decodeBankruptcyRows(displayRows);
     return [
       "<b>📉 Банкротство</b>",
       "",
       `📊 Записей: <b>${rows.length}</b>`,
       rows.length === 0 ? "✅ Статус риска: <b>Отлично</b>" : "⚠️ Статус риска: <b>Требует проверки</b>",
       "",
-      rows.length === 0 ? "Нет сведений о процедурах банкротства за всё время." : previewRows(decodedRows, ["Дата", "ДатаПубл", "date"], ["ТипСообщ", "Тип", "type"], ["Сумма", "amount"])
+      rows.length === 0 ? "Нет сведений о процедурах банкротства за всё время." : previewRows(decodedDisplayRows, ["Дата", "ДатаПубл", "date"], ["ТипСообщ", "Тип", "type"], ["Сумма", "amount"])
     ].join("\n");
   }
   if (section === "contracts") {
@@ -553,7 +577,7 @@ function formatSectionByType(section, rows) {
       rows.length > 0 ? "✅ Статус риска: <b>Низкий</b>" : "⚠️ Статус риска: <b>Нет данных</b>",
       "",
       "Последние контракты:",
-      previewRows(rows, ["ДатаЗакл", "Дата", "date"], ["НомерКонтракта", "Номер", "number"], ["СуммаКонтракта", "Цена", "amount"])
+      previewRows(displayRows, ["ДатаЗакл", "Дата", "date"], ["НомерКонтракта", "Номер", "number"], ["СуммаКонтракта", "Цена", "amount"])
     ].join("\n");
   }
   if (section === "inspections") {
@@ -564,7 +588,7 @@ function formatSectionByType(section, rows) {
       rows.length <= 3 ? "✅ Статус риска: <b>Низкий</b>" : "⚠️ Статус риска: <b>Средний</b>",
       "",
       "Последние проверки:",
-      previewRows(rows, ["ДатаНач", "Дата", "date"], ["Орган", "ВидПроверки", "type"], [])
+      previewRows(displayRows, ["ДатаНач", "Дата", "date"], ["Орган", "ВидПроверки", "type"], [])
     ].join("\n");
   }
   if (section === "financial") {
@@ -602,7 +626,7 @@ function formatSectionByType(section, rows) {
       rows.length === 0 ? "✅ Статус риска: <b>Низкий</b>" : "⚠️ Статус риска: <b>Средний</b>",
       "",
       "Последние:",
-      previewRows(rows, ["ДатаВозб", "Дата", "date"], ["НомерИП", "Номер", "number"], ["СуммаДолга", "Сумма", "amount"])
+      previewRows(displayRows, ["ДатаВозб", "Дата", "date"], ["НомерИП", "Номер", "number"], ["СуммаДолга", "Сумма", "amount"])
     ].join("\n");
   }
   if (section === "history") {
@@ -612,18 +636,18 @@ function formatSectionByType(section, rows) {
       `📊 Всего записей: <b>${rows.length}</b>`,
       "",
       "Последние изменения:",
-      previewRows(rows, ["Дата", "ДатаИзм", "date"], ["Событие", "ВидИзм", "type"], [])
+      previewRows(displayRows, ["Дата", "ДатаИзм", "date"], ["Событие", "ВидИзм", "type"], [])
     ].join("\n");
   }
   if (section === "fedresurs") {
-    const decodedRows = decodeBankruptcyRows(rows);
+    const decodedDisplayRows = decodeBankruptcyRows(displayRows);
     return [
       "<b>📋 Сообщения на Федресурсе</b>",
       "",
       `📊 Всего сообщений: <b>${rows.length}</b>`,
       "",
       "Последние:",
-      previewRows(decodedRows, ["Дата", "ДатаПубл", "date"], ["ТипСообщ", "Тип", "type"], [])
+      previewRows(decodedDisplayRows, ["Дата", "ДатаПубл", "date"], ["ТипСообщ", "Тип", "type"], [])
     ].join("\n");
   }
   return "<b>Данные отсутствуют</b>";
@@ -752,7 +776,7 @@ function previewRows(rows, dateKeys, nameKeys, amountKeys) {
   if (!rows.length) {
     return "Данные отсутствуют.";
   }
-  return rows.slice(0, 5).map((row) => {
+  return rows.map((row) => {
     const date = pick(row, dateKeys) || "—";
     const name = pick(row, nameKeys) || "Запись";
     const amount = amountKeys.length ? pick(row, amountKeys) : null;
