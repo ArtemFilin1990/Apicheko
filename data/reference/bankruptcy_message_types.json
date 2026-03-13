@@ -1,0 +1,442 @@
+{
+  "AccessionDeclarationSubsidiary": {
+    "description": null,
+    "name": "Предложение о присоединении к заявлению о привлечении контролирующих лиц должника к субсидиарной ответственности"
+  },
+  "ActDealInvalid": {
+    "description": null,
+    "name": "Судебный акт по результатам рассмотрения заявления об оспаривании сделки должника"
+  },
+  "ActDealInvalid2": {
+    "description": null,
+    "name": "Судебный акт по результатам рассмотрения заявления об оспаривании сделки должника"
+  },
+  "ActPersonDamages": {
+    "description": null,
+    "name": "Судебный акт по результатам рассмотрения заявления о привлечении контролирующих должника лиц, а также иных лиц, к ответственности в виде возмещения убытков"
+  },
+  "ActPersonSubsidiary": {
+    "description": null,
+    "name": "Судебный акт по результатам рассмотрения заявления о привлечении контролирующих должника лиц к субсидиарной ответственности"
+  },
+  "ActPersonSubsidiary2": {
+    "description": null,
+    "name": "Судебный акт по результатам рассмотрения заявления о привлечении контролирующих должника лиц к субсидиарной ответственности"
+  },
+  "ActReviewDealInvalid": {
+    "description": null,
+    "name": "Судебный акт по результатам пересмотра рассмотрения заявления об оспаривании сделки должника"
+  },
+  "ActReviewDealInvalid2": {
+    "description": null,
+    "name": "Судебный акт по результатам пересмотра рассмотрения заявления об оспаривании сделки должника"
+  },
+  "ActReviewPersonDamages": {
+    "description": null,
+    "name": "Судебный акт по результатам пересмотра рассмотрения заявления о привлечении контролирующих должника лиц, а также иных лиц, к ответственности в виде возмещения убытков"
+  },
+  "ActReviewPersonSubsidiary": {
+    "description": null,
+    "name": "Судебный акт по результатам пересмотра рассмотрения заявления о привлечении контролирующих должника лиц к субсидиарной ответственности"
+  },
+  "ActReviewPersonSubsidiary2": {
+    "description": null,
+    "name": "Судебный акт по результатам пересмотра рассмотрения заявления о привлечении контролирующих должника лиц к субсидиарной ответственности"
+  },
+  "Annul": {
+    "description": null,
+    "name": "Сведения об аннулировании ранее опубликованных сообщений"
+  },
+  "ApplicationReviewCourtDecision": {
+    "description": null,
+    "name": "Сведения о подаче заявления о пересмотре судебного акта по вновь открывшимся обстоятельствам"
+  },
+  "AppointAdministration": {
+    "description": null,
+    "name": "Сведения о решении о назначении временной администрации"
+  },
+  "ArbitralDecree": {
+    "description": null,
+    "name": "Сведения о судебном акте"
+  },
+  "AssessmentReport": {
+    "description": null,
+    "name": "Сведения об отчете оценщика, об оценке имущества должника"
+  },
+  "AssetsReturning": {
+    "description": null,
+    "name": "Объявление о возврате ценных бумаг и иного имущества"
+  },
+  "Auction": {
+    "description": null,
+    "name": "Объявление о проведении торгов"
+  },
+  "Auction2": {
+    "description": null,
+    "name": "Объявление о проведении торгов"
+  },
+  "BankOpenAccountDebtor": {
+    "description": null,
+    "name": "Сведения о кредитной организации, в которой открыт специальный банковский счет должника"
+  },
+  "BankPayment": {
+    "description": null,
+    "name": "Объявление о выплатах Банка России"
+  },
+  "BeginExecutoryProcess": {
+    "description": null,
+    "name": "Сведения о начале исполнительного производства"
+  },
+  "BuyingProperty": {
+    "description": null,
+    "name": "Сообщение о преимущественном праве выкупа имущества"
+  },
+  "CancelAuctionTradeResult": {
+    "description": null,
+    "name": "Сообщение об отмене сообщения об объявлении торгов или сообщения о результатах торгов"
+  },
+  "CancelDeliberateBankruptcy": {
+    "description": null,
+    "name": "Сообщение об отмене сообщения о наличии или об отсутствии признаков преднамеренного или фиктивного банкротства"
+  },
+  "ChangeAdministration": {
+    "description": null,
+    "name": "Сведения об изменении состава временной администрации"
+  },
+  "ChangeAuction": {
+    "description": null,
+    "name": "Сообщение об изменении объявления о проведении торгов"
+  },
+  "ChangeAuction2": {
+    "description": null,
+    "name": "Сообщение об изменении объявления о проведении торгов"
+  },
+  "ChangeCreditorChoiceRightSubsidiary": {
+    "description": null,
+    "name": "Сообщение о праве изменить способ распоряжения правом требования о привлечении к субсидиарной ответственности"
+  },
+  "ChangeDeliberateBankruptcy": {
+    "description": null,
+    "name": "Сообщение об изменении сообщения о наличии или об отсутствии признаков преднамеренного или фиктивного банкротства"
+  },
+  "ChangeEstimatesCurrentExpenses": {
+    "description": null,
+    "name": "Сведения о скорректированной смете текущих расходов кредитной организации или иной финансовой организации"
+  },
+  "Committee": {
+    "description": null,
+    "name": "Сведения о проведении комитета кредиторов"
+  },
+  "Committee2": {
+    "description": null,
+    "name": "Сведения о проведении комитета кредиторов"
+  },
+  "CommitteeResult": {
+    "description": null,
+    "name": "Сообщение о результатах проведения комитета кредиторов"
+  },
+  "CompletionOfExtrajudicialBankruptcy": {
+    "description": null,
+    "name": "Сообщение о завершении процедуры внесудебного банкротства гражданина"
+  },
+  "CourseOfSalePersonProperty": {
+    "description": null,
+    "name": "Сведения об утверждении положения о порядке, об условиях и о сроках реализации имущества гражданина"
+  },
+  "CourtAcceptanceStatement": {
+    "description": null,
+    "name": "Сведения о принятии заявления о признании должника банкротом"
+  },
+  "CourtAssertAcceptance": {
+    "description": null,
+    "name": "Объявление о принятии арбитражным судом заявления"
+  },
+  "CreditorChoiceRightSubsidiary": {
+    "description": null,
+    "name": "Сообщение о праве кредитора выбрать способ распоряжения правом требования о привлечении к субсидиарной ответственности"
+  },
+  "CreditorsDemandRegistered": {
+    "description": null,
+    "name": "Сообщение о включении заявленных требований в реестр требований кредиторов"
+  },
+  "DealInvalid": {
+    "description": null,
+    "name": "Заявление о признании сделки должника недействительной"
+  },
+  "DealInvalid2": {
+    "description": null,
+    "name": "Заявление о признании сделки должника недействительной"
+  },
+  "DealInvalidResult": {
+    "description": null,
+    "name": "Результаты рассмотрения/пересмотра заявлений об оспаривании сделок"
+  },
+  "DealInvalidResult2": {
+    "description": null,
+    "name": "Результаты рассмотрения/пересмотра заявлений об оспаривании сделок"
+  },
+  "DeclarationPersonDamages": {
+    "description": null,
+    "name": "Заявление о привлечении контролирующих должника лиц, а также иных лиц, к ответственности в виде возмещения убытков"
+  },
+  "DeclarationPersonSubsidiary": {
+    "description": null,
+    "name": "Заявление о привлечении контролирующих должника лиц к субсидиарной ответственности"
+  },
+  "DeliberateBankruptcy": {
+    "description": null,
+    "name": "Сообщение о наличии или об отсутствии признаков преднамеренного или фиктивного банкротства"
+  },
+  "DemandAnnouncement": {
+    "description": null,
+    "name": "Извещение о возможности предъявления требований"
+  },
+  "DisqualificationArbitrationManager": {
+    "description": null,
+    "name": "Сообщение о дисквалификации арбитражного управляющего"
+  },
+  "DisqualificationArbitrationManager2": {
+    "description": null,
+    "name": "Сообщение о дисквалификации арбитражного управляющего"
+  },
+  "EstimatesAndUnsoldAssets": {
+    "description": null,
+    "name": "Сведения об исполнении сметы текущих расходов и стоимости нереализованного имущества кредитной организации"
+  },
+  "EstimatesCurrentExpenses": {
+    "description": null,
+    "name": "Сведения о смете текущихрасходов кредитной организации"
+  },
+  "ExtensionAdministration": {
+    "description": null,
+    "name": "Продление срока деятельности временной администрации"
+  },
+  "ExtraordinaryExpenses": {
+    "description": null,
+    "name": "Сведения об осуществлении внеочередных расходов"
+  },
+  "FinancialStateInformation": {
+    "description": null,
+    "name": "Информация о финансовом состоянии"
+  },
+  "FulfilledDemandsRecognition": {
+    "description": null,
+    "name": "Сведения о вынесении судебного акта о признании требований кредиторов удовлетворенными"
+  },
+  "FulfilledDemandsRecognitionReview": {
+    "description": null,
+    "name": "Сведения о пересмотре судебного акта о признании требований кредиторов удовлетворенными"
+  },
+  "ImpendingTransferAssets": {
+    "description": null,
+    "name": "Сообщение о предстоящей передаче приобретателю имущества (активов) и обязательств кредитной организации или их части"
+  },
+  "InformationAboutBankruptcy": {
+    "description": null,
+    "name": "Информация о ходе конкурсного производства"
+  },
+  "IntentionCreditOrg": {
+    "description": null,
+    "name": "Сообщение о намерении исполнить обязательства кредитной организации"
+  },
+  "IntentionOfDemandsFulfilment": {
+    "description": null,
+    "name": "Сведения о вынесении судебного акта об удовлетворении заявления о намерении удовлетворить в полном объеме требования кредиторов к должнику"
+  },
+  "IntentionOfDemandsFulfilmentReview": {
+    "description": null,
+    "name": "Сведения о пересмотре судебного акта об удовлетворении заявления о намерении удовлетворить в полном объеме требования кредиторов к должнику"
+  },
+  "LiabilitiesCreditOrg": {
+    "description": null,
+    "name": "Сообщение о признании исполнения заявителем обязательств кредитной организации несостоявшимся"
+  },
+  "LiabilitiesCreditOrgAct": {
+    "description": null,
+    "name": "Определение о признании исполнения заявителем обязательств несостоявшимся"
+  },
+  "Meeting": {
+    "description": null,
+    "name": "Сведения о собрании кредиторов"
+  },
+  "Meeting2": {
+    "description": null,
+    "name": "Сведения о собрании кредиторов"
+  },
+  "MeetingPartBuildResult": {
+    "description": null,
+    "name": "Сообщение о результатах проведения собрания участников строительства"
+  },
+  "MeetingParticipantsBuilding": {
+    "description": null,
+    "name": "Уведомление о проведении собрания участников строительства"
+  },
+  "MeetingParticipantsBuilding2": {
+    "description": null,
+    "name": "Уведомление о проведении собрания участников строительства"
+  },
+  "MeetingResult": {
+    "description": null,
+    "name": "Сведения о результатах проведения собрания кредиторов"
+  },
+  "MeetingWorker": {
+    "description": null,
+    "name": "Уведомление о проведении собрания работников, бывших работников должника"
+  },
+  "MeetingWorker2": {
+    "description": null,
+    "name": "Уведомление о проведении собрания работников, бывших работников должника"
+  },
+  "MeetingWorkerResult": {
+    "description": null,
+    "name": "Сведения о решениях, принятых собранием работников, бывших работников должника"
+  },
+  "OrderAndTimingCalculations": {
+    "description": null,
+    "name": "Сведения о порядке и сроках расчетов с кредиторами"
+  },
+  "Other": {
+    "description": null,
+    "name": "Иные сведения"
+  },
+  "PartBuildMonetaryClaim": {
+    "description": null,
+    "name": "Извещение участникам строительства о возможности предъявления денежного требования"
+  },
+  "PerformanceCreditOrg": {
+    "description": null,
+    "name": "Сообщение об исполнении обязательств кредитной организации"
+  },
+  "PersonResponsibilityDeclaration": {
+    "description": null,
+    "name": "Заявление о привлечении контролирующих должника и иных лиц к ответственности"
+  },
+  "PersonResponsibilityResult": {
+    "description": null,
+    "name": "Результаты рассмотрения/пересмотра заявлений о привлечении контролирующих должника и иных лиц к ответственности"
+  },
+  "ProcedureGrantingIndemnity": {
+    "description": null,
+    "name": "Предложение о погашении требований кредиторов путем предоставления отступного"
+  },
+  "ProcessInventoryDebtor": {
+    "description": null,
+    "name": "Сведения о ходе инвентаризации имущества должника"
+  },
+  "PropertyEvaluationReport": {
+    "description": null,
+    "name": "Сведения об отчете оценщика, об оценке имущества должника"
+  },
+  "PropertyInventoryResult": {
+    "description": null,
+    "name": "Сведения о результатах инвентаризации имущества должника"
+  },
+  "Rebuttal": {
+    "description": null,
+    "name": "Опровержение по решению суда опубликованных ранее сведений"
+  },
+  "ReceivingCreditorDemand": {
+    "description": null,
+    "name": "Сведения о получении требования кредитора"
+  },
+  "ReceivingCreditorDemand2": {
+    "description": null,
+    "name": "Уведомление о получении требований кредитора"
+  },
+  "ReducingSizeShareCapital": {
+    "description": null,
+    "name": "Сообщение об уменьшении размера уставного капитала банка"
+  },
+  "RefusalOfIntentionCreditOrg": {
+    "description": null,
+    "name": "Сообщение о реализации права приобрести право требования о привлечении к субсидиарной ответственности"
+  },
+  "RemainingAssetsAndRight": {
+    "description": null,
+    "name": "Объявление о наличии у кредитной организации оставшегося имущества и праве ее учредителей (участников) получить указанное имущество"
+  },
+  "ReturnOfApplicationOnExtrajudicialBankruptcy": {
+    "description": null,
+    "name": "Сообщение о возврате гражданину поданного им заявления о признании гражданина банкротом во внесудебном порядке"
+  },
+  "ReturnOfApplicationOnExtrajudicialBankruptcy2": {
+    "description": null,
+    "name": "Сообщение о возврате гражданину поданного им заявления о признании гражданина банкротом во внесудебном порядке"
+  },
+  "RightOfAcquisitionExecution": {
+    "description": null,
+    "name": "Сообщение о реализации права приобрести право требования о привлечении к субсидиарной ответственности"
+  },
+  "RightUnsoldAsset": {
+    "description": null,
+    "name": "Объявление о наличии непроданного имущества и праве собственника имущества должника –унитарного предприятия, учредителей (участников) должника получить такое имущество"
+  },
+  "SaleContractResult": {
+    "description": null,
+    "name": "Сведения о заключении договора купли-продажи"
+  },
+  "SaleContractResult2": {
+    "description": null,
+    "name": "Сведения о заключении договора купли-продажи"
+  },
+  "SaleOrderPledgedProperty": {
+    "description": null,
+    "name": "Об определении начальной продажной цены, утверждении порядка и условий проведения торгов по реализации предмета залога, порядка и условий обеспечения сохранности предмета залога"
+  },
+  "SaleOrderPledgedProperty2": {
+    "description": null,
+    "name": "Об определении начальной продажной цены, утверждении порядка и условий проведения торгов по реализации предмета залога, порядка и условий обеспечения сохранности предмета залога"
+  },
+  "SelectionPurchaserAssets": {
+    "description": null,
+    "name": "Сведения о проведении отбора приобретателей имущества (активов) и обязательств кредитной организации"
+  },
+  "StartOfExtrajudicialBankruptcy": {
+    "description": null,
+    "name": "Сообщение о возбуждении процедуры внесудебного банкротства гражданина"
+  },
+  "StartSettlement": {
+    "description": null,
+    "name": "Сообщения о начале расчетов"
+  },
+  "TerminationAdministration": {
+    "description": null,
+    "name": "Сведения о прекращении деятельности временной администрации"
+  },
+  "TerminationOfExtrajudicialBankruptcy": {
+    "description": null,
+    "name": "Сообщение о прекращении процедуры внесудебного банкротства гражданина"
+  },
+  "TradeResult": {
+    "description": null,
+    "name": "Сведения о результатах торгов"
+  },
+  "TransferAssertsForImplementation": {
+    "description": null,
+    "name": "Сведения о передаче имущества на реализацию"
+  },
+  "TransferAssets": {
+    "description": null,
+    "name": "Сообщение о передаче приобретателю имущества и обязательств кредитной организации"
+  },
+  "TransferInsurancePortfolio": {
+    "description": null,
+    "name": "Уведомление о передаче страхового портфеля страховой организации"
+  },
+  "TransferOwnershipRealEstate": {
+    "description": null,
+    "name": "Сообщение о переходе права собственности на объект незавершенного строительства и прав на земельный участок"
+  },
+  "TransferResponsibilitiesFund": {
+    "description": null,
+    "name": "Решение о передаче обязанности по выплате пожизненных негосударственных пенсий и средств пенсионных резервов другому негосударственному пенсионному фонду"
+  },
+  "ViewDraftRestructuringPlan": {
+    "description": null,
+    "name": "Сведения о порядке и месте ознакомления с проектом плана реструктуризации"
+  },
+  "ViewExecRestructuringPlan": {
+    "description": null,
+    "name": "Сведения о порядке и месте ознакомления с отчетом о результатах исполнения плана реструктуризации"
+  }
+}

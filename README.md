@@ -127,6 +127,19 @@ npx wrangler deploy
 5. Если компания не найдена, бот отвечает: `❌ Компания не найдена`.
 6. Если Checko вернул HTTP != 200, non-JSON или `meta.status != ok/success`, бот отвечает: `⚠️ Ошибка сервиса Checko`.
 
+
+## Reference data
+
+Worker runtime использует только JSON-справочники и lookup helpers. Raw-архивы и исходные справочники (`.sql`, `.xlsx`, `.doc`) не используются напрямую в runtime.
+
+- runtime lookup данные: `data/reference/`
+  - `statuses.json`
+  - `bankruptcy_message_types.json`
+  - `account_codes.json`
+- helper layer: `utils/reference/`
+- документация Checko: `docs/checko/`
+- сырые архивы: `archive/raw/`
+
 ## Локальные проверки
 
 Python-тесты (регрессия существующего runtime):
