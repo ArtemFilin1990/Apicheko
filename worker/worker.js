@@ -5,7 +5,7 @@ var DEFAULT_CHECKO_API_URL = "https://api.checko.ru/v2";
 var DEFAULT_WEBHOOK_PATH = "/webhook";
 var COMPANY_NOT_FOUND_MESSAGE = "❌ Компания не найдена";
 var CHECKO_SERVICE_ERROR_MESSAGE = "⚠️ Ошибка сервиса Checko";
-var START_MESSAGE_TEXT = "👋 <b>Здравствуйте! Это сервис оперативной проверки контрагентов и банков.</b>\n\nВыберите тип поиска ниже или отправьте реквизит сообщением.\n\nПоддерживаются:\n• <b>ИНН</b>\n• <b>ОГРН / ОГРНИП</b>\n• <b>БИК</b>\n\nПосле поиска откроется карточка с основными сведениями и доступом к расширенной проверке:\nфинансы, арбитраж, госзакупки, проверки, ФССП, банкротство и история изменений.";
+var START_MESSAGE_TEXT = "👋 <b>Здравствуйте! Это сервис оперативной проверки контрагентов и банков.</b>\n\nВыберите тип поиска ниже или отправьте реквизит сообщением.\n\nПоддерживаются:\n• <b>ИНН</b>\n• <b>ОГРН / ОГРНИП</b>\n• <b>БИК</b>\n\nПосле поиска откроется карточка с основными сведениями и доступом к расширенной проверке.";
 var PAGE_SIZE = 10;
 var lookupStatus = /* @__PURE__ */ __name(() => null, "lookupStatus");
 var lookupBankruptcyMessageType = /* @__PURE__ */ __name(() => null, "lookupBankruptcyMessageType");
