@@ -336,7 +336,6 @@ function buildArbitrationMenuView(inn) {
       inline_keyboard: [
         [kb("🟢 Истец", `arb:${inn}:plaintiff`)],
         [kb("🔴 Ответчик", `arb:${inn}:defendant`)],
-        [kb("⬅️ Назад", `main:${inn}`)],
         [kb("🏠 В карточку", `main:${inn}`)]
       ]
     }
@@ -351,7 +350,6 @@ function buildContractsMenuView(inn) {
         [kb("🛒 44-ФЗ Заказчик", `con:${inn}:44c`)],
         [kb("💼 44-ФЗ Поставщик", `con:${inn}:44s`)],
         [kb("🏢 223-ФЗ Заказчик", `con:${inn}:223c`)],
-        [kb("⬅️ Назад", `main:${inn}`)],
         [kb("🏠 В карточку", `main:${inn}`)]
       ]
     }
