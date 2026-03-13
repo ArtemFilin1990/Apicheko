@@ -448,7 +448,45 @@ test("POST /webhook with Checko meta error sends safe service message", async ()
   assert.equal(body.text, "⚠️ Ошибка сервиса Checko");
 });
 
-test("callback_query for arbitration answers callback and edits message", async () => {
+test("callback_query for arbitration shows submenu with plaintiff/defendant", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = new URL(String(url));
+    calls.push({ url: requestUrl.toString(), options });
+
+    if (requestUrl.hostname === "api.telegram.org") {
+      return jsonResponse({ ok: true });
+    }
+
+    throw new Error(`Unexpected URL ${requestUrl}`);
+  };
+
+  const request = makeWebhookRequest({
+    callback_query: {
+      id: "cb-1",
+      data: "arbitration:7707083893",
+      message: {
+        message_id: 77,
+        chat: { id: 99 }
+      }
+    }
+  });
+
+  const response = await worker.fetch(request, makeEnv());
+  assert.equal(response.status, 200);
+
+  assert.match(calls[0].url, /answerCallbackQuery$/);
+  assert.match(calls[1].url, /editMessageText$/);
+
+  const body = JSON.parse(calls[1].options.body);
+  assert.equal(body.chat_id, 99);
+  assert.equal(body.message_id, 77);
+  assert.match(body.text, /Арбитраж/);
+  assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "arb:7707083893:plaintiff")));
+  assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "arb:7707083893:defendant")));
+});
+
+test("callback_query for arb:inn:plaintiff answers callback and edits message with cases", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const requestUrl = new URL(String(url));
@@ -472,8 +510,8 @@ test("callback_query for arbitration answers callback and edits message", async 
 
   const request = makeWebhookRequest({
     callback_query: {
-      id: "cb-1",
-      data: "arbitration:7707083893",
+      id: "cb-2",
+      data: "arb:7707083893:plaintiff",
       message: {
         message_id: 77,
         chat: { id: 99 }
@@ -484,11 +522,42 @@ test("callback_query for arbitration answers callback and edits message", async 
   const response = await worker.fetch(request, makeEnv());
   assert.equal(response.status, 200);
 
-  assert.match(calls[0].url, /answerCallbackQuery$/);
-  assert.match(calls[2].url, /editMessageText$/);
+  const editCall = calls.find((call) => call.url.includes("/editMessageText"));
+  const body = JSON.parse(editCall.options.body);
+  assert.match(body.text, /Арбитраж/);
+});
 
-  const body = JSON.parse(calls[2].options.body);
-  assert.equal(body.chat_id, 99);
-  assert.equal(body.message_id, 77);
-  assert.match(body.text, /Арбитражные дела/);
+test("callback_query for contracts shows submenu with law categories", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = new URL(String(url));
+    calls.push({ url: requestUrl.toString(), options });
+
+    if (requestUrl.hostname === "api.telegram.org") {
+      return jsonResponse({ ok: true });
+    }
+
+    throw new Error(`Unexpected URL ${requestUrl}`);
+  };
+
+  const request = makeWebhookRequest({
+    callback_query: {
+      id: "cb-3",
+      data: "contracts:7707083893",
+      message: {
+        message_id: 80,
+        chat: { id: 99 }
+      }
+    }
+  });
+
+  const response = await worker.fetch(request, makeEnv());
+  assert.equal(response.status, 200);
+
+  const editCall = calls.find((call) => call.url.includes("/editMessageText"));
+  const body = JSON.parse(editCall.options.body);
+  assert.match(body.text, /Госзакупки/);
+  assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "con:7707083893:44c")));
+  assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "con:7707083893:44s")));
+  assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "con:7707083893:223c")));
 });

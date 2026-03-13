@@ -24,43 +24,43 @@ var referenceLookupsReady = import("../utils/reference/index.js").then((module) 
 });
 var SECTION_CONFIG = {
   arbitration: {
-    title: "⚖️ Арбитражные дела",
+    title: "⚖️ Арбитраж",
     endpoint: "legal-cases",
     listKeys: ["Дела", "cases"],
     countLabel: "Количество дел"
   },
   bankruptcy: {
-    title: "🏦 Банкротство (ЕФРСБ)",
+    title: "📉 Банкротство",
     endpoint: "bankruptcy-messages",
     listKeys: ["Сообщения", "messages"],
     countLabel: "Записей о банкротстве"
   },
   contracts: {
-    title: "💼 Госзакупки (44-ФЗ / 223-ФЗ)",
+    title: "🏛 Госзакупки",
     endpoint: "contracts",
     listKeys: ["Контракты", "items"],
     countLabel: "Всего контрактов"
   },
   inspections: {
-    title: "🔍 Проверки и КНМ",
+    title: "🚨 Проверки",
     endpoint: "inspections",
     listKeys: ["Проверки", "items"],
     countLabel: "Всего проверок"
   },
   financial: {
-    title: "📊 Финансовая отчётность",
+    title: "📊 Финансы",
     endpoint: "finances",
     listKeys: ["Отчеты", "reports"],
     countLabel: "Лет в отчётности"
   },
   enforcements: {
-    title: "🏛️ Исполнительные производства",
+    title: "🛑 ФССП",
     endpoint: "enforcements",
     listKeys: ["ИП", "items"],
     countLabel: "Всего"
   },
   history: {
-    title: "📜 История изменений",
+    title: "📜 История",
     endpoint: "timeline",
     listKeys: ["События", "events"],
     countLabel: "Всего записей"
@@ -232,6 +232,27 @@ async function handleCallbackQuery(callbackQuery, env) {
       await editMessage(env, chatId, messageId, view.text, view.reply_markup);
       return;
     }
+    if (action === "arbitration") {
+      const view = buildArbitrationMenuView(inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (action === "arb") {
+      const view = await buildSectionView(env, "arbitration", inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (action === "contracts") {
+      const view = buildContractsMenuView(inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (action === "con") {
+      const law = rawPage || "44";
+      const view = await buildContractsByLawView(env, inn, law);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
     if (SECTION_CONFIG[action]) {
       const view = await buildSectionView(env, action, inn);
       await editMessage(env, chatId, messageId, view.text, view.reply_markup);
@@ -302,6 +323,64 @@ function buildPersonTypeChoiceView(inn) {
   };
 }
 __name(buildPersonTypeChoiceView, "buildPersonTypeChoiceView");
+function buildArbitrationMenuView(inn) {
+  return {
+    text: "<b>⚖️ Арбитраж</b>\n\nВыберите роль компании в делах:",
+    reply_markup: {
+      inline_keyboard: [
+        [kb("🟢 Истец", `arb:${inn}:plaintiff`)],
+        [kb("🔴 Ответчик", `arb:${inn}:defendant`)],
+        [kb("⬅️ Назад", `main:${inn}`)],
+        [kb("🏠 В карточку", `main:${inn}`)]
+      ]
+    }
+  };
+}
+__name(buildArbitrationMenuView, "buildArbitrationMenuView");
+function buildContractsMenuView(inn) {
+  return {
+    text: "<b>🏛 Госзакупки</b>\n\nВыберите категорию:",
+    reply_markup: {
+      inline_keyboard: [
+        [kb("🛒 44-ФЗ Заказчик", `con:${inn}:44c`)],
+        [kb("💼 44-ФЗ Поставщик", `con:${inn}:44s`)],
+        [kb("🏢 223-ФЗ Заказчик", `con:${inn}:223c`)],
+        [kb("⬅️ Назад", `main:${inn}`)],
+        [kb("🏠 В карточку", `main:${inn}`)]
+      ]
+    }
+  };
+}
+__name(buildContractsMenuView, "buildContractsMenuView");
+async function buildContractsByLawView(env, inn, lawCode) {
+  const cfg = SECTION_CONFIG.contracts;
+  const lawMap = { "44c": "44", "44s": "44", "223c": "223" };
+  const labelMap = { "44c": "44-ФЗ Заказчик", "44s": "44-ФЗ Поставщик", "223c": "223-ФЗ Заказчик" };
+  const law = lawMap[lawCode] || "44";
+  const label = labelMap[lawCode] || "Госзакупки";
+  const payload = await checkoRequest(env, cfg.endpoint, { ...identifierParams(inn), law });
+  const rows = takeItems(payload, cfg.listKeys);
+  const totalAmount = sumByKeys(rows, ["СуммаКонтракта", "Цена", "Сумма", "amount"]);
+  const text = [
+    `<b>🏛 ${escapeHtml(label)}</b>`,
+    "",
+    `📊 Всего контрактов: <b>${rows.length}</b>`,
+    `💰 Сумма контрактов: <b>${formatMoney(totalAmount)}</b>`,
+    "",
+    rows.length > 0 ? "Последние контракты:" : "Контракты не найдены.",
+    rows.length > 0 ? previewRows(rows, ["ДатаЗакл", "Дата", "date"], ["НомерКонтракта", "Номер", "number"], ["СуммаКонтракта", "Цена", "amount"]) : ""
+  ].join("\n");
+  return {
+    text,
+    reply_markup: {
+      inline_keyboard: [
+        [kb("⬅️ Назад", `contracts:${inn}`)],
+        [kb("🏠 В карточку", `main:${inn}`)]
+      ]
+    }
+  };
+}
+__name(buildContractsByLawView, "buildContractsByLawView");
 async function buildMainCardView(env, inn, entityType) {
   // 10-digit INN or 13-digit OGRN → company; 12-digit INN or 15-digit OGRNIP → entrepreneur
   const endpoint = entityType || (inn.length === 10 || inn.length === 13 ? "company" : "entrepreneur");
@@ -325,19 +404,19 @@ async function buildMainCardView(env, inn, entityType) {
   const director = pickNested(data, [["Руковод", 0, "ФИО"]]) || "—";
   const risk = assessOverallRisk(counts);
   const text = [
-    `🏢 <b>Компания: ${escapeHtml(title)}</b>`,
+    `🏢 <b>Карточка компании</b>`,
     "",
-    `ИНН: <b>${escapeHtml(String(innValue))}</b>`,
-    `ОГРН: <b>${escapeHtml(String(ogrn))}</b>`,
+    `<b>Наименование:</b> ${escapeHtml(title)}`,
+    `<b>ИНН:</b> <code>${escapeHtml(String(innValue))}</code>`,
+    `<b>ОГРН:</b> <code>${escapeHtml(String(ogrn))}</code>`,
     "",
-    `Статус: <b>${escapeHtml(String(status))}</b>`,
-    `Регистрация: <b>${escapeHtml(String(data.ДатаРег || "—"))}</b>`,
-    `Директор: <b>${escapeHtml(String(director))}</b>`,
-    `Регион: <b>${escapeHtml(String(region))}</b>`,
+    `<b>Статус:</b> ${escapeHtml(String(status))}`,
+    `<b>Дата регистрации:</b> ${escapeHtml(String(data.ДатаРег || "—"))}`,
+    `<b>Руководитель:</b> ${escapeHtml(String(director))}`,
+    `<b>Регион:</b> ${escapeHtml(String(region))}`,
     "",
-    `${risk.icon} Общий риск компании: <b>${risk.level}</b>`,
-    `${risk.note}`,
-    `🔄 Обновлено: ${formatDate(/* @__PURE__ */ new Date())}`
+    `${risk.icon} <b>Риск:</b> ${risk.level}`,
+    `🔄 <b>Обновлено:</b> ${formatDate(/* @__PURE__ */ new Date())}`
   ].join("\n");
   return { text, reply_markup: buildMainKeyboard(inn, counts, endpoint) };
 }
@@ -428,7 +507,7 @@ async function buildSectionView(env, section, inn) {
   const extra = sectionExtraButton(section, rows.length, inn);
   return {
     text,
-    reply_markup: extra ? { inline_keyboard: [[extra], [kb("⬅️ Назад к главной", `main:${inn}`)]] } : backKeyboard(inn)
+    reply_markup: extra ? { inline_keyboard: [[extra], [kb("🏠 В карточку", `main:${inn}`)]] } : backKeyboard(inn)
   };
 }
 __name(buildSectionView, "buildSectionView");
@@ -436,14 +515,14 @@ function formatSectionByType(section, rows) {
   if (section === "arbitration") {
     if (rows.length === 0) {
       return [
-        "<b>⚖️ Арбитражные дела</b>",
+        "<b>⚖️ Арбитраж</b>",
         "",
         "✅ Арбитражные дела по компании не найдены."
       ].join("\n");
     }
     const totalAmount = sumByKeys(rows, ["СуммаТреб", "Сумма", "amount"]);
     return [
-      "<b>⚖️ Арбитражные дела</b>",
+      "<b>⚖️ Арбитраж</b>",
       "",
       `📊 Всего дел: <b>${rows.length}</b>`,
       `💰 Общая сумма: <b>${formatMoney(totalAmount)}</b>`,
@@ -456,7 +535,7 @@ function formatSectionByType(section, rows) {
   if (section === "bankruptcy") {
     const decodedRows = decodeBankruptcyRows(rows);
     return [
-      "<b>🏦 Банкротство (ЕФРСБ)</b>",
+      "<b>📉 Банкротство</b>",
       "",
       `📊 Записей: <b>${rows.length}</b>`,
       rows.length === 0 ? "✅ Статус риска: <b>Отлично</b>" : "⚠️ Статус риска: <b>Требует проверки</b>",
@@ -467,7 +546,7 @@ function formatSectionByType(section, rows) {
   if (section === "contracts") {
     const totalAmount = sumByKeys(rows, ["СуммаКонтракта", "Цена", "Сумма", "amount"]);
     return [
-      "<b>💼 Госзакупки 44-ФЗ / 223-ФЗ</b>",
+      "<b>🏛 Госзакупки</b>",
       "",
       `📊 Всего контрактов: <b>${rows.length}</b>`,
       `💰 Сумма контрактов: <b>${formatMoney(totalAmount)}</b>`,
@@ -479,7 +558,7 @@ function formatSectionByType(section, rows) {
   }
   if (section === "inspections") {
     return [
-      "<b>🔍 Проверки и КНМ</b>",
+      "<b>🚨 Проверки</b>",
       "",
       `📊 Всего проверок: <b>${rows.length}</b>`,
       rows.length <= 3 ? "✅ Статус риска: <b>Низкий</b>" : "⚠️ Статус риска: <b>Средний</b>",
@@ -491,7 +570,7 @@ function formatSectionByType(section, rows) {
   if (section === "financial") {
     if (rows.length === 0) {
       return [
-        "<b>📊 Финансовая отчётность</b>",
+        "<b>📊 Финансы</b>",
         "",
         "⚠️ Финансовая отчётность по компании не найдена."
       ].join("\n");
@@ -504,7 +583,7 @@ function formatSectionByType(section, rows) {
     const profitLabel = lookupAccountCode("2400")?.name || "Чистая прибыль";
     const assetsLabel = lookupAccountCode("1600")?.name || "Активы";
     return [
-      "<b>📊 Финансовая отчётность</b>",
+      "<b>📊 Финансы</b>",
       "",
       `📊 Периодов в отчётности: <b>${rows.length}</b>`,
       `• ${escapeHtml(revenueLabel)}: <b>${formatMoney(revenue)}</b>`,
@@ -516,7 +595,7 @@ function formatSectionByType(section, rows) {
   if (section === "enforcements") {
     const totalAmount = sumByKeys(rows, ["СуммаДолга", "Сумма", "amount"]);
     return [
-      "<b>🏛️ Исполнительные производства</b>",
+      "<b>🛑 ФССП</b>",
       "",
       `📊 Всего: <b>${rows.length}</b>`,
       `💰 Сумма к взысканию: <b>${formatMoney(totalAmount)}</b>`,
@@ -528,7 +607,7 @@ function formatSectionByType(section, rows) {
   }
   if (section === "history") {
     return [
-      "<b>📜 История изменений</b>",
+      "<b>📜 История</b>",
       "",
       `📊 Всего записей: <b>${rows.length}</b>`,
       "",
@@ -718,7 +797,7 @@ function assessOverallRisk(counts) {
 }
 __name(assessOverallRisk, "assessOverallRisk");
 function backKeyboard(inn) {
-  return { inline_keyboard: [[kb("⬅️ В карточку компании", `main:${inn}`)]] };
+  return { inline_keyboard: [[kb("🏠 В карточку", `main:${inn}`)]] };
 }
 __name(backKeyboard, "backKeyboard");
 function kb(text, callback_data) {
