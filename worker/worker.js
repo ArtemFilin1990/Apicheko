@@ -1,6 +1,5 @@
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
-
 // worker.js
 var DEFAULT_CHECKO_API_URL = "https://api.checko.ru/v2";
 var DEFAULT_WEBHOOK_PATH = "/webhook";
@@ -8,6 +7,21 @@ var COMPANY_NOT_FOUND_MESSAGE = "❌ Компания не найдена";
 var CHECKO_SERVICE_ERROR_MESSAGE = "⚠️ Ошибка сервиса Checko";
 var START_MESSAGE_TEXT = "👋 <b>Здравствуйте! Это сервис оперативной проверки контрагентов и банков.</b>\n\nВыберите тип поиска ниже или отправьте реквизит сообщением.\n\nПоддерживаются:\n• <b>ИНН</b>\n• <b>ОГРН / ОГРНИП</b>\n• <b>БИК</b>\n\nПосле поиска откроется карточка с основными сведениями и доступом к расширенной проверке:\nфинансы, арбитраж, госзакупки, проверки, ФССП, банкротство и история изменений.";
 var PAGE_SIZE = 10;
+var lookupStatus = /* @__PURE__ */ __name(() => null, "lookupStatus");
+var lookupBankruptcyMessageType = /* @__PURE__ */ __name(() => null, "lookupBankruptcyMessageType");
+var lookupAccountCode = /* @__PURE__ */ __name(() => null, "lookupAccountCode");
+var referenceLookupsReady = import("../utils/reference/index.js").then((module) => {
+  if (typeof module.lookupStatus === "function") {
+    lookupStatus = module.lookupStatus;
+  }
+  if (typeof module.lookupBankruptcyMessageType === "function") {
+    lookupBankruptcyMessageType = module.lookupBankruptcyMessageType;
+  }
+  if (typeof module.lookupAccountCode === "function") {
+    lookupAccountCode = module.lookupAccountCode;
+  }
+}).catch(() => {
+});
 var SECTION_CONFIG = {
   arbitration: {
     title: "⚖️ Арбитражные дела",
@@ -305,7 +319,9 @@ async function buildMainCardView(env, inn, entityType) {
     data,
     [["ЮрАдрес", "Регион", "Наим"], ["ЮрАдрес", "Регион"], ["Регион", "Наим"], ["Регион"], ["АдрМЖ", "Регион", "Наим"], ["АдрМЖ", "Регион"]]
   ) || deriveRegionFromAddress(address) || "—";
-  const status = pickNested(data, [["Статус", "Наим"], ["Статус", "Текст"], ["Статус"]]) || "—";
+  const statusCode = pickNested(data, [["Статус", "Код"], ["Статус", "Code"], ["СтатусКод"], ["КодСтатуса"]]);
+  const statusLookup = lookupStatus(statusCode);
+  const status = pickNested(data, [["Статус", "Наим"], ["Статус", "Текст"], ["Статус"]]) || statusLookup?.name || "—";
   const director = pickNested(data, [["Руковод", 0, "ФИО"]]) || "—";
   const risk = assessOverallRisk(counts);
   const text = [
@@ -438,13 +454,14 @@ function formatSectionByType(section, rows) {
     ].join("\n");
   }
   if (section === "bankruptcy") {
+    const decodedRows = decodeBankruptcyRows(rows);
     return [
       "<b>🏦 Банкротство (ЕФРСБ)</b>",
       "",
       `📊 Записей: <b>${rows.length}</b>`,
       rows.length === 0 ? "✅ Статус риска: <b>Отлично</b>" : "⚠️ Статус риска: <b>Требует проверки</b>",
       "",
-      rows.length === 0 ? "Нет сведений о процедурах банкротства за всё время." : previewRows(rows, ["Дата", "ДатаПубл", "date"], ["ТипСообщ", "Тип", "type"], ["Сумма", "amount"])
+      rows.length === 0 ? "Нет сведений о процедурах банкротства за всё время." : previewRows(decodedRows, ["Дата", "ДатаПубл", "date"], ["ТипСообщ", "Тип", "type"], ["Сумма", "amount"])
     ].join("\n");
   }
   if (section === "contracts") {
@@ -483,13 +500,16 @@ function formatSectionByType(section, rows) {
     const revenue = pick(last, ["2110", "Выручка", "revenue"]);
     const profit = pick(last, ["2400", "ЧистПриб", "netProfit"]);
     const assets = pick(last, ["1600", "Активы", "assets"]);
+    const revenueLabel = lookupAccountCode("2110")?.name || "Выручка";
+    const profitLabel = lookupAccountCode("2400")?.name || "Чистая прибыль";
+    const assetsLabel = lookupAccountCode("1600")?.name || "Активы";
     return [
       "<b>📊 Финансовая отчётность</b>",
       "",
       `📊 Периодов в отчётности: <b>${rows.length}</b>`,
-      `• Выручка: <b>${formatMoney(revenue)}</b>`,
-      `• Чистая прибыль: <b>${formatMoney(profit)}</b>`,
-      `• Активы: <b>${formatMoney(assets)}</b>`,
+      `• ${escapeHtml(revenueLabel)}: <b>${formatMoney(revenue)}</b>`,
+      `• ${escapeHtml(profitLabel)}: <b>${formatMoney(profit)}</b>`,
+      `• ${escapeHtml(assetsLabel)}: <b>${formatMoney(assets)}</b>`,
       Number(profit || 0) > 0 ? "✅ Статус риска: <b>Отлично</b>" : "⚠️ Статус риска: <b>Требует проверки</b>"
     ].join("\n");
   }
@@ -517,13 +537,14 @@ function formatSectionByType(section, rows) {
     ].join("\n");
   }
   if (section === "fedresurs") {
+    const decodedRows = decodeBankruptcyRows(rows);
     return [
       "<b>📋 Сообщения на Федресурсе</b>",
       "",
       `📊 Всего сообщений: <b>${rows.length}</b>`,
       "",
       "Последние:",
-      previewRows(rows, ["Дата", "ДатаПубл", "date"], ["ТипСообщ", "Тип", "type"], [])
+      previewRows(decodedRows, ["Дата", "ДатаПубл", "date"], ["ТипСообщ", "Тип", "type"], [])
     ].join("\n");
   }
   return "<b>Данные отсутствуют</b>";
@@ -634,6 +655,20 @@ function sectionExtraButton(section, count, inn) {
   return null;
 }
 __name(sectionExtraButton, "sectionExtraButton");
+function decodeBankruptcyRows(rows) {
+  return rows.map((row) => {
+    const typeCode = pick(row, ["ТипСообщ", "Тип", "type", "messageType"]);
+    const decoded = lookupBankruptcyMessageType(typeCode);
+    if (!decoded?.name || decoded.name === typeCode) {
+      return row;
+    }
+    return {
+      ...row,
+      ТипСообщ: `${decoded.name} (${typeCode})`
+    };
+  });
+}
+__name(decodeBankruptcyRows, "decodeBankruptcyRows");
 function previewRows(rows, dateKeys, nameKeys, amountKeys) {
   if (!rows.length) {
     return "Данные отсутствуют.";
