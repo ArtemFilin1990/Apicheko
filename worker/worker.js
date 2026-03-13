@@ -45,19 +45,19 @@ var SECTION_CONFIG = {
   inspections: {
     title: "🚨 Проверки",
     endpoint: "inspections",
-    listKeys: ["Проверки", "items"],
+    listKeys: ["Проверки", "Inspection", "Docs", "items", "data"],
     countLabel: "Всего проверок"
   },
   financial: {
     title: "📊 Финансы",
     endpoint: "finances",
-    listKeys: ["Отчеты", "reports"],
+    listKeys: ["Отчеты", "reports", "items", "data"],
     countLabel: "Лет в отчётности"
   },
   enforcements: {
     title: "🛑 ФССП",
     endpoint: "enforcements",
-    listKeys: ["ИП", "items"],
+    listKeys: ["ИП", "ИспПр", "Производства", "Docs", "items", "data"],
     countLabel: "Всего"
   },
   history: {
@@ -431,7 +431,7 @@ async function buildMainCardView(env, inn, entityType) {
       // Invalid URL — omit the link
     }
   }
-  const risk = assessOverallRisk(counts);
+  const risk = assessOverallRisk(counts, status);
   const lines = [
     `🏢 <b>Карточка компании</b>`,
     "",
@@ -461,7 +461,8 @@ async function collectCounts(env, inn, cardData) {
   const jobs = [
     ["arbitration", () => fetchSectionCount(env, "arbitration", inn)],
     ["bankruptcy", () => fetchSectionCount(env, "bankruptcy", inn)],
-    ["financial", () => fetchSectionCount(env, "financial", inn)]
+    ["financial", () => fetchSectionCount(env, "financial", inn)],
+    ["enforcements", () => fetchSectionCount(env, "enforcements", inn)]
   ];
   const settled = await Promise.allSettled(jobs.map(([, fn]) => fn()));
   jobs.forEach(([name], idx) => {
@@ -838,13 +839,27 @@ function formatMoney(value) {
   return `${Math.round(num).toLocaleString("ru-RU")} ₽`;
 }
 __name(formatMoney, "formatMoney");
-function assessOverallRisk(counts) {
+const INACTIVE_STATUS_PATTERNS = [
+  "не действует", "ликвидирован", "ликвидирована", "ликвидировано",
+  "прекратил", "прекратила", "прекратило", "исключен", "исключена"
+];
+function isInactiveStatus(status) {
+  if (!status || status === "—") return false;
+  const lower = String(status).toLowerCase();
+  return INACTIVE_STATUS_PATTERNS.some((p) => lower.includes(p));
+}
+__name(isInactiveStatus, "isInactiveStatus");
+function assessOverallRisk(counts, statusText) {
   const score = Number(counts.arbitration || 0) * 4 + Number(counts.bankruptcy || 0) * 10 + Number(counts.enforcements || 0) * 6;
+  const inactive = isInactiveStatus(statusText);
   if (score >= 40) {
     return { icon: "🔴", level: "Высокий", note: "(рекомендуется проверить Арбитраж и Финансы)" };
   }
   if (score > 0) {
     return { icon: "🟡", level: "Средний", note: "(есть сигналы для дополнительной проверки)" };
+  }
+  if (inactive) {
+    return { icon: "🟡", level: "Средний", note: "(компания не действует — повышенный риск контрагента)" };
   }
   return { icon: "🟢", level: "Низкий", note: "(критичных сигналов риска не выявлено)" };
 }
@@ -928,16 +943,23 @@ function takeEntity(payload) {
 }
 __name(takeEntity, "takeEntity");
 function takeItems(payload, keys) {
-  const data = payload?.payload?.data ?? payload?.data ?? payload;
-  if (Array.isArray(data)) {
-    return data;
-  }
-  if (!data || typeof data !== "object") {
-    return [];
-  }
-  for (const key of keys) {
-    if (Array.isArray(data[key])) {
-      return data[key];
+  // Try known nesting paths in priority order
+  const candidates = [
+    payload?.payload?.data,
+    payload?.data,
+    payload?.payload,
+    payload
+  ];
+  for (const data of candidates) {
+    if (Array.isArray(data)) {
+      return data;
+    }
+    if (data && typeof data === "object") {
+      for (const key of keys) {
+        if (Array.isArray(data[key])) {
+          return data[key];
+        }
+      }
     }
   }
   return [];
