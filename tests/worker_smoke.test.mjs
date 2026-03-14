@@ -151,6 +151,7 @@ test("search by name calls /search", async () => {
   await worker.fetch(makeWebhookRequest({ message: { text: "Ромашка", chat: { id: 1 } } }), makeEnv());
   const send = calls.find((c) => c.url.includes("/sendMessage"));
   const body = JSON.parse(send.options.body);
+  assert.match(body.text, /Выберите организацию/);
   assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "select:company:1234567890");
 });
 
@@ -168,4 +169,120 @@ test("BIC lookup uses /bank", async () => {
 
   await worker.fetch(makeWebhookRequest({ message: { text: "044525225", chat: { id: 1 } } }), makeEnv());
   assert.ok(calls.some((c) => c.url.includes("/bank?")));
+});
+
+test("main card applies critical risk override and founders fallback", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.pathname.endsWith("/company")) {
+      return jsonResponse({
+        meta: { status: "ok" },
+        data: {
+          ИНН: "3525405517",
+          ОГРН: "1023500000000",
+          НаимСокр: "ООО Риск",
+          Статус: { Наим: "Не действует" },
+          Учредители: [{ Наим: "Учредитель Тест" }],
+          Налоги: { СумНедоим: 0 }
+        }
+      });
+    }
+    if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs")) {
+      return jsonResponse({ meta: { status: "ok" }, data: [] });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(makeWebhookRequest({ message: { text: "3525405517", chat: { id: 5 } } }), makeEnv());
+
+  const send = calls.find((c) => c.url.includes("/sendMessage"));
+  const body = JSON.parse(send.options.body);
+  assert.match(body.text, /КРИТИЧЕСКИЙ РИСК/);
+  assert.match(body.text, /Компания не действует/);
+  assert.match(body.text, /Уровень риска: <b>Критический<\/b>/);
+  assert.match(body.text, /Учредитель \(текущий\): Учредитель Тест/);
+});
+
+test("co:tax distinguishes missing data from zero values", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.pathname.endsWith("/company")) {
+      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893" } });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-tax", data: "co:tax:7707083893", message: { message_id: 7, chat: { id: 2 } } } }),
+    makeEnv()
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Налоговые данные не найдены/);
+  assert.doesNotMatch(body.text, /0 ₽/);
+});
+
+test("co:ctr renders explicit contract number fallback", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.pathname.endsWith("/contracts")) {
+      return jsonResponse({
+        meta: { status: "ok" },
+        data: [{ Дата: "2019-12-30", Предмет: "", СуммаКонтракта: 320447 }]
+      });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-ctr", data: "co:ctr:7707083893", message: { message_id: 8, chat: { id: 3 } } } }),
+    makeEnv()
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Номер: нет данных/);
+  assert.doesNotMatch(body.text, /• —/);
+});
+
+test("co:lnk shows only non-empty sections and collapsed empty note", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.pathname.endsWith("/company")) {
+      return jsonResponse({
+        meta: { status: "ok" },
+        data: {
+          ИНН: "7707083893",
+          Руковод: [{ ФИО: "Иванов И.И." }],
+          ЮрАдрес: { АдресРФ: "Москва" }
+        }
+      });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-lnk", data: "co:lnk:7707083893", message: { message_id: 9, chat: { id: 3 } } } }),
+    makeEnv()
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Связи по руководителю: Иванов И\.И\./);
+  assert.match(body.text, /Связи по адресу: Москва/);
+  assert.match(body.text, /Нет данных по: учредителям, телефону, email/);
+  assert.doesNotMatch(body.text, /Связи по телефону:/);
 });
