@@ -621,7 +621,7 @@ test("company card includes main summary, risk block and new menu", async () => 
 
   assert.match(body.text, /ПАО Сбербанк/);
   assert.match(body.text, /Краткая оценка/);
-  assert.match(body.text, /Риск: низкий/);
+  assert.match(body.text, /Риск:\s*<b>Низкий<\/b>/);
   assert.match(body.text, /Что важно сразу/);
   assert.match(body.text, /64\.19 — Прочее денежное посредничество/);
   assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "card:7707083893");

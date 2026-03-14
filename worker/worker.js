@@ -304,7 +304,7 @@ async function handleCallbackQuery(callbackQuery, env) {
       chatId,
       messageId,
       isCheckoNotFoundError(error) ? COMPANY_NOT_FOUND_MESSAGE : CHECKO_SERVICE_ERROR_MESSAGE,
-      { inline_keyboard: [[kb("🔄 Новый поиск", "reset:start")]] }
+      { inline_keyboard: [[kb("🏠 В меню", "reset:start")]] }
     );
   }
 }
@@ -429,7 +429,6 @@ async function buildMainCardView(env, inn, entityType) {
     throw createCheckoNotFoundError();
   }
   const counts = await collectCounts(env, inn, data);
-  const cardTitle = endpoint === "entrepreneur" ? "<b>🧑‍💼 Карточка ИП</b>" : "<b>🏢 Карточка компании</b>";
   const titleFull = pick(data, ["НаимПолн"]);
   const titleShort = pick(data, ["НаимСокр"]);
   const fioTitle = pick(data, ["ФИО"]);
@@ -476,29 +475,29 @@ async function buildMainCardView(env, inn, entityType) {
   const founderName = founder ? founder.ФИО || founder.Наим || "—" : "—";
   const founderShare = founder?.Доля?.Проц || founder?.ДоляПроц || founder?.Доля || null;
   const lines = [
-    `<b>${escapeHtml(title)}</b>`,
-    `ОГРН: ${escapeHtml(String(ogrn))} · ИНН: ${escapeHtml(String(innValue))}`,
-    `Статус: ${escapeHtml(String(status).toLowerCase())}`,
-    `Дата регистрации: ${escapeHtml(formatDateValue(data.ДатаРег))}`,
-    `КПП: ${escapeHtml(String(pick(data, ["КПП"]) || "—"))}`,
-    okved ? `Основной ОКВЭД: ${escapeHtml(okved)}` : null,
-    `Адрес: ${escapeHtml(String(address))}`,
-    `Руководитель: ${escapeHtml(String(director))}`,
-    phone ? `Телефон: ${escapeHtml(phone)}` : null,
-    email ? `Email: ${escapeHtml(email)}` : null,
-    capital ? `Уставный капитал: ${escapeHtml(formatMoney(capital))}` : null,
-    founder ? `Учредитель: ${escapeHtml(String(founderName))}${founderShare ? `, ${escapeHtml(String(founderShare))}%` : ""}` : null,
-    `Филиалы: ${branchCount > 0 ? `есть, ${branchCount} шт.` : "нет"}`,
+    `🏢 <b>${escapeHtml(title)}</b>`,
+    `🆔 ОГРН: <code>${escapeHtml(String(ogrn))}</code> · ИНН: <code>${escapeHtml(String(innValue))}</code>`,
+    `📌 Статус: <b>${escapeHtml(String(status))}</b>`,
+    `📅 Дата регистрации: ${escapeHtml(formatDateValue(data.ДатаРег))}`,
+    `🧾 КПП: ${escapeHtml(String(pick(data, ["КПП"]) || "—"))}`,
+    okved ? `🏭 ОКВЭД: ${escapeHtml(okved)}` : null,
+    `📍 Адрес: ${escapeHtml(String(address))}`,
+    `👤 Руководитель: ${escapeHtml(String(director))}`,
+    phone ? `📞 Телефон: ${escapeHtml(phone)}` : null,
+    email ? `✉️ Email: ${escapeHtml(email)}` : null,
+    capital ? `💼 Уставный капитал: ${escapeHtml(formatMoney(capital))}` : null,
+    founder ? `👥 Учредитель: ${escapeHtml(String(founderName))}${founderShare ? `, ${escapeHtml(String(founderShare))}%` : ""}` : null,
+    `🏬 Филиалы: ${branchCount > 0 ? branchCount : 0}`,
     "",
-    "<b>Краткая оценка</b>",
-    `${risk.icon} Риск: ${risk.level.toLowerCase()}`,
+    "⚠️ <b>Краткая оценка</b>",
+    `${risk.icon} Риск: <b>${risk.level}</b>`,
     "",
     "Что важно сразу:",
-    Number(taxDebt) > 1000 ? "• есть налоговая задолженность более 1 000 ₽" : "• значимой налоговой задолженности не выявлено",
-    `• арбитражных дел: ${escapeHtml(String(counts.arbitration ?? "?"))}`,
-    `• ФССП: ${escapeHtml(String(counts.enforcements ?? "?"))}`,
-    "• госконтракты: см. раздел Контракты",
-    smeCat ? `• в реестре МСП: ${escapeHtml(String(smeCat).toLowerCase())}` : "• в реестре МСП: нет данных"
+    Number(taxDebt) > 1000 ? `💸 Налоговая задолженность — ${escapeHtml(formatMoney(taxDebt))}` : "✅ Значимой налоговой задолженности не выявлено",
+    `⚖️ Арбитражных дел — ${escapeHtml(String(counts.arbitration ?? "?"))}`,
+    `🛡️ ФССП — ${escapeHtml(String(counts.enforcements ?? "?"))}`,
+    "📑 Госконтракты — см. раздел Контракты",
+    smeCat ? `🏷️ МСП — ${escapeHtml(String(smeCat).toLowerCase())}` : "🏷️ МСП — нет данных"
   ].filter(Boolean);
   const text = lines.join("\n");
   return { text, reply_markup: buildMainKeyboard(inn, counts, endpoint) };
@@ -543,13 +542,13 @@ __name(fetchSectionCount, "fetchSectionCount");
 function buildMainKeyboard(inn, counts, entityType) {
   return {
     inline_keyboard: [
-      [kb("📄 Карточка", `card:${inn}`), kb("⚠️ Проверки", `checks:${inn}`)],
+      [kb("🏢 Карточка", `card:${inn}`), kb("⚠️ Проверки", `checks:${inn}`)],
       [kb("💰 Финансы", `financial:${inn}`), kb("⚖️ Арбитраж", `arbitration:${inn}`)],
       [kb("🛡️ ФССП", `enforcements:${inn}`), kb("📑 Контракты", `contracts:${inn}`)],
       [kb("🕓 История", `history:${inn}`), kb("🔗 Связи", `links:${inn}`)],
-      [kb("👥 Учредители", `founders:${inn}`), kb("🏢 Филиалы", `branches:${inn}`)],
+      [kb("👥 Учредители", `founders:${inn}`), kb("🏬 Филиалы", `branches:${inn}`)],
       [kb("🏭 ОКВЭД", `okved:${inn}`), kb("🧾 Налоги", `taxes:${inn}`)],
-      [kb("🔄 Новый поиск", "reset:start")]
+      [kb("🏠 В меню", "reset:start")]
     ]
   };
 }
@@ -560,7 +559,7 @@ async function buildCardDetailsView(env, inn) {
   const director = pickNested(data, [["Руковод", 0, "ФИО"]]) || "—";
   const address = pickNested(data, [["ЮрАдрес", "АдресРФ"], ["Адрес"]]) || "—";
   const text = [
-    "<b>Карточка компании</b>",
+    "🏢 <b>Карточка компании</b>",
     `Полное наименование: ${escapeHtml(String(pick(data, ["НаимПолн"]) || "—"))}`,
     `Краткое наименование: ${escapeHtml(String(pick(data, ["НаимСокр"]) || "—"))}`,
     `ОГРН: ${escapeHtml(String(pick(data, ["ОГРН"]) || "—"))}`,
@@ -580,7 +579,7 @@ async function buildChecksView(env, inn) {
   const counts = await collectCounts(env, inn, data);
   const taxDebt = toNumber(pickNested(data, [["Налоги", "СумНедоим"]]));
   const text = [
-    "<b>Проверки и факторы риска</b>",
+    "⚠️ <b>Проверки и факторы риска</b>",
     "Позитивные факторы:",
     `• ${countBranches(data) > 0 ? `есть филиалы — ${countBranches(data)} шт.` : "филиалы не найдены"}`,
     `• категория МСП: ${escapeHtml(String(pickNested(data, [["РМСП", "Кат"]]) || "нет данных"))}`,
@@ -600,7 +599,7 @@ async function buildLinksView(env, inn) {
   const founders = Array.isArray(data.Учред) ? data.Учред : [];
   const founderNames = founders.slice(0, 5).map((f) => f?.ФИО || f?.Наим).filter(Boolean);
   const text = [
-    "<b>Связи</b>",
+    "🔗 <b>Связи компании</b>",
     "По текущему руководителю / учредителю:",
     `• ${escapeHtml(String(director))}`,
     ...founderNames.length ? founderNames.map((name) => `• ${escapeHtml(String(name))}`) : ["• Нет данных"],
@@ -626,7 +625,7 @@ async function buildFoundersView(env, inn) {
     const share = f?.Доля?.Проц || f?.ДоляПроц || f?.Доля || "—";
     return `${idx + 1}. ${escapeHtml(String(name))} — доля: ${escapeHtml(String(share))}%`;
   });
-  const text = ["<b>Учредители</b>", rows.length ? rows.join("\n") : "Нет данных"].join("\n");
+  const text = ["👥 <b>Учредители</b>", rows.length ? rows.join("\n") : "Нет данных"].join("\n");
   return { text, reply_markup: backKeyboard(inn) };
 }
 __name(buildFoundersView, "buildFoundersView");
@@ -635,7 +634,7 @@ async function buildBranchesView(env, inn) {
   const data = takeEntity(payload) || {};
   const branches = getBranches(data);
   const rows = branches.map((b, idx) => `${idx + 1}. КПП: ${escapeHtml(String(b?.КПП || "—"))} — ${escapeHtml(String(b?.Адрес || b?.АдресРФ || "—"))}`);
-  const text = ["<b>Филиалы</b>", rows.length ? rows.join("\n") : "Ничего не найдено."].join("\n");
+  const text = ["🏢 <b>Филиалы</b>", rows.length ? rows.join("\n") : "Ничего не найдено."].join("\n");
   return { text, reply_markup: backKeyboard(inn) };
 }
 __name(buildBranchesView, "buildBranchesView");
@@ -645,7 +644,7 @@ async function buildOkvedView(env, inn) {
   const primary = data?.ОКВЭД || {};
   const extra = Array.isArray(data?.ОКВЭДДоп) ? data.ОКВЭДДоп : [];
   const text = [
-    "<b>Виды деятельности</b>",
+    "🏭 <b>Виды деятельности</b>",
     "Основной:",
     `• ${escapeHtml(String(primary?.Код || "—"))} — ${escapeHtml(String(primary?.Наим || "—"))}`,
     "",
@@ -660,7 +659,7 @@ async function buildTaxesView(env, inn) {
   const data = takeEntity(payload) || {};
   const tax = data?.Налоги || {};
   const text = [
-    "<b>Налоги</b>",
+    "🧾 <b>Налоги</b>",
     `Общая сумма: ${escapeHtml(formatMoney(tax?.Сум || tax?.Сумма || 0))}`,
     `Недоимка: ${escapeHtml(formatMoney(tax?.СумНедоим || 0))}`,
     `Пени/штрафы: ${escapeHtml(formatMoney(tax?.СумПениШтр || 0))}`
@@ -713,14 +712,14 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
   if (section === "arbitration") {
     if (rows.length === 0) {
       return [
-        "<b>⚖️ Арбитраж</b>",
+        "⚖️ <b>Арбитражные дела</b>",
         "",
         "✅ Арбитражные дела по компании не найдены."
       ].join("\n");
     }
     const totalAmount = sumByKeys(rows, ["СуммаТреб", "Сумма", "amount"]);
     return [
-      "<b>⚖️ Арбитраж</b>",
+      "⚖️ <b>Арбитражные дела</b>",
       "",
       `📊 Всего дел: <b>${rows.length}</b>`,
       `💰 Общая сумма: <b>${formatMoney(totalAmount)}</b>`,
@@ -744,7 +743,7 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
   if (section === "contracts") {
     const totalAmount = sumByKeys(rows, ["СуммаКонтракта", "Цена", "Сумма", "amount"]);
     return [
-      "<b>🏛 Госзакупки</b>",
+      "📑 <b>Госконтракты и закупки</b>",
       "",
       `📊 Всего контрактов: <b>${rows.length}</b>`,
       `💰 Сумма контрактов: <b>${formatMoney(totalAmount)}</b>`,
@@ -756,7 +755,7 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
   }
   if (section === "inspections") {
     return [
-      "<b>🚨 Проверки</b>",
+      "⚠️ <b>Проверки и факторы риска</b>",
       "",
       `📊 Всего проверок: <b>${rows.length}</b>`,
       rows.length <= 3 ? "✅ Статус риска: <b>Низкий</b>" : "⚠️ Статус риска: <b>Средний</b>",
@@ -768,7 +767,7 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
   if (section === "financial") {
     if (rows.length === 0) {
       return [
-        "<b>📊 Финансы</b>",
+        "💰 <b>Финансы</b>",
         "",
         "⚠️ Финансовая отчётность по компании не найдена."
       ].join("\n");
@@ -781,7 +780,7 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
     const profitLabel = lookupAccountCode("2400")?.name || "Чистая прибыль";
     const assetsLabel = lookupAccountCode("1600")?.name || "Активы";
     return [
-      "<b>📊 Финансы</b>",
+      "💰 <b>Финансы</b>",
       "",
       `📊 Периодов в отчётности: <b>${rows.length}</b>`,
       `• ${escapeHtml(revenueLabel)}: <b>${formatMoney(revenue)}</b>`,
@@ -793,7 +792,7 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
   if (section === "enforcements") {
     const totalAmount = sumByKeys(rows, ["СуммаДолга", "Сумма", "amount"]);
     return [
-      "<b>🛑 ФССП</b>",
+      "🛡️ <b>Исполнительные производства</b>",
       "",
       `📊 Всего: <b>${rows.length}</b>`,
       `💰 Сумма к взысканию: <b>${formatMoney(totalAmount)}</b>`,
@@ -805,7 +804,7 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
   }
   if (section === "history") {
     return [
-      "<b>📜 История</b>",
+      "🕓 <b>История изменений</b>",
       "",
       `📊 Всего записей: <b>${rows.length}</b>`,
       "",
@@ -837,7 +836,7 @@ async function buildPersonView(env, inn) {
     `ИНН: <b>${escapeHtml(String(pick(data || {}, ["ИНН"]) || inn))}</b>`,
     `Связанные компании: <b>${escapeHtml(String(pick(data || {}, ["Связи", "КолСвязей"]) || "—"))}</b>`
   ].join("\n");
-  return { text, reply_markup: { inline_keyboard: [[kb("🔄 Новый поиск", "reset:start")]] } };
+  return { text, reply_markup: { inline_keyboard: [[kb("🏠 В меню", "reset:start")]] } };
 }
 __name(buildPersonView, "buildPersonView");
 async function buildBankView(env, inn) {
@@ -876,7 +875,7 @@ async function buildBicView(env, bic) {
     `Тип: <b>${escapeHtml(String(pick(bank || {}, ["Тип"]) || "—"))}</b>`,
     `Корр. счёт: <b>${escapeHtml(String(corr))}</b>`
   ].join("\n");
-  return { text, reply_markup: { inline_keyboard: [[kb("🔄 Новый поиск", "reset:start")]] } };
+  return { text, reply_markup: { inline_keyboard: [[kb("🏠 В меню", "reset:start")]] } };
 }
 __name(buildBicView, "buildBicView");
 async function buildAffiliatesView(env, inn, page) {
