@@ -222,15 +222,20 @@ test("POST /webhook with 10-digit INN sends company card with expanded menu", as
   const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
   const body = JSON.parse(telegramCall.options.body);
   assert.match(body.text, /ПАО Сбербанк/);
-  assert.equal(body.reply_markup.inline_keyboard.length, 4);
-  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "financial:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "arbitration:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "contracts:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[1][1].callback_data, "inspections:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard.length, 7);
+  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "card:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "checks:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "financial:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[1][1].callback_data, "arbitration:7707083893");
   assert.equal(body.reply_markup.inline_keyboard[2][0].callback_data, "enforcements:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[2][1].callback_data, "bankruptcy:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[2][1].callback_data, "contracts:7707083893");
   assert.equal(body.reply_markup.inline_keyboard[3][0].callback_data, "history:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[3][1].callback_data, "reset:start");
+  assert.equal(body.reply_markup.inline_keyboard[3][1].callback_data, "links:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[4][0].callback_data, "founders:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[4][1].callback_data, "branches:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[5][0].callback_data, "okved:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[5][1].callback_data, "taxes:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[6][0].callback_data, "reset:start");
 });
 
 test("POST /webhook with 13-digit OGRN routes to company", async () => {
@@ -299,10 +304,10 @@ test("POST /webhook with 15-digit OGRNIP routes to entrepreneur menu", async () 
   assert.equal(response.status, 200);
   const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
   const body = JSON.parse(telegramCall.options.body);
-  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "arbitration:304500116000157");
-  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "contracts:304500116000157");
-  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "history:304500116000157");
-  assert.equal(body.reply_markup.inline_keyboard[1][1].callback_data, "reset:start");
+  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "card:304500116000157");
+  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "checks:304500116000157");
+  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "financial:304500116000157");
+  assert.equal(body.reply_markup.inline_keyboard[1][1].callback_data, "arbitration:304500116000157");
 });
 
 test("POST /webhook with 9-digit BIK sends bank card and reset", async () => {
@@ -562,7 +567,7 @@ test("callback_query for contracts shows submenu with law categories", async () 
   assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "con:7707083893:223c")));
 });
 
-test("company card includes website link, phone, email, ОКВЭД, capital, SME, and tax debt", async () => {
+test("company card includes main summary, risk block and new menu", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const requestUrl = new URL(String(url));
@@ -614,18 +619,13 @@ test("company card includes website link, phone, email, ОКВЭД, capital, SME
   const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
   const body = JSON.parse(telegramCall.options.body);
 
-  // Website rendered as clickable link with https:// prefix added (URL() normalizes to add trailing slash)
-  assert.match(body.text, /<a href="https:\/\/www\.sberbank\.ru\/">www\.sberbank\.ru<\/a>/);
-  // Phone numbers joined
-  assert.match(body.text, /\+7 495 500-00-00, \+7 495 500-00-01/);
-  // Email shown
-  assert.match(body.text, /info@sberbank\.ru/);
-  // ОКВЭД
+  assert.match(body.text, /ПАО Сбербанк/);
+  assert.match(body.text, /Краткая оценка/);
+  assert.match(body.text, /Риск: низкий/);
+  assert.match(body.text, /Что важно сразу/);
   assert.match(body.text, /64\.19 — Прочее денежное посредничество/);
-  // Capital
-  assert.match(body.text, /Уставной капитал/);
-  // SME category
-  assert.match(body.text, /Категория МСП/);
-  // Tax debt
-  assert.match(body.text, /Недоимка по налогам/);
+  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "card:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "checks:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[5][0].callback_data, "okved:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[5][1].callback_data, "taxes:7707083893");
 });
