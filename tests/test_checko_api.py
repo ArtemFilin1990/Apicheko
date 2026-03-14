@@ -230,3 +230,21 @@ class SearchIdentifierRegexTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CheckoAPIDetailEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_documented_finance_history_fedresurs_endpoints(self) -> None:
+        api = _FakeCheckoAPI()
+
+        await api.get_financial(inn="7707083893")
+        await api.get_history(inn="7707083893")
+        await api.get_fedresurs(inn="7707083893")
+
+        self.assertEqual(
+            api.calls,
+            [
+                ("finance", {"inn": "7707083893"}),
+                ("history", {"inn": "7707083893"}),
+                ("fedresurs-messages", {"inn": "7707083893"}),
+            ],
+        )

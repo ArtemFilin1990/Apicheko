@@ -50,7 +50,7 @@ var SECTION_CONFIG = {
   },
   financial: {
     title: "📊 Финансы",
-    endpoint: "finances",
+    endpoint: "finance",
     listKeys: ["Отчеты", "reports", "items", "data"],
     countLabel: "Лет в отчётности"
   },
@@ -62,13 +62,13 @@ var SECTION_CONFIG = {
   },
   history: {
     title: "📜 История",
-    endpoint: "timeline",
+    endpoint: "history",
     listKeys: ["События", "events"],
     countLabel: "Всего записей"
   },
   fedresurs: {
     title: "📋 Федресурс",
-    endpoint: "fedresurs",
+    endpoint: "fedresurs-messages",
     listKeys: ["Сообщения", "messages"],
     countLabel: "Всего сообщений"
   }
@@ -394,6 +394,7 @@ async function buildMainCardView(env, inn, entityType) {
     throw createCheckoNotFoundError();
   }
   const counts = await collectCounts(env, inn, data);
+  const cardTitle = endpoint === "entrepreneur" ? "<b>🧑‍💼 Карточка ИП</b>" : "<b>🏢 Карточка компании</b>";
   const titleFull = pick(data, ["НаимПолн"]);
   const titleShort = pick(data, ["НаимСокр"]);
   const fioTitle = pick(data, ["ФИО"]);
@@ -408,6 +409,7 @@ async function buildMainCardView(env, inn, entityType) {
   const statusCode = pickNested(data, [["Статус", "Код"], ["Статус", "Code"], ["СтатусКод"], ["КодСтатуса"]]);
   const statusLookup = lookupStatus(statusCode);
   const status = pickNested(data, [["Статус", "Наим"], ["Статус", "Текст"], ["Статус"]]) || statusLookup?.name || "—";
+  const risk = assessOverallRisk(counts, status);
   const director = pickNested(data, [["Руковод", 0, "ФИО"]]) || "—";
   const okvedObj = (typeof data.ОКВЭД === "object" && data.ОКВЭД !== null) ? data.ОКВЭД : {};
   const okvedCode = okvedObj.Код || null;
