@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock
 
-from bot.handlers.callbacks import _DETAIL_FETCHERS, cb_detail
+from bot.handlers.callbacks import _DETAIL_FETCHERS, calculate_risk_score, cb_detail
 from bot.keyboards import cancel_keyboard, company_detail_keyboard, main_menu_keyboard
 from services.checko_api import CheckoAPI
 
@@ -86,3 +86,16 @@ class PersonKeyboardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CemeteryRiskTests(unittest.IsolatedAsyncioTestCase):
+    async def test_calculate_risk_score_uses_counts_formula(self) -> None:
+        api = MagicMock(spec=CheckoAPI)
+        api.get_arbitration = AsyncMock(return_value={"data": {"cases": [{}, {}]}})
+        api.get_enforcements = AsyncMock(return_value={"data": {"items": [{}]}})
+        api.get_bankruptcy = AsyncMock(return_value={"data": {"messages": [{}, {}, {}]}})
+
+        score, label = await calculate_risk_score(api, "7707083893")
+
+        self.assertEqual(score, 2 * 4 + 1 * 6 + 3 * 10)
+        self.assertEqual(label, "🔴 Высокий риск")

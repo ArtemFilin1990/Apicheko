@@ -1,10 +1,10 @@
 import html
 import re
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from bot.formatters import format_bank, format_company, format_entrepreneur, format_person, format_search_results
 from bot.keyboards import (
@@ -25,6 +25,26 @@ IDENTIFIER_RE = re.compile(r"^\d{9}$|^\d{10}$|^\d{12}$|^\d{13}$|^\d{15}$")
 class SearchState(StatesGroup):
     waiting_for_inn = State()
     waiting_for_name = State()
+
+
+@router.callback_query(F.data == "cem:search_inn")
+async def cem_search_inn(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(SearchState.waiting_for_inn)
+    await call.message.edit_text(
+        "Введите ИНН организации для проверки:",
+        reply_markup=cancel_keyboard(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "cem:search_name")
+async def cem_search_name(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(SearchState.waiting_for_name)
+    await call.message.edit_text(
+        "Введите название или ФИО для проверки:",
+        reply_markup=cancel_keyboard(),
+    )
+    await call.answer()
 
 
 @router.message(SearchState.waiting_for_inn)

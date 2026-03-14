@@ -201,7 +201,7 @@ test("POST /webhook with 10-digit INN sends company card with expanded menu", as
       if (endpoint === "bankruptcy-messages") {
         return jsonResponse({ meta: { status: "ok" }, data: { messages: [] } });
       }
-      if (endpoint === "finances") {
+      if (endpoint === "finance") {
         return jsonResponse({ meta: { status: "ok" }, data: { reports: [{ 2110: 1000, 2400: 250, 1600: 5000 }] } });
       }
     }
@@ -243,7 +243,7 @@ test("POST /webhook with 13-digit OGRN routes to company", async () => {
       if (endpoint === "company") {
         return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", ОГРН: "1027700132195", НаимПолн: "ООО Тест" } });
       }
-      if (["legal-cases", "bankruptcy-messages", "finances"].includes(endpoint)) {
+      if (["legal-cases", "bankruptcy-messages", "finance"].includes(endpoint)) {
         return jsonResponse({ meta: { status: "ok" }, data: {} });
       }
     }
@@ -287,7 +287,7 @@ test("POST /webhook with 15-digit OGRNIP routes to entrepreneur menu", async () 
       }
       if (endpoint === "legal-cases") return jsonResponse({ meta: { status: "ok" }, data: { cases: [] } });
       if (endpoint === "bankruptcy-messages") return jsonResponse({ meta: { status: "ok" }, data: { messages: [] } });
-      if (endpoint === "finances") return jsonResponse({ meta: { status: "ok" }, data: { reports: [] } });
+      if (endpoint === "finance") return jsonResponse({ meta: { status: "ok" }, data: { reports: [] } });
     }
     return jsonResponse({ ok: true });
   };
@@ -593,7 +593,7 @@ test("company card includes website link, phone, email, ОКВЭД, capital, SME
           }
         });
       }
-      if (["legal-cases", "bankruptcy-messages", "finances"].includes(endpoint)) {
+      if (["legal-cases", "bankruptcy-messages", "finance"].includes(endpoint)) {
         return jsonResponse({ meta: { status: "ok" }, data: {} });
       }
     }

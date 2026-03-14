@@ -7,14 +7,104 @@ from aiogram.types import CallbackQuery
 from bot.cards import DETAIL_FETCHERS, build_detail_card
 from bot.formatters import format_company, format_entrepreneur, format_person
 from bot.handlers.search import SearchState
-from bot.keyboards import cancel_keyboard, company_detail_keyboard, main_menu_keyboard
+from bot.keyboards import cancel_keyboard, cemetery_detail_keyboard, cemetery_menu_keyboard, company_detail_keyboard, main_menu_keyboard
 from services.checko_api import CheckoAPI, CheckoAPIError
+from utils.checko_payload import extract_items
 from storage.database import Database
 
 router = Router(name="callbacks")
 
 # Keep compatibility for tests importing internals from this module.
 _DETAIL_FETCHERS = DETAIL_FETCHERS
+
+
+@router.callback_query(F.data == "scenario:cemetery")
+async def cb_open_cemetery(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await call.message.edit_text(
+        "Введите ИНН или выберите раздел проверки:",
+        reply_markup=cemetery_menu_keyboard(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("scenario:cemetery:"))
+async def cb_open_cemetery_for_identifier(call: CallbackQuery, state: FSMContext) -> None:
+    parts = call.data.split(":", 2)
+    if len(parts) != 3:
+        await call.answer("Неверный запрос", show_alert=True)
+        return
+
+    _, _, identifier = parts
+    await state.clear()
+    await call.message.edit_text(
+        f"🪦 Сценарий проверки для <code>{html.escape(identifier)}</code>. Выберите раздел:",
+        reply_markup=cemetery_detail_keyboard(identifier),
+    )
+    await call.answer()
+
+
+async def calculate_risk_score(api: CheckoAPI, inn: str) -> tuple[int, str]:
+    arbs = await api.get_arbitration(inn=inn)
+    enfs = await api.get_enforcements(inn=inn)
+    bnks = await api.get_bankruptcy(inn=inn)
+
+    arbitration_count = len(extract_items(arbs, "Дела", "Записи", "cases", "items"))
+    enforcements_count = len(extract_items(enfs, "ИП", "Записи", "items"))
+    bankruptcy_count = len(extract_items(bnks, "Сообщения", "Записи", "messages", "items"))
+
+    score = arbitration_count * 4 + bankruptcy_count * 10 + enforcements_count * 6
+    if score >= 40:
+        label = "🔴 Высокий риск"
+    elif score > 0:
+        label = "🟡 Средний риск"
+    else:
+        label = "🟢 Низкий риск"
+    return score, label
+
+
+@router.callback_query(F.data.startswith("cem:"))
+async def cb_cemetery_detail(call: CallbackQuery, checko_api: CheckoAPI) -> None:
+    parts = call.data.split(":", 2)
+    if len(parts) < 2:
+        await call.answer("Неверный запрос", show_alert=True)
+        return
+
+    _, section, *rest = parts
+    if section in {"search_inn", "search_name"}:
+        return
+
+    if len(parts) != 3:
+        await call.answer("Неверный запрос", show_alert=True)
+        return
+
+    identifier = rest[0]
+    await call.message.edit_text("🔄 Загружаю…")
+
+    try:
+        if section == "risk":
+            score, label = await calculate_risk_score(checko_api, identifier)
+            text = (
+                f"📊 <b>Итоговая оценка риска</b>\n"
+                f"ИНН: <code>{html.escape(identifier)}</code>\n"
+                f"Счёт: <b>{score}</b>\n"
+                f"Статус: <b>{label}</b>"
+            )
+            markup = cemetery_detail_keyboard(identifier)
+        else:
+            if section not in _DETAIL_FETCHERS:
+                await call.answer("Неизвестный раздел", show_alert=True)
+                return
+            text, _ = await build_detail_card(checko_api, identifier, section)
+            markup = cemetery_detail_keyboard(identifier)
+
+        await call.message.edit_text(text, reply_markup=markup)
+    except CheckoAPIError as exc:
+        await call.message.edit_text(
+            f"⚠️ Ошибка при загрузке раздела «{html.escape(section)}»\n<i>{html.escape(str(exc))}</i>",
+            reply_markup=cemetery_detail_keyboard(identifier),
+        )
+    await call.answer()
 
 
 @router.callback_query(F.data == "menu")

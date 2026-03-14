@@ -28,9 +28,9 @@ class CheckoAPI:
         "enforcements": "enforcements",
         "arbitration": "legal-cases",
         "inspections": "inspections",
-        "financial": "finances",
-        "history": "timeline",
-        "fedresurs": "fedresurs",
+        "financial": "finance",
+        "history": "history",
+        "fedresurs": "fedresurs-messages",
         "search": "search",
     }
 
