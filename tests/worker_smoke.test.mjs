@@ -230,6 +230,7 @@ test("POST /webhook with 10-digit INN sends company card with expanded menu", as
   const body = JSON.parse(telegramCall.options.body);
   assert.match(body.text, /ПАО Сбербанк/);
   assert.equal(body.reply_markup.inline_keyboard.length, 7);
+
 });
 
 test("POST /webhook with 13-digit OGRN routes to company", async () => {
@@ -298,7 +299,6 @@ test("POST /webhook with 15-digit OGRNIP routes to entrepreneur menu", async () 
   assert.equal(response.status, 200);
   const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
   const body = JSON.parse(telegramCall.options.body);
-
 });
 
 test("POST /webhook with 9-digit BIK sends bank card and reset", async () => {
