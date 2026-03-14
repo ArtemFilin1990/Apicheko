@@ -69,10 +69,10 @@ test("/start sends new main menu", async () => {
 
   await worker.fetch(makeWebhookRequest({ message: { text: "/start", chat: { id: 1 } } }), makeEnv());
   const body = JSON.parse(calls[0].options.body);
-  assert.match(body.text, /оперативная проверка контрагентов/);
+  assert.match(body.text, /сервис проверки контрагентов и банков/);
   assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "search:inn");
-  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "search:name");
-  assert.equal(body.reply_markup.inline_keyboard[2][0].callback_data, "search:bic");
+  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "search:name");
+  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "search:bic");
 });
 
 test("10-digit INN opens main card with 12-section keyboard", async () => {
@@ -96,8 +96,8 @@ test("10-digit INN opens main card with 12-section keyboard", async () => {
   const send = calls.find((c) => c.url.includes("/sendMessage"));
   const body = JSON.parse(send.options.body);
   assert.match(body.text, /ООО Тест/);
-  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "co:main:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[5][1].callback_data, "co:tax:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "co:risk:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[5][0].callback_data, "co:tax:7707083893");
 });
 
 test("12-digit INN forces user choice", async () => {
@@ -110,7 +110,7 @@ test("12-digit INN forces user choice", async () => {
   await worker.fetch(makeWebhookRequest({ message: { text: "500100732259", chat: { id: 1 } } }), makeEnv());
   const body = JSON.parse(calls[0].options.body);
   assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "resolve12:entrepreneur:500100732259");
-  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "resolve12:person:500100732259");
+  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "resolve12:person:500100732259");
 });
 
 test("co:fin uses /finances and shows empty-state without service error", async () => {
@@ -131,7 +131,7 @@ test("co:fin uses /finances and shows empty-state without service error", async 
   assert.ok(calls.some((c) => c.url.includes("/answerCallbackQuery")));
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Financial statements not found/);
+  assert.match(body.text, /Финансовая отчетность не найдена/);
 });
 
 test("search by name calls /search", async () => {
