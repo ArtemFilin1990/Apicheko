@@ -617,7 +617,13 @@ __name(fetchSectionCount, "fetchSectionCount");
 function buildMainKeyboard(inn, counts, entityType) {
   return {
     inline_keyboard: [
-
+      [kb("⚠️ Риски", `co:risk:${inn}`), kb("📊 Финансы", `co:fin:${inn}`)],
+      [kb("⚖️ Арбитраж", `co:arb:${inn}`), kb("🛑 ФССП", `co:fsp:${inn}`)],
+      [kb("🏛 Контракты", `co:ctr:${inn}`), kb("📜 История", `co:his:${inn}`)],
+      [kb("🔗 Связи", `co:lnk:${inn}`), kb("👥 Учредители", `co:own:${inn}`)],
+      [kb("🏢 Филиалы", `co:fil:${inn}`), kb("🏭 ОКВЭД", `co:okv:${inn}`)],
+      [kb("🧾 Налоги", `co:tax:${inn}`)],
+      [kb("🏠 В меню", "menu")]
     ]
   };
 }
@@ -943,6 +949,10 @@ async function buildBicView(env, bic) {
     `Тип: <b>${escapeHtml(String(pick(bank || {}, ["Тип"]) || "—"))}</b>`,
     `Корр. счёт: <b>${escapeHtml(String(corr))}</b>`
   ].join("\n");
+  return {
+    text,
+    reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
+  };
 }
 __name(buildBicView, "buildBicView");
 async function buildAffiliatesView(env, inn, page) {
