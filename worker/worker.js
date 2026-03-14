@@ -394,7 +394,10 @@ async function buildMainCardView(env, inn, entityType) {
     throw createCheckoNotFoundError();
   }
   const counts = await collectCounts(env, inn, data);
-  const title = pick(data, ["НаимПолн", "НаимСокр", "ФИО"]) || "Без названия";
+  const titleFull = pick(data, ["НаимПолн"]);
+  const titleShort = pick(data, ["НаимСокр"]);
+  const fioTitle = pick(data, ["ФИО"]);
+  const title = titleFull || titleShort || fioTitle || "Без названия";
   const innValue = pick(data, ["ИНН"]) || inn;
   const ogrn = pick(data, ["ОГРН", "ОГРНИП"]) || "—";
   const address = pickNested(data, [["ЮрАдрес", "АдресРФ"], ["АдрМЖ", "АдресРФ"], ["Адрес"]]) || "—";
@@ -432,26 +435,53 @@ async function buildMainCardView(env, inn, entityType) {
     }
   }
   const risk = assessOverallRisk(counts);
+  const cardTitle = endpoint === "entrepreneur" ? "👤 <b>Карточка ИП / физлица</b>" : "🏢 <b>Карточка компании</b>";
   const lines = [
-    `🏢 <b>Карточка компании</b>`,
+    cardTitle,
     "",
-    `<b>Наименование:</b> ${escapeHtml(title)}`,
+    `<b>${endpoint === "entrepreneur" ? "ФИО" : "Наименование"}:</b> ${escapeHtml(title)}`
+  ];
+  if (titleFull && titleShort && titleFull !== titleShort) {
+    lines.push(`<b>Кратко:</b> ${escapeHtml(String(titleShort))}`);
+  }
+  lines.push(
+    "",
+    "<b>🧾 Реквизиты</b>",
     `<b>ИНН:</b> <code>${escapeHtml(String(innValue))}</code>`,
     `<b>ОГРН:</b> <code>${escapeHtml(String(ogrn))}</code>`,
-    "",
     `<b>Статус:</b> ${escapeHtml(String(status))}`,
     `<b>Дата регистрации:</b> ${escapeHtml(String(data.ДатаРег || "—"))}`,
-    `<b>Руководитель:</b> ${escapeHtml(String(director))}`,
+    "",
+    "<b>📍 Адрес</b>",
     `<b>Регион:</b> ${escapeHtml(String(region))}`,
-  ];
+    `<b>Адрес:</b> ${escapeHtml(String(address))}`,
+    "",
+    "<b>👤 Руководство и деятельность</b>",
+    `<b>Руководитель:</b> ${escapeHtml(String(director))}`
+  );
   if (okved) lines.push(`<b>ОКВЭД:</b> ${escapeHtml(okved)}`);
-  if (capital) lines.push(`<b>Уставной капитал:</b> ${escapeHtml(String(capital))} руб.`);
-  if (smeCat) lines.push(`<b>Категория МСП:</b> ${escapeHtml(String(smeCat))}`);
-  if (taxDebt) lines.push(`⚠️ <b>Недоимка по налогам:</b> ${escapeHtml(String(taxDebt))} руб.`);
-  if (phone) lines.push(`<b>Телефон:</b> ${escapeHtml(phone)}`);
-  if (email) lines.push(`<b>Email:</b> ${escapeHtml(email)}`);
-  if (websiteUrl) lines.push(`<b>Сайт:</b> <a href="${escapeHtml(encodeURI(websiteUrl))}">${escapeHtml(websiteRaw)}</a>`);
-  lines.push("", `${risk.icon} <b>Риск:</b> ${risk.level}`, `🔄 <b>Обновлено:</b> ${formatDate(/* @__PURE__ */ new Date())}`);
+  if (capital || smeCat || taxDebt) {
+    lines.push("", "<b>💼 Финансовые маркеры</b>");
+    if (capital) lines.push(`<b>Уставной капитал:</b> ${escapeHtml(String(capital))} руб.`);
+    if (smeCat) lines.push(`<b>Категория МСП:</b> ${escapeHtml(String(smeCat))}`);
+    if (taxDebt) lines.push(`⚠️ <b>Недоимка по налогам:</b> ${escapeHtml(String(taxDebt))} руб.`);
+  }
+  if (phone || email || websiteUrl) {
+    lines.push("", "<b>📞 Контакты</b>");
+    if (phone) lines.push(`<b>Телефон:</b> ${escapeHtml(phone)}`);
+    if (email) lines.push(`<b>Email:</b> ${escapeHtml(email)}`);
+    if (websiteUrl) lines.push(`<b>Сайт:</b> <a href="${escapeHtml(encodeURI(websiteUrl))}">${escapeHtml(String(websiteRaw))}</a>`);
+  }
+  lines.push(
+    "",
+    "<b>📌 Быстрые показатели</b>",
+    `<b>Финансы:</b> ${escapeHtml(String(counts.financial ?? "?"))}`,
+    `<b>Арбитраж:</b> ${escapeHtml(String(counts.arbitration ?? "?"))}`,
+    `<b>Банкротство:</b> ${escapeHtml(String(counts.bankruptcy ?? "?"))}`,
+    "",
+    `${risk.icon} <b>Риск:</b> ${risk.level}`,
+    `🔄 <b>Обновлено:</b> ${formatDate(/* @__PURE__ */ new Date())}`
+  );
   const text = lines.join("\n");
   return { text, reply_markup: buildMainKeyboard(inn, counts, endpoint) };
 }
