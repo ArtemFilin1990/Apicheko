@@ -170,7 +170,30 @@ async function handleCallbackQuery(callbackQuery, env) {
     if (data.startsWith("noop")) {
       return;
     }
-    if (data === "back:start" || data === "reset:start") {
+    if (data === "help") {
+      const view = buildStartInfoView();
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (data === "search:inn") {
+      const view = buildCompanyInputView();
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (data === "search:name") {
+      const view = {
+        text: "🧾 <b>Поиск по названию</b>\n\nОтправьте название компании или ФИО ИП сообщением.",
+        reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
+      };
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (data === "search:bic") {
+      const view = buildBankInputView();
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (data === "menu" || data === "back:start" || data === "reset:start") {
       const view = buildStartView();
       await editMessage(env, chatId, messageId, view.text, view.reply_markup);
       return;
@@ -211,12 +234,100 @@ async function handleCallbackQuery(callbackQuery, env) {
       }
       return;
     }
+    if (data.startsWith("co:")) {
+      const [, section, ident] = data.split(":", 3);
+      if (!section || !ident || !(/^\d{10}$/.test(ident) || /^\d{12}$/.test(ident) || /^\d{13}$/.test(ident) || /^\d{15}$/.test(ident))) {
+        return;
+      }
+      if (section === "main") {
+        const view = await buildMainCardView(env, ident);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      const map = { risk: "checks", fin: "financial", arb: "arbitration", fsp: "enforcements", ctr: "contracts", his: "history", lnk: "links", own: "founders", fil: "branches", okv: "okved", tax: "taxes" };
+      const mapped = map[section];
+      if (!mapped) {
+        return;
+      }
+      const synthetic = `${mapped}:${ident}`;
+      const [mappedAction, mappedInn] = synthetic.split(":");
+      if (mappedAction === "checks") {
+        const view = await buildChecksView(env, mappedInn);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      if (mappedAction === "links") {
+        const view = await buildLinksView(env, mappedInn);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      if (mappedAction === "founders") {
+        const view = await buildFoundersView(env, mappedInn);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      if (mappedAction === "branches") {
+        const view = await buildBranchesView(env, mappedInn);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      if (mappedAction === "okved") {
+        const view = await buildOkvedView(env, mappedInn);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      if (mappedAction === "taxes") {
+        const view = await buildTaxesView(env, mappedInn);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      if (SECTION_CONFIG[mappedAction]) {
+        const view = await buildSectionView(env, mappedAction, mappedInn, 1);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      }
+      return;
+    }
     const [action, inn, rawPage] = data.split(":");
     if (!inn || !(/^\d{10}$/.test(inn) || /^\d{12}$/.test(inn) || /^\d{13}$/.test(inn) || /^\d{15}$/.test(inn))) {
       return;
     }
     if (action === "main") {
       const view = await buildMainCardView(env, inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (action === "card") {
+      const view = await buildCardDetailsView(env, inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (action === "checks") {
+      const view = await buildChecksView(env, inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (action === "links") {
+      const view = await buildLinksView(env, inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (action === "founders") {
+      const view = await buildFoundersView(env, inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (action === "branches") {
+      const view = await buildBranchesView(env, inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (action === "okved") {
+      const view = await buildOkvedView(env, inn);
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (action === "taxes") {
+      const view = await buildTaxesView(env, inn);
       await editMessage(env, chatId, messageId, view.text, view.reply_markup);
       return;
     }
@@ -269,7 +380,7 @@ async function handleCallbackQuery(callbackQuery, env) {
       chatId,
       messageId,
       isCheckoNotFoundError(error) ? COMPANY_NOT_FOUND_MESSAGE : CHECKO_SERVICE_ERROR_MESSAGE,
-      { inline_keyboard: [[kb("🔄 Новый поиск", "reset:start")]] }
+      { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
     );
   }
 }
@@ -279,10 +390,10 @@ function buildStartView() {
     text: START_MESSAGE_TEXT,
     reply_markup: {
       inline_keyboard: [
-        [kb("🏢 Компания — ИНН / ОГРН", "start:company")],
-        [kb("👤 ИП / физлицо — ИНН / ОГРНИП", "start:person")],
-        [kb("🏦 Банк — БИК", "start:bank")],
-        [kb("ℹ️ Что входит в проверку", "start:info")]
+        [kb("🔎 Поиск по ИНН / ОГРН", "search:inn")],
+        [kb("🧾 Поиск по названию", "search:name")],
+        [kb("🏦 Поиск по БИК", "search:bic")],
+        [kb("ℹ️ Помощь", "help")]
       ]
     }
   };
@@ -394,7 +505,6 @@ async function buildMainCardView(env, inn, entityType) {
     throw createCheckoNotFoundError();
   }
   const counts = await collectCounts(env, inn, data);
-  const cardTitle = endpoint === "entrepreneur" ? "<b>🧑‍💼 Карточка ИП</b>" : "<b>🏢 Карточка компании</b>";
   const titleFull = pick(data, ["НаимПолн"]);
   const titleShort = pick(data, ["НаимСокр"]);
   const fioTitle = pick(data, ["ФИО"]);
@@ -436,53 +546,35 @@ async function buildMainCardView(env, inn, entityType) {
       // Invalid URL — omit the link
     }
   }
-
+  const branchCount = countBranches(data);
+  const founder = Array.isArray(data.Учред) && data.Учред[0] ? data.Учред[0] : null;
+  const founderName = founder ? founder.ФИО || founder.Наим || "—" : "—";
+  const founderShare = founder?.Доля?.Проц || founder?.ДоляПроц || founder?.Доля || null;
   const lines = [
-    cardTitle,
+    `🏢 <b>${escapeHtml(title)}</b>`,
+    `🆔 ОГРН: <code>${escapeHtml(String(ogrn))}</code> · ИНН: <code>${escapeHtml(String(innValue))}</code>`,
+    `📌 Статус: <b>${escapeHtml(String(status))}</b>`,
+    `📅 Дата регистрации: ${escapeHtml(formatDateValue(data.ДатаРег))}`,
+    `🧾 КПП: ${escapeHtml(String(pick(data, ["КПП"]) || "—"))}`,
+    okved ? `🏭 ОКВЭД: ${escapeHtml(okved)}` : null,
+    `📍 Адрес: ${escapeHtml(String(address))}`,
+    `👤 Руководитель: ${escapeHtml(String(director))}`,
+    phone ? `📞 Телефон: ${escapeHtml(phone)}` : null,
+    email ? `✉️ Email: ${escapeHtml(email)}` : null,
+    capital ? `💼 Уставный капитал: ${escapeHtml(formatMoney(capital))}` : null,
+    founder ? `👥 Учредитель: ${escapeHtml(String(founderName))}${founderShare ? `, ${escapeHtml(String(founderShare))}%` : ""}` : null,
+    `🏬 Филиалы: ${branchCount > 0 ? branchCount : 0}`,
     "",
-    `<b>${endpoint === "entrepreneur" ? "ФИО" : "Наименование"}:</b> ${escapeHtml(title)}`
-  ];
-  if (titleFull && titleShort && titleFull !== titleShort) {
-    lines.push(`<b>Кратко:</b> ${escapeHtml(String(titleShort))}`);
-  }
-  lines.push(
+    "⚠️ <b>Краткая оценка</b>",
+    `${risk.icon} Риск: <b>${risk.level}</b>`,
     "",
-    "<b>🧾 Реквизиты</b>",
-    `<b>ИНН:</b> <code>${escapeHtml(String(innValue))}</code>`,
-    `<b>ОГРН:</b> <code>${escapeHtml(String(ogrn))}</code>`,
-    `<b>Статус:</b> ${escapeHtml(String(status))}`,
-    `<b>Дата регистрации:</b> ${escapeHtml(String(data.ДатаРег || "—"))}`,
-    "",
-    "<b>📍 Адрес</b>",
-    `<b>Регион:</b> ${escapeHtml(String(region))}`,
-    `<b>Адрес:</b> ${escapeHtml(String(address))}`,
-    "",
-    "<b>👤 Руководство и деятельность</b>",
-    `<b>Руководитель:</b> ${escapeHtml(String(director))}`
-  );
-  if (okved) lines.push(`<b>ОКВЭД:</b> ${escapeHtml(okved)}`);
-  if (capital || smeCat || taxDebt) {
-    lines.push("", "<b>💼 Финансовые маркеры</b>");
-    if (capital) lines.push(`<b>Уставной капитал:</b> ${escapeHtml(String(capital))} руб.`);
-    if (smeCat) lines.push(`<b>Категория МСП:</b> ${escapeHtml(String(smeCat))}`);
-    if (taxDebt) lines.push(`⚠️ <b>Недоимка по налогам:</b> ${escapeHtml(String(taxDebt))} руб.`);
-  }
-  if (phone || email || websiteUrl) {
-    lines.push("", "<b>📞 Контакты</b>");
-    if (phone) lines.push(`<b>Телефон:</b> ${escapeHtml(phone)}`);
-    if (email) lines.push(`<b>Email:</b> ${escapeHtml(email)}`);
-    if (websiteUrl) lines.push(`<b>Сайт:</b> <a href="${escapeHtml(encodeURI(websiteUrl))}">${escapeHtml(String(websiteRaw))}</a>`);
-  }
-  lines.push(
-    "",
-    "<b>📌 Быстрые показатели</b>",
-    `<b>Финансы:</b> ${escapeHtml(String(counts.financial ?? "?"))}`,
-    `<b>Арбитраж:</b> ${escapeHtml(String(counts.arbitration ?? "?"))}`,
-    `<b>Банкротство:</b> ${escapeHtml(String(counts.bankruptcy ?? "?"))}`,
-    "",
-    `${risk.icon} <b>Риск:</b> ${risk.level}`,
-    `🔄 <b>Обновлено:</b> ${formatDate(/* @__PURE__ */ new Date())}`
-  );
+    "Что важно сразу:",
+    Number(taxDebt) > 1000 ? `💸 Налоговая задолженность — ${escapeHtml(formatMoney(taxDebt))}` : "✅ Значимой налоговой задолженности не выявлено",
+    `⚖️ Арбитражных дел — ${escapeHtml(String(counts.arbitration ?? "?"))}`,
+    `🛡️ ФССП — ${escapeHtml(String(counts.enforcements ?? "?"))}`,
+    "📑 Госконтракты — см. раздел Контракты",
+    smeCat ? `🏷️ МСП — ${escapeHtml(String(smeCat).toLowerCase())}` : "🏷️ МСП — нет данных"
+  ].filter(Boolean);
   const text = lines.join("\n");
   return { text, reply_markup: buildMainKeyboard(inn, counts, endpoint) };
 }
@@ -524,37 +616,133 @@ async function fetchSectionCount(env, section, inn) {
 }
 __name(fetchSectionCount, "fetchSectionCount");
 function buildMainKeyboard(inn, counts, entityType) {
-  const c = /* @__PURE__ */ __name((key) => counts[key] ?? "?", "c");
-  if (entityType === "entrepreneur") {
-    return {
-      inline_keyboard: [
-        [kb(`⚖️ Арбитраж (${c("arbitration")})`, `arbitration:${inn}`), kb("🏛 Госзакупки", `contracts:${inn}`)],
-        [kb("📜 История", `history:${inn}`), kb("🔄 Новый поиск", "reset:start")]
-      ]
-    };
-  }
   return {
     inline_keyboard: [
-      [
-        kb(`📊 Финансы (${c("financial")})`, `financial:${inn}`),
-        kb(`⚖️ Арбитраж (${c("arbitration")})`, `arbitration:${inn}`)
-      ],
-      [
-        kb("🏛 Госзакупки", `contracts:${inn}`),
-        kb("🚨 Проверки", `inspections:${inn}`)
-      ],
-      [
-        kb("🛑 ФССП", `enforcements:${inn}`),
-        kb(`📉 Банкротство (${c("bankruptcy")})`, `bankruptcy:${inn}`)
-      ],
-      [
-        kb("📜 История", `history:${inn}`),
-        kb("🔄 Новый поиск", "reset:start")
-      ]
+      [kb("🏢 Карточка", `co:main:${inn}`), kb("⚠️ Проверки", `co:risk:${inn}`)],
+      [kb("💰 Финансы", `co:fin:${inn}`), kb("⚖️ Арбитраж", `co:arb:${inn}`)],
+      [kb("🛡️ ФССП", `co:fsp:${inn}`), kb("📑 Контракты", `co:ctr:${inn}`)],
+      [kb("🕓 История", `co:his:${inn}`), kb("🔗 Связи", `co:lnk:${inn}`)],
+      [kb("👥 Учредители", `co:own:${inn}`), kb("🏬 Филиалы", `co:fil:${inn}`)],
+      [kb("🏭 ОКВЭД", `co:okv:${inn}`), kb("🧾 Налоги", `co:tax:${inn}`)],
+      [kb("🏠 В меню", "menu")]
     ]
   };
 }
 __name(buildMainKeyboard, "buildMainKeyboard");
+async function buildCardDetailsView(env, inn) {
+  const payload = await checkoRequest(env, "company", identifierParams(inn));
+  const data = takeEntity(payload) || {};
+  const director = pickNested(data, [["Руковод", 0, "ФИО"]]) || "—";
+  const address = pickNested(data, [["ЮрАдрес", "АдресРФ"], ["Адрес"]]) || "—";
+  const text = [
+    "🏢 <b>Карточка компании</b>",
+    `Полное наименование: ${escapeHtml(String(pick(data, ["НаимПолн"]) || "—"))}`,
+    `Краткое наименование: ${escapeHtml(String(pick(data, ["НаимСокр"]) || "—"))}`,
+    `ОГРН: ${escapeHtml(String(pick(data, ["ОГРН"]) || "—"))}`,
+    `ИНН: ${escapeHtml(String(pick(data, ["ИНН"]) || inn))}`,
+    `КПП: ${escapeHtml(String(pick(data, ["КПП"]) || "—"))}`,
+    `Дата регистрации: ${escapeHtml(formatDateValue(data.ДатаРег))}`,
+    `Адрес: ${escapeHtml(String(address))}`,
+    `Руководитель: ${escapeHtml(String(director))}`,
+    `Телефон: ${escapeHtml(String(pickNested(data, [["Контакты", "Тел"]]) || "—"))}`
+  ].join("\n");
+  return { text, reply_markup: backKeyboard(inn) };
+}
+__name(buildCardDetailsView, "buildCardDetailsView");
+async function buildChecksView(env, inn) {
+  const payload = await checkoRequest(env, "company", identifierParams(inn));
+  const data = takeEntity(payload) || {};
+  const counts = await collectCounts(env, inn, data);
+  const taxDebt = toNumber(pickNested(data, [["Налоги", "СумНедоим"]]));
+  const text = [
+    "⚠️ <b>Проверки и факторы риска</b>",
+    "Позитивные факторы:",
+    `• ${countBranches(data) > 0 ? `есть филиалы — ${countBranches(data)} шт.` : "филиалы не найдены"}`,
+    `• категория МСП: ${escapeHtml(String(pickNested(data, [["РМСП", "Кат"]]) || "нет данных"))}`,
+    "",
+    "Факторы риска:",
+    `• задолженность по налогам: ${escapeHtml(formatMoney(taxDebt))}`,
+    `• арбитражных дел: ${escapeHtml(String(counts.arbitration ?? "?"))}`,
+    `• исполнительные производства ФССП: ${escapeHtml(String(counts.enforcements ?? "?"))}`
+  ].join("\n");
+  return { text, reply_markup: backKeyboard(inn) };
+}
+__name(buildChecksView, "buildChecksView");
+async function buildLinksView(env, inn) {
+  const payload = await checkoRequest(env, "company", identifierParams(inn));
+  const data = takeEntity(payload) || {};
+  const director = pickNested(data, [["Руковод", 0, "ФИО"]]) || "—";
+  const founders = Array.isArray(data.Учред) ? data.Учред : [];
+  const founderNames = founders.slice(0, 5).map((f) => f?.ФИО || f?.Наим).filter(Boolean);
+  const text = [
+    "🔗 <b>Связи компании</b>",
+    "По текущему руководителю / учредителю:",
+    `• ${escapeHtml(String(director))}`,
+    ...founderNames.length ? founderNames.map((name) => `• ${escapeHtml(String(name))}`) : ["• Нет данных"],
+    "",
+    "По адресу:",
+    `• ${escapeHtml(String(pickNested(data, [["ЮрАдрес", "АдресРФ"], ["Адрес"]]) || "нет данных"))}`,
+    "",
+    "По телефону:",
+    `• ${escapeHtml(String(pickNested(data, [["Контакты", "Тел"]]) || "нет данных"))}`,
+    "",
+    "По email:",
+    `• ${escapeHtml(String(pickNested(data, [["Контакты", "Емэйл"]]) || "нет данных"))}`
+  ].join("\n");
+  return { text, reply_markup: backKeyboard(inn) };
+}
+__name(buildLinksView, "buildLinksView");
+async function buildFoundersView(env, inn) {
+  const payload = await checkoRequest(env, "company", identifierParams(inn));
+  const data = takeEntity(payload) || {};
+  const founders = Array.isArray(data.Учред) ? data.Учред : [];
+  const rows = founders.map((f, idx) => {
+    const name = f?.ФИО || f?.Наим || "—";
+    const share = f?.Доля?.Проц || f?.ДоляПроц || f?.Доля || "—";
+    return `${idx + 1}. ${escapeHtml(String(name))} — доля: ${escapeHtml(String(share))}%`;
+  });
+  const text = ["👥 <b>Учредители</b>", rows.length ? rows.join("\n") : "Нет данных"].join("\n");
+  return { text, reply_markup: backKeyboard(inn) };
+}
+__name(buildFoundersView, "buildFoundersView");
+async function buildBranchesView(env, inn) {
+  const payload = await checkoRequest(env, "company", identifierParams(inn));
+  const data = takeEntity(payload) || {};
+  const branches = getBranches(data);
+  const rows = branches.map((b, idx) => `${idx + 1}. КПП: ${escapeHtml(String(b?.КПП || "—"))} — ${escapeHtml(String(b?.Адрес || b?.АдресРФ || "—"))}`);
+  const text = ["🏢 <b>Филиалы</b>", rows.length ? rows.join("\n") : "Ничего не найдено."].join("\n");
+  return { text, reply_markup: backKeyboard(inn) };
+}
+__name(buildBranchesView, "buildBranchesView");
+async function buildOkvedView(env, inn) {
+  const payload = await checkoRequest(env, "company", identifierParams(inn));
+  const data = takeEntity(payload) || {};
+  const primary = data?.ОКВЭД || {};
+  const extra = Array.isArray(data?.ОКВЭДДоп) ? data.ОКВЭДДоп : [];
+  const text = [
+    "🏭 <b>Виды деятельности</b>",
+    "Основной:",
+    `• ${escapeHtml(String(primary?.Код || "—"))} — ${escapeHtml(String(primary?.Наим || "—"))}`,
+    "",
+    "Дополнительные:",
+    ...(extra.length ? extra.slice(0, 15).map((o) => `• ${escapeHtml(String(o?.Код || "—"))} — ${escapeHtml(String(o?.Наим || "—"))}`) : ["• Нет данных"])
+  ].join("\n");
+  return { text, reply_markup: backKeyboard(inn) };
+}
+__name(buildOkvedView, "buildOkvedView");
+async function buildTaxesView(env, inn) {
+  const payload = await checkoRequest(env, "company", identifierParams(inn));
+  const data = takeEntity(payload) || {};
+  const tax = data?.Налоги || {};
+  const text = [
+    "🧾 <b>Налоги</b>",
+    `Общая сумма: ${escapeHtml(formatMoney(tax?.Сум || tax?.Сумма || 0))}`,
+    `Недоимка: ${escapeHtml(formatMoney(tax?.СумНедоим || 0))}`,
+    `Пени/штрафы: ${escapeHtml(formatMoney(tax?.СумПениШтр || 0))}`
+  ].join("\n");
+  return { text, reply_markup: backKeyboard(inn) };
+}
+__name(buildTaxesView, "buildTaxesView");
 async function buildSectionView(env, section, inn, page, callbackPrefix) {
   const cfg = SECTION_CONFIG[section];
   if (!cfg) {
@@ -600,14 +788,14 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
   if (section === "arbitration") {
     if (rows.length === 0) {
       return [
-        "<b>⚖️ Арбитраж</b>",
+        "⚖️ <b>Арбитражные дела</b>",
         "",
         "✅ Арбитражные дела по компании не найдены."
       ].join("\n");
     }
     const totalAmount = sumByKeys(rows, ["СуммаТреб", "Сумма", "amount"]);
     return [
-      "<b>⚖️ Арбитраж</b>",
+      "⚖️ <b>Арбитражные дела</b>",
       "",
       `📊 Всего дел: <b>${rows.length}</b>`,
       `💰 Общая сумма: <b>${formatMoney(totalAmount)}</b>`,
@@ -631,7 +819,7 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
   if (section === "contracts") {
     const totalAmount = sumByKeys(rows, ["СуммаКонтракта", "Цена", "Сумма", "amount"]);
     return [
-      "<b>🏛 Госзакупки</b>",
+      "📑 <b>Госконтракты и закупки</b>",
       "",
       `📊 Всего контрактов: <b>${rows.length}</b>`,
       `💰 Сумма контрактов: <b>${formatMoney(totalAmount)}</b>`,
@@ -643,7 +831,7 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
   }
   if (section === "inspections") {
     return [
-      "<b>🚨 Проверки</b>",
+      "⚠️ <b>Проверки и факторы риска</b>",
       "",
       `📊 Всего проверок: <b>${rows.length}</b>`,
       rows.length <= 3 ? "✅ Статус риска: <b>Низкий</b>" : "⚠️ Статус риска: <b>Средний</b>",
@@ -655,7 +843,7 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
   if (section === "financial") {
     if (rows.length === 0) {
       return [
-        "<b>📊 Финансы</b>",
+        "💰 <b>Финансы</b>",
         "",
         "⚠️ Финансовая отчётность по компании не найдена."
       ].join("\n");
@@ -668,7 +856,7 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
     const profitLabel = lookupAccountCode("2400")?.name || "Чистая прибыль";
     const assetsLabel = lookupAccountCode("1600")?.name || "Активы";
     return [
-      "<b>📊 Финансы</b>",
+      "💰 <b>Финансы</b>",
       "",
       `📊 Периодов в отчётности: <b>${rows.length}</b>`,
       `• ${escapeHtml(revenueLabel)}: <b>${formatMoney(revenue)}</b>`,
@@ -680,7 +868,7 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
   if (section === "enforcements") {
     const totalAmount = sumByKeys(rows, ["СуммаДолга", "Сумма", "amount"]);
     return [
-      "<b>🛑 ФССП</b>",
+      "🛡️ <b>Исполнительные производства</b>",
       "",
       `📊 Всего: <b>${rows.length}</b>`,
       `💰 Сумма к взысканию: <b>${formatMoney(totalAmount)}</b>`,
@@ -692,7 +880,7 @@ function formatSectionByType(section, rows, pageRows, page, totalPages) {
   }
   if (section === "history") {
     return [
-      "<b>📜 История</b>",
+      "🕓 <b>История изменений</b>",
       "",
       `📊 Всего записей: <b>${rows.length}</b>`,
       "",
@@ -724,7 +912,7 @@ async function buildPersonView(env, inn) {
     `ИНН: <b>${escapeHtml(String(pick(data || {}, ["ИНН"]) || inn))}</b>`,
     `Связанные компании: <b>${escapeHtml(String(pick(data || {}, ["Связи", "КолСвязей"]) || "—"))}</b>`
   ].join("\n");
-  return { text, reply_markup: { inline_keyboard: [[kb("🔄 Новый поиск", "reset:start")]] } };
+  return { text, reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] } };
 }
 __name(buildPersonView, "buildPersonView");
 async function buildBankView(env, inn) {
@@ -763,7 +951,7 @@ async function buildBicView(env, bic) {
     `Тип: <b>${escapeHtml(String(pick(bank || {}, ["Тип"]) || "—"))}</b>`,
     `Корр. счёт: <b>${escapeHtml(String(corr))}</b>`
   ].join("\n");
-  return { text, reply_markup: { inline_keyboard: [[kb("🔄 Новый поиск", "reset:start")]] } };
+  return { text, reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] } };
 }
 __name(buildBicView, "buildBicView");
 async function buildAffiliatesView(env, inn, page) {
@@ -1027,6 +1215,28 @@ function hasCompanyIdentity(data) {
   return Boolean(pick(data, ["НаимПолн", "НаимСокр", "ФИО", "ИНН", "ОГРН", "ОГРНИП"]));
 }
 __name(hasCompanyIdentity, "hasCompanyIdentity");
+function formatDateValue(value) {
+  if (!value) return "—";
+  if (value instanceof Date) return formatDate(value);
+  if (typeof value === "string") {
+    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[3]}.${m[2]}.${m[1]}`;
+  }
+  return String(value);
+}
+__name(formatDateValue, "formatDateValue");
+function getBranches(data) {
+  const candidates = [data?.Филиалы, data?.Филиал, data?.ОбособПодр, data?.Фил]
+  for (const c of candidates) {
+    if (Array.isArray(c)) return c;
+  }
+  return [];
+}
+__name(getBranches, "getBranches");
+function countBranches(data) {
+  return getBranches(data).length;
+}
+__name(countBranches, "countBranches");
 function deriveRegionFromAddress(address) {
   if (!address || address === "—") {
     return null;

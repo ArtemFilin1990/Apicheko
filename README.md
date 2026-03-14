@@ -44,18 +44,36 @@ Python-бот в `bot/` сохранён как отдельный runtime, но
 
 ## Формат callback_data
 
-Короткий формат:
+Единый формат callback-контракта Worker:
 
 ```text
-<cmd>:<id>:<page>:<extra>
+menu
+help
+search:inn
+search:name
+search:bic
+
+resolve12:entrepreneur:<id>
+resolve12:person:<id>
+
+select:company:<id>
+select:entrepreneur:<id>
+
+co:main:<id>
+co:risk:<id>
+co:fin:<id>
+co:arb:<id>
+co:fsp:<id>
+co:ctr:<id>
+co:his:<id>
+co:lnk:<id>
+co:own:<id>
+co:fil:<id>
+co:okv:<id>
+co:tax:<id>
 ```
 
-Примеры:
-
-- `arbitration:7707083893`
-- `financial:7707083893`
-- `bankruptcy:7707083893`
-- `main:7707083893`
+Для совместимости также продолжают приниматься legacy callback'и (`start:*`, `detail:*`, `card:*` и т.д.), но основной UI использует `co:*`.
 
 ## Секреты и переменные
 

@@ -79,12 +79,14 @@ class KeyboardTests(unittest.TestCase):
         callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row]
         self.assertNotIn("detail:7707083893:bank", callbacks)
 
-    def test_company_detail_keyboard_has_fedresurs_button(self) -> None:
+    def test_company_detail_keyboard_has_new_company_nav_buttons(self) -> None:
         from bot.keyboards import company_detail_keyboard
 
         markup = company_detail_keyboard("7707083893")
         callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row]
-        self.assertIn("detail:7707083893:fedresurs", callbacks)
+        self.assertIn("co:main:7707083893", callbacks)
+        self.assertIn("co:tax:7707083893", callbacks)
+        self.assertIn("menu", callbacks)
 
 
 class HistoryFormatterTests(unittest.TestCase):
