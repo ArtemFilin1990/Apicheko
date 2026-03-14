@@ -136,6 +136,42 @@ test("co:fin uses /finances and shows empty-state without service error", async 
   assert.match(body.text, /Финансовая отчетность не найдена/);
 });
 
+test("Checko non-JSON response returns service error instead of crashing", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      return new Response("<html>bad gateway</html>", { status: 200 });
+    }
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(makeWebhookRequest({ message: { text: "7707083893", chat: { id: 1 } } }), makeEnv());
+  const send = calls.find((c) => c.url.includes("/sendMessage"));
+  const body = JSON.parse(send.options.body);
+  assert.equal(body.text, "⚠️ Ошибка сервиса Checko");
+});
+
+test("Checko payload without meta.status is treated as service error", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      return jsonResponse({ meta: { message: "ok" }, data: { ИНН: "7707083893" } });
+    }
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(makeWebhookRequest({ message: { text: "7707083893", chat: { id: 1 } } }), makeEnv());
+  const send = calls.find((c) => c.url.includes("/sendMessage"));
+  const body = JSON.parse(send.options.body);
+  assert.equal(body.text, "⚠️ Ошибка сервиса Checko");
+});
+
 test("search by name calls /search", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {

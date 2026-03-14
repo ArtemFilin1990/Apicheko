@@ -793,9 +793,10 @@ async function checkoRequest(env, endpoint, params = {}) {
 
   const response = await fetch(url.toString(), { method: "GET" });
   const raw = await response.text();
+  const snippet = buildSnippet(raw);
   if (response.status !== 200) {
     logCheckoFailure(endpoint, response.status, raw, null);
-    throw new CheckoServiceError(`HTTP ${response.status}`);
+    throw new CheckoServiceError(`HTTP ${response.status}; snippet=${snippet}`);
   }
 
   let payload;
@@ -803,17 +804,22 @@ async function checkoRequest(env, endpoint, params = {}) {
     payload = JSON.parse(raw);
   } catch {
     logCheckoFailure(endpoint, response.status, raw, null);
-    throw new CheckoServiceError("Non-JSON response");
+    throw new CheckoServiceError(`Non-JSON response; snippet=${snippet}`);
   }
 
   const meta = payload.meta || null;
-  const status = String(meta?.status || "ok").toLowerCase();
-  if (status === "error") {
+  const status = String(meta?.status || "").toLowerCase();
+  if (status !== "ok") {
     logCheckoFailure(endpoint, response.status, raw, meta);
-    throw new CheckoServiceError(`meta.status=error (${meta?.message || ""})`);
+    const message = String(meta?.message || "").trim() || "no message";
+    throw new CheckoServiceError(`meta.status=${status || "missing"}; meta.message=${message}; snippet=${snippet}`);
   }
 
   return payload;
+}
+
+function buildSnippet(value) {
+  return String(value || "").replace(/\s+/g, " ").slice(0, 180);
 }
 
 function logCheckoFailure(endpoint, status, raw, meta) {
