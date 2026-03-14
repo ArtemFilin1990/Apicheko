@@ -1,50 +1,21 @@
 # Apicheko
 
-Telegram-бот для проверки российских компаний и ИП через Checko API.
+Telegram-бот для оперативной проверки компаний, ИП, физлиц и банков через **Checko API v2.4**.
 
-Основной целевой runtime: **Cloudflare Worker + webhook Telegram**.
-Python-бот в `bot/` сохранён как отдельный runtime, но Worker является приоритетным для деплоя.
+Production runtime: **Cloudflare Worker** (`worker/worker.js`).
 
-## Структура репозитория
+## Что поддерживает Worker
 
-- `worker/` — production runtime Cloudflare Worker.
-- `bot/` — secondary Python runtime (fallback).
-- `skills/` — skill/agent packs (Cloudflare, Telegram, Terraform, reference helpers).
-- `docs/` — документация и справочные материалы (в т.ч. Checko reference).
-- `review_needed/` — спорные/неразобранные файлы для ручной ревизии.
-- `archive/` — место для устаревших материалов (если потребуется безопасно убрать из active tree).
+- `GET /` — healthcheck.
+- `POST /webhook` (или путь из `WEBHOOK_PATH`) — Telegram webhook.
+- Главный экран `/start` в формате «1 сообщение = 1 экран».
+- Поиск по ИНН/ОГРН/ОГРНИП, БИК, названию.
+- Разрешение 12-значного ИНН через выбор: ИП или физлицо.
+- Главная карточка компании + 12 экранов разделов.
+- Навигация по `editMessageText`, обработка callback через `answerCallbackQuery`.
+- Строгое разделение сервисных ошибок и валидных пустых результатов.
 
-
-## Архитектура Worker runtime
-
-- `worker/worker.js` — entrypoint Worker.
-- `wrangler.toml` — конфигурация Worker.
-
-### Что делает Worker
-
-- `GET /` → healthcheck JSON.
-- `POST /webhook` → Telegram webhook по умолчанию.
-- Проверяет заголовок `X-Telegram-Bot-Api-Secret-Token` против `WEBHOOK_SECRET`.
-- Разбирает `message` и `callback_query`.
-- Ходит в Checko API v2.
-- Показывает карточку и 3 detail-раздела через inline-кнопки.
-- В первом стабильном релизе UI ограничен разделами `Арбитраж`, `Финансы`, `ЕФРСБ / Банкротство`.
-
-## Входные форматы
-
-Поддерживаемые идентификаторы:
-
-| Длина | Тип | Эндпоинт API |
-|-------|-----|-------------|
-| 10 цифр | ИНН юрлица | `/v2/company` |
-| 13 цифр | ОГРН | `/v2/company` |
-| 12 цифр | ИНН ИП / физлица | выбор: `/v2/entrepreneur` или `/v2/person` |
-| 15 цифр | ОГРНИП | `/v2/entrepreneur` |
-| 9 цифр | БИК банка | `/v2/bank` |
-
-## Формат callback_data
-
-Единый формат callback-контракта Worker:
+## Callback contract
 
 ```text
 menu
@@ -73,123 +44,60 @@ co:okv:<id>
 co:tax:<id>
 ```
 
-Для совместимости также продолжают приниматься legacy callback'и (`start:*`, `detail:*`, `card:*` и т.д.), но основной UI использует `co:*`.
+## Endpoint mapping
 
-## Секреты и переменные
+- `co:main` → `/company`
+- `co:risk` → `/company`
+- `co:fin` → `/finances`
+- `co:arb` → `/legal-cases`
+- `co:fsp` → `/enforcements`
+- `co:ctr` → `/contracts`
+- `co:his` → `/timeline`
+- `co:lnk` → `/company` (+ `/person` при необходимости)
+- `co:own` → `/company`
+- `co:fil` → `/company`
+- `co:okv` → `/company`
+- `co:tax` → `/company`
 
-### Cloudflare Secrets
+Дополнительно:
+
+- `search:name` → `/search?by=name&obj=org&query=...`
+- `resolve12:entrepreneur` → `/entrepreneur`
+- `resolve12:person` → `/person`
+- `search:bic` → `/bank`
+
+## Error-handling contract
+
+Worker возвращает `⚠️ Ошибка сервиса Checko` только если:
+
+1. HTTP статус Checko != 200;
+2. ответ Checko не JSON;
+3. `meta.status == error`.
+
+Если `meta.status == ok`, но данные пустые, показываются экранные empty-state сообщения:
+
+- `📊 Financial statements not found`
+- `🛡️ No enforcement proceedings found`
+- `📑 Contracts not found`
+- `🕓 No history found`
+
+## Secrets / vars
+
+Cloudflare Secrets:
 
 - `TELEGRAM_BOT_TOKEN`
 - `CHECKO_API_KEY`
 - `WEBHOOK_SECRET`
 
-### Публичные vars
+Vars (`wrangler.toml`):
 
-- `NODE_ENV=production`
 - `CHECKO_API_URL=https://api.checko.ru/v2`
 - `WEBHOOK_PATH=/webhook`
 
-## Настройка webhook
-
-Установка webhook:
-
-```bash
-curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=<WORKER_URL>/webhook&secret_token=<WEBHOOK_SECRET>&drop_pending_updates=true"
-```
-
-Проверка:
-
-```bash
-curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo"
-```
-
-Ожидаемый `url` в ответе `getWebhookInfo`:
-
-```text
-https://<worker-domain>/webhook
-```
-
-## Деплой Worker
-
-Wrangler в non-interactive окружении требует Cloudflare API token:
-
-```bash
-export CLOUDFLARE_API_TOKEN=<cloudflare_api_token>
-```
-
-```bash
-npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put CHECKO_API_KEY
-npx wrangler secret put WEBHOOK_SECRET
-
-npx wrangler deploy
-```
-
-После деплоя:
-
-- проверьте `GET /` как healthcheck;
-- установите webhook на `POST /webhook` или на путь из `WEBHOOK_PATH`;
-- проверьте `/start`;
-- отправьте тестовый ИНН, ОГРН, ОГРНИП или БИК;
-- откройте detail-кнопки: `Финансы`, `Арбитраж`, `Госзакупки`, `Проверки`, `ФССП`, `Банкротство`, `История`.
-
-## Основной сценарий
-
-1. Telegram отправляет `POST` update в Worker на `/webhook`.
-2. Worker принимает `update.message.text`.
-3. Бот определяет тип идентификатора по количеству цифр (9/10/12/13/15).
-4. Для 12-значного ИНН бот предлагает выбор: физлицо или ИП.
-5. В карточке компании бот показывает:
-   - название компании;
-   - ИНН;
-   - ОГРН;
-   - статус (с lookup через справочник);
-   - дату регистрации;
-   - руководителя;
-   - регион;
-   - уровень риска.
-6. Под карточкой: кнопки Финансы, Арбитраж, Госзакупки, Проверки, ФССП, Банкротство, История.
-7. Арбитраж и Госзакупки открываются через подменю (выбор роли / закона).
-8. Все списки поддерживают постраничную навигацию (5 записей на страницу).
-9. Если компания не найдена, бот отвечает: `❌ Компания не найдена`.
-10. Если Checko вернул HTTP != 200, non-JSON или `meta.status != ok/success`, бот отвечает: `⚠️ Ошибка сервиса Checko`.
-
-
-## Reference data
-
-Worker runtime использует только JSON-справочники и lookup helpers. Raw-архивы и исходные справочники (`.sql`, `.xlsx`, `.doc`) не используются напрямую в runtime.
-
-- **runtime lookup данные:** `data/reference/`
-  - `statuses.json` — коды статусов юрлиц (101 → «Находится в стадии ликвидации» и т.д.)
-  - `bankruptcy_message_types.json` — типы сообщений ЕФРСБ
-  - `account_codes.json` — коды строк бухгалтерской отчётности (2110 → «Выручка» и т.д.)
-- **helper layer:** `utils/reference/lookup.js` — функции `lookupStatus()`, `lookupBankruptcyMessageType()`, `lookupAccountCode()`
-- **документация Checko:** `docs/checko/` — PDF-документация по API Checko, форматы ЕГРЮЛ/ЕГРИП
-- **сырые архивы:** `archive/raw/` — исходные `.sql.zip`, `.xlsx`, `.xls` выгрузки (не используются в runtime)
-- **спорные файлы:** `archive/raw/review_needed/` — файлы для ручной ревизии
-
-## Локальные проверки
-
-Python-тесты (регрессия существующего runtime):
-
-```bash
-python -m unittest discover -s tests -p "test_*.py"
-```
-
-Проверка синтаксиса Worker:
+## Локальная проверка
 
 ```bash
 node --check worker/worker.js
-```
-
-Smoke-тест Worker без внешних зависимостей:
-
-```bash
 node --test tests/worker_smoke.test.mjs
+python -m unittest discover -s tests -p "test_*.py"
 ```
-
-## Безопасность
-
-- Не храните секреты в исходниках.
-- Проверяйте `meta.status` и `meta.message` ответа Checko.
-- При HTTP != 200, non-JSON и `meta.status != ok/success` бот должен отдавать безопасное сообщение `⚠️ Ошибка сервиса Checko`.
