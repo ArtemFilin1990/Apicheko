@@ -30,6 +30,10 @@ resolve12:person:<id>
 select:company:<id>
 select:entrepreneur:<id>
 
+ep:risk:<id>
+ep:his:<id>
+ep:lnk:<id>
+
 co:main:<id>
 co:risk:<id>
 co:fin:<id>
@@ -76,10 +80,10 @@ Worker возвращает `⚠️ Ошибка сервиса Checko` толь
 
 Если `meta.status == ok`, но данные пустые, показываются экранные empty-state сообщения:
 
-- `📊 Financial statements not found`
-- `🛡️ No enforcement proceedings found`
-- `📑 Contracts not found`
-- `🕓 No history found`
+- `📊 Финансовая отчетность не найдена`
+- `🛡️ Исполнительные производства не найдены`
+- `📑 Контракты не найдены`
+- `🕓 История изменений не найдена`
 
 ## Secrets / vars
 
