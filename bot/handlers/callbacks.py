@@ -4,10 +4,10 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
-from bot.cards import DETAIL_FETCHERS, build_detail_card
+from bot.cards import DETAIL_FETCHERS, SCREEN_SPECS, build_company_screen, build_detail_card
 from bot.formatters import format_company, format_entrepreneur, format_person
 from bot.handlers.search import SearchState
-from bot.keyboards import cancel_keyboard, cemetery_detail_keyboard, cemetery_menu_keyboard, company_detail_keyboard, main_menu_keyboard
+from bot.keyboards import cancel_keyboard, cemetery_detail_keyboard, cemetery_menu_keyboard, company_nav_keyboard, company_detail_keyboard, main_menu_keyboard
 from services.checko_api import CheckoAPI, CheckoAPIError
 from utils.checko_payload import extract_items
 from storage.database import Database
@@ -16,6 +16,38 @@ router = Router(name="callbacks")
 
 # Keep compatibility for tests importing internals from this module.
 _DETAIL_FETCHERS = DETAIL_FETCHERS
+
+
+@router.callback_query(F.data.startswith("co:"))
+async def company_navigation(call: CallbackQuery, checko_api: CheckoAPI) -> None:
+    parts = call.data.split(":", 2)
+    if len(parts) != 3:
+        await call.answer("Некорректная команда", show_alert=True)
+        return
+
+    _, section, ident = parts
+
+    spec = SCREEN_SPECS.get(section)
+    if not spec:
+        await call.answer("Раздел не найден", show_alert=True)
+        return
+
+    await call.answer()
+    await call.message.edit_text("🔄 Загружаю…")
+
+    try:
+        text, markup = await build_company_screen(checko_api, ident, section)
+        await call.message.edit_text(
+            text,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
+    except CheckoAPIError as exc:
+        await call.message.edit_text(
+            f"⚠️ Ошибка при загрузке раздела «{html.escape(section)}»\n<i>{html.escape(str(exc))}</i>",
+            reply_markup=company_nav_keyboard(ident),
+            disable_web_page_preview=True,
+        )
 
 
 @router.callback_query(F.data == "scenario:cemetery")
@@ -190,7 +222,7 @@ async def cb_resolve_12digit(call: CallbackQuery, checko_api: CheckoAPI) -> None
         if mode == "entrepreneur":
             data = await checko_api.get_entrepreneur(inn=inn)
             text = format_entrepreneur(data)
-            markup = company_detail_keyboard(inn)
+            markup = company_nav_keyboard(inn)
         elif mode == "person":
             data = await checko_api.get_person(inn=inn)
             text = format_person(data)
@@ -228,7 +260,7 @@ async def cb_select_search_result(call: CallbackQuery, checko_api: CheckoAPI) ->
 
         await call.message.edit_text(
             text,
-            reply_markup=company_detail_keyboard(identifier),
+            reply_markup=company_nav_keyboard(identifier),
         )
     except CheckoAPIError as exc:
         await call.message.edit_text(

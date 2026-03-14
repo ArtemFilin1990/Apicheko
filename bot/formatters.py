@@ -381,3 +381,230 @@ def format_search_results(results: list[dict]) -> str:
     else:
         lines.append("\nВыберите запись из списка ниже:")
     return "\n".join(lines)
+
+SECTION_TITLES = {
+    "main": "🏢 Карточка компании",
+    "risk": "⚠️ Проверки и факторы риска",
+    "fin": "💰 Финансы",
+    "arb": "⚖️ Арбитражные дела",
+    "fsp": "🛡️ Исполнительные производства",
+    "ctr": "📑 Госконтракты и закупки",
+    "his": "🕓 История изменений",
+    "lnk": "🔗 Связи компании",
+    "own": "👥 Учредители",
+    "fil": "🏬 Филиалы",
+    "okv": "🏭 Виды деятельности",
+    "tax": "🧾 Налоги",
+}
+
+
+def _extract_data(payload: dict) -> dict:
+    data = payload.get("payload", {}).get("data") if isinstance(payload, dict) else None
+    if data is None and isinstance(payload, dict):
+        data = payload.get("data", payload)
+    if isinstance(data, list):
+        return data[0] if data else {}
+    return data if isinstance(data, dict) else {}
+
+
+def _title(section: str) -> str:
+    return f"{SECTION_TITLES[section]}" if section in SECTION_TITLES else ""
+
+
+def _money(value: Any) -> str:
+    if value in (None, ""):
+        return "0 ₽"
+    try:
+        num = float(str(value).replace(" ", "").replace(",", "."))
+    except ValueError:
+        return f"{_fmt(value)}"
+    return f"{int(round(num)):,}".replace(",", " ") + " ₽"
+
+
+def format_risk_summary(d: dict) -> str:
+    risk_lines: list[str] = []
+
+    tax_debt = _nested(d, "Налоги", "СумНедоим")
+    if tax_debt not in (None, ""):
+        try:
+            if float(str(tax_debt).replace(" ", "").replace(",", ".")) > 1000:
+                risk_lines.append(f"💸 Налоговая задолженность — {_money(tax_debt)}")
+        except ValueError:
+            pass
+
+    arbitration_count = d.get("Арбитраж", {}).get("Количество") if isinstance(d.get("Арбитраж"), dict) else None
+    if arbitration_count is not None:
+        risk_lines.append(f"⚖️ Арбитражных дел — {_fmt(arbitration_count, '0')}")
+
+    fssp_count = d.get("ФССП", {}).get("Количество") if isinstance(d.get("ФССП"), dict) else None
+    risk_lines.append(f"🛡️ ФССП — {_fmt(fssp_count, '0')}")
+
+    contracts_count = d.get("Госконтракты", {}).get("Количество") if isinstance(d.get("Госконтракты"), dict) else None
+    if contracts_count not in (None, "", 0, "0"):
+        risk_lines.append(f"📑 Контрактов — {_fmt(contracts_count)}")
+    else:
+        risk_lines.append("📑 Госконтракты — не найдены")
+
+    sme_cat = _nested(d, "РМСП", "Кат")
+    if sme_cat:
+        risk_lines.append(f"🏷️ МСП — {_fmt(str(sme_cat).lower())}")
+
+    risk_icon = "🟢"
+    risk_label = "Низкий"
+    if tax_debt not in (None, ""):
+        try:
+            if float(str(tax_debt).replace(" ", "").replace(",", ".")) > 1000:
+                risk_icon, risk_label = "🟡", "Средний"
+        except ValueError:
+            pass
+
+    return (
+        "⚠️ <b>Краткая оценка</b>\n\n"
+        f"{risk_icon} Риск: <b>{risk_label}</b>\n\n"
+        + "\n".join(risk_lines[:8])
+    )
+
+
+def format_company_main_screen(payload: dict) -> str:
+    d = _extract_data(payload)
+    okved_obj = d.get("ОКВЭД") if isinstance(d.get("ОКВЭД"), dict) else {}
+    okved = _fmt(okved_obj.get("Код"))
+    if okved_obj.get("Наим"):
+        okved = f"{_fmt(okved_obj.get('Код'))} — {_fmt(okved_obj.get('Наим'))}"
+
+    director = "—"
+    if isinstance(d.get("Руковод"), list) and d["Руковод"]:
+        director = _fmt(d["Руковод"][0].get("ФИО"))
+
+    contacts = d.get("Контакты") if isinstance(d.get("Контакты"), dict) else {}
+    phone = contacts.get("Тел")
+    email = contacts.get("Емэйл")
+    phone_val = ", ".join(phone) if isinstance(phone, list) else _fmt(phone)
+    email_val = ", ".join(email) if isinstance(email, list) else _fmt(email)
+
+    founders = d.get("Учред") if isinstance(d.get("Учред"), list) else []
+    founder = founders[0] if founders else {}
+    founder_name = _fmt(founder.get("ФИО") or founder.get("Наим"))
+    founder_share = founder.get("Доля", {}).get("Проц") if isinstance(founder.get("Доля"), dict) else founder.get("Доля")
+    founder_line = founder_name if founder_name != "—" else "—"
+    if founder_share not in (None, ""):
+        founder_line = f"{founder_line}, {_fmt(founder_share)}%"
+
+    return (
+        f"🏢 <b>{_fmt(_pick(d, 'НаимСокр', 'НаимПолн', 'name'))}</b>\n\n"
+        f"🆔 ОГРН: <code>{_fmt(_pick(d, 'ОГРН', 'ogrn'))}</code> · ИНН: <code>{_fmt(_pick(d, 'ИНН', 'inn'))}</code>\n"
+        f"📌 Статус: <b>{_fmt(_nested(d, 'Статус', 'Наим') or _pick(d, 'status'))}</b>\n"
+        f"📅 Дата регистрации: {_fmt(_pick(d, 'ДатаРег', 'reg_date'))}\n"
+        f"🧾 КПП: {_fmt(_pick(d, 'КПП', 'kpp'))}\n"
+        f"🏭 ОКВЭД: {okved}\n\n"
+        f"📍 Адрес: {_fmt(_nested(d, 'ЮрАдрес', 'АдресРФ') or _pick(d, 'address'))}\n"
+        f"👤 Руководитель: {director}\n"
+        f"📞 Телефон: {phone_val}\n"
+        f"✉️ Email: {email_val}\n\n"
+        f"💼 Уставный капитал: {_money(_nested(d, 'УстКап', 'Сумма'))}\n"
+        f"👥 Сотрудники: {_fmt(_nested(d, 'ЧислПерс', 'Кол') or _pick(d, 'Сотр'))}\n"
+        f"🧾 Налоги: {_money(_nested(d, 'Налоги', 'Сум'))}\n"
+        f"💰 Выручка: {_fmt(_nested(d, 'Фин', 'Выруч') or _pick(d, 'Выручка'))}\n"
+        f"👥 Учредитель: {founder_line}\n"
+        f"🏬 Филиалы: {_fmt(len(d.get('Филиалы') or []), '0')}\n\n"
+        f"{format_risk_summary(d)}"
+    )
+
+
+def format_company_risk_screen(payload: dict) -> str:
+    d = _extract_data(payload)
+    return f"⚠️ <b>Проверки и факторы риска</b>\n\n{format_risk_summary(d)}"
+
+
+def format_financial_screen(payload: dict) -> str:
+    return format_financial(payload).replace("📊 <b>Финансовая отчётность</b>", "💰 <b>Финансы</b>", 1)
+
+
+def format_arbitration_screen(payload: dict) -> str:
+    return format_arbitration(payload).replace("⚖️ <b>Арбитраж</b>", "⚖️ <b>Арбитражные дела</b>", 1)
+
+
+def format_fssp_screen(payload: dict) -> str:
+    return format_enforcements(payload).replace("🛡️ <b>Исполнительные производства (ФССП)</b>", "🛡️ <b>Исполнительные производства</b>", 1)
+
+
+def format_contracts_screen(payload: dict) -> str:
+    return format_contracts(payload).replace("📑 <b>Госконтракты</b>", "📑 <b>Госконтракты и закупки</b>", 1)
+
+
+def format_history_screen(payload: dict) -> str:
+    return format_history(payload).replace("📜 <b>История изменений</b>", "🕓 <b>История изменений</b>", 1)
+
+
+def format_connections_screen(payload: dict) -> str:
+    d = _extract_data(payload)
+    founders = d.get("Учред") if isinstance(d.get("Учред"), list) else []
+    founder_lines = [f"• {_fmt(item.get('ФИО') or item.get('Наим'))}" for item in founders[:5]] or ["• —"]
+    leaders = d.get("Руковод") if isinstance(d.get("Руковод"), list) else []
+    director = leaders[0].get("ФИО") if leaders and isinstance(leaders[0], dict) else None
+    return "\n".join([
+        "🔗 <b>Связи компании</b>",
+        "",
+        "По текущему руководителю / учредителю:",
+        f"• {_fmt(director)}",
+        *founder_lines,
+    ])
+
+
+def format_founders_screen(payload: dict) -> str:
+    d = _extract_data(payload)
+    founders = d.get("Учред") if isinstance(d.get("Учред"), list) else []
+    lines = ["👥 <b>Учредители</b>", ""]
+    if not founders:
+        lines.append("Нет данных")
+        return "\n".join(lines)
+    for idx, item in enumerate(founders[:20], 1):
+        share = item.get("Доля", {}).get("Проц") if isinstance(item.get("Доля"), dict) else item.get("Доля")
+        line = f"{idx}. {_fmt(item.get('ФИО') or item.get('Наим'))}"
+        if share not in (None, ""):
+            line += f" — {_fmt(share)}%"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def format_branches_screen(payload: dict) -> str:
+    d = _extract_data(payload)
+    branches = d.get("Филиалы") if isinstance(d.get("Филиалы"), list) else []
+    lines = ["🏬 <b>Филиалы</b>", ""]
+    if not branches:
+        lines.append("Ничего не найдено.")
+        return "\n".join(lines)
+    for idx, item in enumerate(branches[:20], 1):
+        lines.append(f"{idx}. КПП: {_fmt(item.get('КПП'))} — {_fmt(item.get('Адрес') or item.get('АдресРФ'))}")
+    return "\n".join(lines)
+
+
+def format_okved_screen(payload: dict) -> str:
+    d = _extract_data(payload)
+    primary = d.get("ОКВЭД") if isinstance(d.get("ОКВЭД"), dict) else {}
+    extra = d.get("ОКВЭДДоп") if isinstance(d.get("ОКВЭДДоп"), list) else []
+    lines = [
+        "🏭 <b>Виды деятельности</b>",
+        "",
+        "Основной:",
+        f"• {_fmt(primary.get('Код'))} — {_fmt(primary.get('Наим'))}",
+        "",
+        "Дополнительные:",
+    ]
+    if not extra:
+        lines.append("• Нет данных")
+    else:
+        lines.extend([f"• {_fmt(item.get('Код'))} — {_fmt(item.get('Наим'))}" for item in extra[:20]])
+    return "\n".join(lines)
+
+
+def format_taxes_screen(payload: dict) -> str:
+    d = _extract_data(payload)
+    taxes = d.get("Налоги") if isinstance(d.get("Налоги"), dict) else {}
+    return "\n".join([
+        "🧾 <b>Налоги</b>",
+        "",
+        f"Общая сумма: {_money(taxes.get('Сум') or taxes.get('Сумма'))}",
+        f"Недоимка: {_money(taxes.get('СумНедоим'))}",
+        f"Недоимка / пени / штрафы: {_money(taxes.get('СумПениШтр'))}",
+    ])

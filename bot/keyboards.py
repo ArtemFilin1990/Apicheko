@@ -5,31 +5,44 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 def main_menu_keyboard() -> InlineKeyboardMarkup:
     """Main menu keyboard."""
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔎 Поиск по ИНН", callback_data="search:inn")
+    builder.button(text="🔎 Поиск по ИНН / ОГРН", callback_data="search:inn")
     builder.button(text="🧾 Поиск по названию", callback_data="search:name")
     builder.button(text="📋 История запросов", callback_data="history")
-    builder.button(text="🪦 Сценарий проверки", callback_data="scenario:cemetery")
     builder.button(text="ℹ️ Помощь", callback_data="help")
-    builder.adjust(2, 2, 1)
+    builder.adjust(2, 2)
+    return builder.as_markup()
+
+
+def company_nav_keyboard(ident: str) -> InlineKeyboardMarkup:
+    """Navigation keyboard for company screens (co:* callbacks)."""
+    builder = InlineKeyboardBuilder()
+
+    builder.button(text="🏢 Карточка", callback_data=f"co:main:{ident}")
+    builder.button(text="⚠️ Проверки", callback_data=f"co:risk:{ident}")
+
+    builder.button(text="💰 Финансы", callback_data=f"co:fin:{ident}")
+    builder.button(text="⚖️ Арбитраж", callback_data=f"co:arb:{ident}")
+
+    builder.button(text="🛡️ ФССП", callback_data=f"co:fsp:{ident}")
+    builder.button(text="📑 Контракты", callback_data=f"co:ctr:{ident}")
+
+    builder.button(text="🕓 История", callback_data=f"co:his:{ident}")
+    builder.button(text="🔗 Связи", callback_data=f"co:lnk:{ident}")
+
+    builder.button(text="👥 Учредители", callback_data=f"co:own:{ident}")
+    builder.button(text="🏬 Филиалы", callback_data=f"co:fil:{ident}")
+
+    builder.button(text="🏭 ОКВЭД", callback_data=f"co:okv:{ident}")
+    builder.button(text="🧾 Налоги", callback_data=f"co:tax:{ident}")
+
+    builder.button(text="🏠 В меню", callback_data="menu")
+    builder.adjust(2, 2, 2, 2, 2, 2, 1)
     return builder.as_markup()
 
 
 def company_detail_keyboard(inn: str) -> InlineKeyboardMarkup:
-    """Keyboard with detail sections for a company."""
-    builder = InlineKeyboardBuilder()
-    builder.button(text="💼 Основные данные", callback_data=f"detail:{inn}:company")
-    builder.button(text="💰 Финансы", callback_data=f"detail:{inn}:financial")
-    builder.button(text="⚖️ Арбитраж", callback_data=f"detail:{inn}:arbitration")
-    builder.button(text="🛡️ Исполн. производства", callback_data=f"detail:{inn}:enforcements")
-    builder.button(text="📑 Госконтракты", callback_data=f"detail:{inn}:contracts")
-    builder.button(text="🔍 Проверки", callback_data=f"detail:{inn}:inspections")
-    builder.button(text="📉 Банкротство", callback_data=f"detail:{inn}:bankruptcy")
-    builder.button(text="📝 История изменений", callback_data=f"detail:{inn}:history")
-    builder.button(text="📰 Федресурс", callback_data=f"detail:{inn}:fedresurs")
-    builder.button(text="🪦 Сценарий проверки", callback_data=f"scenario:cemetery:{inn}")
-    builder.button(text="🔙 В меню", callback_data="menu")
-    builder.adjust(2, 2, 2, 2, 1, 1, 1)
-    return builder.as_markup()
+    """Backward-compatible alias to the new company navigation keyboard."""
+    return company_nav_keyboard(inn)
 
 
 def person_or_entrepreneur_keyboard(inn: str) -> InlineKeyboardMarkup:
@@ -45,7 +58,7 @@ def person_or_entrepreneur_keyboard(inn: str) -> InlineKeyboardMarkup:
 def back_to_company_keyboard(inn: str) -> InlineKeyboardMarkup:
     """Keyboard to go back to the company details."""
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔙 Назад к компании", callback_data=f"detail:{inn}:company")
+    builder.button(text="🔙 Назад к карточке", callback_data=f"co:main:{inn}")
     builder.button(text="🏠 В меню", callback_data="menu")
     builder.adjust(1)
     return builder.as_markup()
@@ -105,7 +118,7 @@ def cemetery_detail_keyboard(inn: str) -> InlineKeyboardMarkup:
     builder.button(text="📝 История изменений", callback_data=f"cem:history:{inn}")
     builder.button(text="📰 Федресурс", callback_data=f"cem:fedresurs:{inn}")
     builder.button(text="📊 Риск", callback_data=f"cem:risk:{inn}")
-    builder.button(text="🔙 В карточку", callback_data=f"detail:{inn}:company")
+    builder.button(text="🔙 В карточку", callback_data=f"co:main:{inn}")
     builder.button(text="🏠 В меню", callback_data="menu")
     builder.adjust(2, 2, 2, 2, 1, 1, 1)
     return builder.as_markup()

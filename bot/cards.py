@@ -7,17 +7,29 @@ from aiogram.types import InlineKeyboardMarkup
 
 from bot.formatters import (
     format_arbitration,
+    format_arbitration_screen,
     format_bankruptcy,
     format_company,
+    format_company_main_screen,
+    format_company_risk_screen,
+    format_connections_screen,
     format_contracts,
+    format_contracts_screen,
     format_enforcements,
     format_entrepreneur,
     format_fedresurs,
     format_financial,
+    format_financial_screen,
+    format_founders_screen,
+    format_branches_screen,
     format_history,
+    format_history_screen,
     format_inspections,
+    format_okved_screen,
+    format_taxes_screen,
+    format_fssp_screen,
 )
-from bot.keyboards import back_to_company_keyboard
+from bot.keyboards import back_to_company_keyboard, company_nav_keyboard
 from services.checko_api import CheckoAPI
 from utils.checko_payload import extract_data, extract_items
 
@@ -26,6 +38,12 @@ CardFormatter = Callable[[dict], str]
 
 @dataclass(frozen=True)
 class DetailCardSpec:
+    fetcher: str
+    formatter: CardFormatter
+
+
+@dataclass(frozen=True)
+class ScreenSpec:
     fetcher: str
     formatter: CardFormatter
 
@@ -42,10 +60,22 @@ DETAIL_CARDS: dict[str, DetailCardSpec] = {
     "fedresurs": DetailCardSpec(fetcher="get_fedresurs", formatter=format_fedresurs),
 }
 
-DETAIL_FETCHERS: dict[str, str] = {
-    section: spec.fetcher
-    for section, spec in DETAIL_CARDS.items()
+SCREEN_SPECS: dict[str, ScreenSpec] = {
+    "main": ScreenSpec(fetcher="get_company", formatter=format_company_main_screen),
+    "risk": ScreenSpec(fetcher="get_company", formatter=format_company_risk_screen),
+    "fin": ScreenSpec(fetcher="get_financial", formatter=format_financial_screen),
+    "arb": ScreenSpec(fetcher="get_arbitration", formatter=format_arbitration_screen),
+    "fsp": ScreenSpec(fetcher="get_enforcements", formatter=format_fssp_screen),
+    "ctr": ScreenSpec(fetcher="get_contracts", formatter=format_contracts_screen),
+    "his": ScreenSpec(fetcher="get_history", formatter=format_history_screen),
+    "lnk": ScreenSpec(fetcher="get_company", formatter=format_connections_screen),
+    "own": ScreenSpec(fetcher="get_company", formatter=format_founders_screen),
+    "fil": ScreenSpec(fetcher="get_company", formatter=format_branches_screen),
+    "okv": ScreenSpec(fetcher="get_company", formatter=format_okved_screen),
+    "tax": ScreenSpec(fetcher="get_company", formatter=format_taxes_screen),
 }
+
+DETAIL_FETCHERS: dict[str, str] = {section: spec.fetcher for section, spec in DETAIL_CARDS.items()}
 
 SECTION_LIST_KEYS: dict[str, tuple[str, ...]] = {
     "arbitration": ("Дела", "Записи", "cases", "items"),
@@ -86,10 +116,17 @@ def _normalize_financial_payload(payload: dict) -> dict:
 
 
 def _normalize_detail_payload(section: str, payload: dict) -> dict:
-    if section == "financial":
+    if section in {"financial", "fin"}:
         return _normalize_financial_payload(payload)
 
-    keys = SECTION_LIST_KEYS.get(section)
+    map_section = {
+        "arb": "arbitration",
+        "fsp": "enforcements",
+        "ctr": "contracts",
+        "his": "history",
+    }.get(section, section)
+
+    keys = SECTION_LIST_KEYS.get(map_section)
     if not keys:
         return payload
 
@@ -97,6 +134,25 @@ def _normalize_detail_payload(section: str, payload: dict) -> dict:
     if not items:
         return payload
     return {"data": items}
+
+
+async def build_company_screen(
+    checko_api: CheckoAPI,
+    identifier: str,
+    section: str,
+) -> tuple[str, InlineKeyboardMarkup]:
+    spec = SCREEN_SPECS.get(section)
+    if not spec:
+        raise ValueError(f"Unknown section: {section}")
+
+    fetcher_name = spec.fetcher
+    if fetcher_name == "get_company" and len(identifier) in (12, 15):
+        fetcher_name = "get_entrepreneur"
+
+    fetcher = getattr(checko_api, fetcher_name)
+    payload = await fetcher(**_identifier_params(identifier))
+    normalized_payload = _normalize_detail_payload(section, payload)
+    return spec.formatter(normalized_payload), company_nav_keyboard(identifier)
 
 
 async def build_detail_card(
