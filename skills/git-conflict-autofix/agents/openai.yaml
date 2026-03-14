@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Conflict Autofix"
+  short_description: "Find and safely resolve git conflict markers with validation"
+  default_prompt: "Use $git-conflict-autofix to detect merge conflict markers, resolve them with minimal safe edits, and validate that no markers remain."
