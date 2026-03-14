@@ -5,12 +5,19 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
 from bot.cards import DETAIL_FETCHERS, SCREEN_SPECS, build_company_screen, build_detail_card
-from bot.formatters import format_company, format_entrepreneur, format_person
+from bot.formatters import format_entrepreneur, format_person
 from bot.handlers.search import SearchState
-from bot.keyboards import cancel_keyboard, cemetery_detail_keyboard, cemetery_menu_keyboard, company_nav_keyboard, company_detail_keyboard, main_menu_keyboard
+from bot.keyboards import (
+    CompanyNav,
+    cancel_keyboard,
+    cemetery_detail_keyboard,
+    cemetery_menu_keyboard,
+    company_nav_keyboard,
+    main_menu_keyboard,
+)
 from services.checko_api import CheckoAPI, CheckoAPIError
-from utils.checko_payload import extract_items
 from storage.database import Database
+from utils.checko_payload import extract_items
 
 router = Router(name="callbacks")
 
@@ -18,35 +25,145 @@ router = Router(name="callbacks")
 _DETAIL_FETCHERS = DETAIL_FETCHERS
 
 
-@router.callback_query(F.data.startswith("co:"))
-async def company_navigation(call: CallbackQuery, checko_api: CheckoAPI) -> None:
+@router.callback_query(F.data == "menu")
+async def cb_menu(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await call.message.edit_text(
+        "🏠 <b>Главное меню</b>\nВыберите действие:",
+        reply_markup=main_menu_keyboard(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "help")
+async def cb_help(call: CallbackQuery) -> None:
+    text = (
+        "ℹ️ <b>Как пользоваться ботом</b>\n\n"
+        "🔎 Поиск по ИНН / ОГРН — для компании, ИП, банка\n"
+        "🧾 Поиск по названию — список найденных компаний\n"
+        "🏢 После открытия карточки доступны экраны:\n"
+        "• проверки\n"
+        "• финансы\n"
+        "• арбитраж\n"
+        "• ФССП\n"
+        "• контракты\n"
+        "• история\n"
+        "• связи\n"
+        "• учредители\n"
+        "• филиалы\n"
+        "• ОКВЭД\n"
+        "• налоги"
+    )
+    await call.message.edit_text(text, reply_markup=main_menu_keyboard())
+    await call.answer()
+
+
+@router.callback_query(F.data == "search:inn")
+async def cb_search_inn(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(SearchState.waiting_for_inn)
+    await call.message.edit_text(
+        "🔎 <b>Введите ИНН / ОГРН / ОГРНИП / БИК</b>\n\n"
+        "Поддерживаются:\n"
+        "• ИНН 10 / 12\n"
+        "• ОГРН 13\n"
+        "• ОГРНИП 15\n"
+        "• БИК 9",
+        reply_markup=cancel_keyboard(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "search:name")
+async def cb_search_name(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(SearchState.waiting_for_name)
+    await call.message.edit_text(
+        "🧾 <b>Введите название компании или ФИО ИП</b>",
+        reply_markup=cancel_keyboard(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "history")
+async def cb_history(call: CallbackQuery, db: Database) -> None:
+    user = call.from_user
+    if not user:
+        await call.answer()
+        return
+
+    rows = await db.get_user_history(user.id, limit=10)
+    if not rows:
+        await call.message.edit_text(
+            "📭 <b>История запросов пуста</b>",
+            reply_markup=main_menu_keyboard(),
+        )
+        await call.answer()
+        return
+
+    lines = ["📋 <b>Последние запросы</b>", ""]
+    for row in rows:
+        query = html.escape(str(row["query"]))
+        created = html.escape(str(row["searched_at"]))
+        lines.append(f"• <code>{query}</code> — <i>{created}</i>")
+
+    await call.message.edit_text("\n".join(lines), reply_markup=main_menu_keyboard())
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("select:"))
+async def cb_select_search_result(call: CallbackQuery, checko_api: CheckoAPI) -> None:
     parts = call.data.split(":", 2)
     if len(parts) != 3:
-        await call.answer("Некорректная команда", show_alert=True)
+        await call.answer("Некорректный выбор", show_alert=True)
         return
 
-    _, section, ident = parts
-
-    spec = SCREEN_SPECS.get(section)
-    if not spec:
-        await call.answer("Раздел не найден", show_alert=True)
-        return
+    _, _, ident = parts
 
     await call.answer()
-    await call.message.edit_text("🔄 Загружаю…")
+    await call.message.edit_text("🔄 Загружаю карточку...")
 
     try:
-        text, markup = await build_company_screen(checko_api, ident, section)
+        text = await build_company_screen(checko_api, "main", ident)
         await call.message.edit_text(
             text,
-            reply_markup=markup,
+            reply_markup=company_nav_keyboard(ident),
             disable_web_page_preview=True,
         )
     except CheckoAPIError as exc:
         await call.message.edit_text(
-            f"⚠️ Ошибка при загрузке раздела «{html.escape(section)}»\n<i>{html.escape(str(exc))}</i>",
+            f"⚠️ <b>Ошибка загрузки карточки</b>\n\n"
+            f"<i>{html.escape(str(exc))}</i>",
+            reply_markup=main_menu_keyboard(),
+        )
+
+
+@router.callback_query(CompanyNav.filter())
+async def cb_company_nav(
+    call: CallbackQuery,
+    callback_data: CompanyNav,
+    checko_api: CheckoAPI,
+) -> None:
+    section = callback_data.sec
+    ident = callback_data.ident
+
+    if section not in SCREEN_SPECS:
+        await call.answer("Раздел не найден", show_alert=True)
+        return
+
+    await call.answer()
+    await call.message.edit_text("🔄 Загружаю раздел...")
+
+    try:
+        text = await build_company_screen(checko_api, section, ident)
+        await call.message.edit_text(
+            text,
             reply_markup=company_nav_keyboard(ident),
             disable_web_page_preview=True,
+        )
+    except CheckoAPIError as exc:
+        await call.message.edit_text(
+            f"⚠️ <b>Ошибка загрузки раздела</b>\n\n"
+            f"<i>{html.escape(str(exc))}</i>",
+            reply_markup=company_nav_keyboard(ident),
         )
 
 
@@ -139,75 +256,6 @@ async def cb_cemetery_detail(call: CallbackQuery, checko_api: CheckoAPI) -> None
     await call.answer()
 
 
-@router.callback_query(F.data == "menu")
-async def cb_menu(call: CallbackQuery, state: FSMContext) -> None:
-    await state.clear()
-    await call.message.edit_text(
-        "🏠 Главное меню. Выберите действие:",
-        reply_markup=main_menu_keyboard(),
-    )
-    await call.answer()
-
-
-@router.callback_query(F.data == "help")
-async def cb_help(call: CallbackQuery) -> None:
-    help_text = (
-        "ℹ️ <b>Как пользоваться ботом</b>\n\n"
-        "• <b>Поиск по идентификатору</b> — ИНН 10/12, ОГРН 13, ОГРНИП 15.\n"
-        "• Для ИНН 12 бот предложит выбрать: <b>ИП</b> или <b>физлицо</b>.\n"
-        "• Поиск по названию показывает список найденных компаний.\n"
-        "• Для юрлиц доступны детальные разделы: финансы, арбитраж, ФССП и др.\n\n"
-        "Если что-то не работает — попробуйте /start."
-    )
-    await call.message.edit_text(help_text, reply_markup=main_menu_keyboard())
-    await call.answer()
-
-
-@router.callback_query(F.data == "search:inn")
-async def cb_search_inn(call: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(SearchState.waiting_for_inn)
-    await call.message.edit_text(
-        "Введите ИНН (10/12), ОГРН (13) или ОГРНИП (15):",
-        reply_markup=cancel_keyboard(),
-    )
-    await call.answer()
-
-
-@router.callback_query(F.data == "search:name")
-async def cb_search_name(call: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(SearchState.waiting_for_name)
-    await call.message.edit_text(
-        "Введите название компании или ФИО ИП:",
-        reply_markup=cancel_keyboard(),
-    )
-    await call.answer()
-
-
-@router.callback_query(F.data == "history")
-async def cb_history(call: CallbackQuery, db: Database) -> None:
-    user = call.from_user
-    if not user:
-        await call.answer()
-        return
-
-    rows = await db.get_user_history(user.id, limit=10)
-    if not rows:
-        await call.message.edit_text(
-            "📭 История запросов пуста.", reply_markup=main_menu_keyboard()
-        )
-        await call.answer()
-        return
-
-    lines = ["📋 <b>Последние запросы:</b>", ""]
-    for row in rows:
-        query = html.escape(str(row["query"]))
-        created = html.escape(str(row["searched_at"]))
-        lines.append(f"• {query} <i>({created})</i>")
-
-    await call.message.edit_text("\n".join(lines), reply_markup=main_menu_keyboard())
-    await call.answer()
-
-
 @router.callback_query(F.data.startswith("resolve12:"))
 async def cb_resolve_12digit(call: CallbackQuery, checko_api: CheckoAPI) -> None:
     parts = call.data.split(":", 2)
@@ -235,36 +283,6 @@ async def cb_resolve_12digit(call: CallbackQuery, checko_api: CheckoAPI) -> None
     except CheckoAPIError as exc:
         await call.message.edit_text(
             f"⚠️ Ошибка при загрузке данных:\n<i>{html.escape(str(exc))}</i>",
-            reply_markup=main_menu_keyboard(),
-        )
-    await call.answer()
-
-
-@router.callback_query(F.data.startswith("select:"))
-async def cb_select_search_result(call: CallbackQuery, checko_api: CheckoAPI) -> None:
-    parts = call.data.split(":", 2)
-    if len(parts) != 3:
-        await call.answer("Неверный запрос", show_alert=True)
-        return
-
-    _, entity_type, identifier = parts
-
-    await call.message.edit_text("🔄 Загружаю…")
-    try:
-        if entity_type == "entrepreneur":
-            data = await checko_api.get_entrepreneur(inn=identifier)
-            text = format_entrepreneur(data)
-        else:
-            data = await checko_api.get_company(inn=identifier)
-            text = format_company(data)
-
-        await call.message.edit_text(
-            text,
-            reply_markup=company_nav_keyboard(identifier),
-        )
-    except CheckoAPIError as exc:
-        await call.message.edit_text(
-            f"⚠️ Ошибка при загрузке карточки:\n<i>{html.escape(str(exc))}</i>",
             reply_markup=main_menu_keyboard(),
         )
     await call.answer()

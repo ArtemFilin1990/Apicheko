@@ -1,43 +1,47 @@
+from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
+class CompanyNav(CallbackData, prefix="co"):
+    sec: str
+    ident: str
+
+
 def main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Main menu keyboard."""
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔎 Поиск по ИНН / ОГРН", callback_data="search:inn")
-    builder.button(text="🧾 Поиск по названию", callback_data="search:name")
-    builder.button(text="📋 История запросов", callback_data="history")
-    builder.button(text="ℹ️ Помощь", callback_data="help")
-    builder.adjust(2, 2)
-    return builder.as_markup()
+    b = InlineKeyboardBuilder()
+    b.button(text="🔎 Поиск по ИНН / ОГРН", callback_data="search:inn")
+    b.button(text="🧾 Поиск по названию", callback_data="search:name")
+    b.button(text="📋 История запросов", callback_data="history")
+    b.button(text="ℹ️ Помощь", callback_data="help")
+    b.adjust(2, 2)
+    return b.as_markup()
 
 
 def company_nav_keyboard(ident: str) -> InlineKeyboardMarkup:
-    """Navigation keyboard for company screens (co:* callbacks)."""
-    builder = InlineKeyboardBuilder()
+    b = InlineKeyboardBuilder()
 
-    builder.button(text="🏢 Карточка", callback_data=f"co:main:{ident}")
-    builder.button(text="⚠️ Проверки", callback_data=f"co:risk:{ident}")
+    b.button(text="🏢 Карточка", callback_data=CompanyNav(sec="main", ident=ident))
+    b.button(text="⚠️ Проверки", callback_data=CompanyNav(sec="risk", ident=ident))
 
-    builder.button(text="💰 Финансы", callback_data=f"co:fin:{ident}")
-    builder.button(text="⚖️ Арбитраж", callback_data=f"co:arb:{ident}")
+    b.button(text="💰 Финансы", callback_data=CompanyNav(sec="fin", ident=ident))
+    b.button(text="⚖️ Арбитраж", callback_data=CompanyNav(sec="arb", ident=ident))
 
-    builder.button(text="🛡️ ФССП", callback_data=f"co:fsp:{ident}")
-    builder.button(text="📑 Контракты", callback_data=f"co:ctr:{ident}")
+    b.button(text="🛡️ ФССП", callback_data=CompanyNav(sec="fsp", ident=ident))
+    b.button(text="📑 Контракты", callback_data=CompanyNav(sec="ctr", ident=ident))
 
-    builder.button(text="🕓 История", callback_data=f"co:his:{ident}")
-    builder.button(text="🔗 Связи", callback_data=f"co:lnk:{ident}")
+    b.button(text="🕓 История", callback_data=CompanyNav(sec="his", ident=ident))
+    b.button(text="🔗 Связи", callback_data=CompanyNav(sec="lnk", ident=ident))
 
-    builder.button(text="👥 Учредители", callback_data=f"co:own:{ident}")
-    builder.button(text="🏬 Филиалы", callback_data=f"co:fil:{ident}")
+    b.button(text="👥 Учредители", callback_data=CompanyNav(sec="own", ident=ident))
+    b.button(text="🏬 Филиалы", callback_data=CompanyNav(sec="fil", ident=ident))
 
-    builder.button(text="🏭 ОКВЭД", callback_data=f"co:okv:{ident}")
-    builder.button(text="🧾 Налоги", callback_data=f"co:tax:{ident}")
+    b.button(text="🏭 ОКВЭД", callback_data=CompanyNav(sec="okv", ident=ident))
+    b.button(text="🧾 Налоги", callback_data=CompanyNav(sec="tax", ident=ident))
 
-    builder.button(text="🏠 В меню", callback_data="menu")
-    builder.adjust(2, 2, 2, 2, 2, 2, 1)
-    return builder.as_markup()
+    b.button(text="🏠 В меню", callback_data="menu")
+    b.adjust(2, 2, 2, 2, 2, 2, 1)
+    return b.as_markup()
 
 
 def company_detail_keyboard(inn: str) -> InlineKeyboardMarkup:
@@ -46,79 +50,80 @@ def company_detail_keyboard(inn: str) -> InlineKeyboardMarkup:
 
 
 def person_or_entrepreneur_keyboard(inn: str) -> InlineKeyboardMarkup:
-    """Ask user to choose how to resolve 12-digit INN."""
-    builder = InlineKeyboardBuilder()
-    builder.button(text="👔 Проверить как ИП", callback_data=f"resolve12:entrepreneur:{inn}")
-    builder.button(text="👤 Проверить связи физлица", callback_data=f"resolve12:person:{inn}")
-    builder.button(text="🔙 В меню", callback_data="menu")
-    builder.adjust(1)
-    return builder.as_markup()
+    b = InlineKeyboardBuilder()
+    b.button(text="👔 Проверить как ИП", callback_data=f"resolve12:entrepreneur:{inn}")
+    b.button(text="👤 Проверить связи физлица", callback_data=f"resolve12:person:{inn}")
+    b.button(text="🏠 В меню", callback_data="menu")
+    b.adjust(1)
+    return b.as_markup()
 
 
 def back_to_company_keyboard(inn: str) -> InlineKeyboardMarkup:
-    """Keyboard to go back to the company details."""
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔙 Назад к карточке", callback_data=f"co:main:{inn}")
-    builder.button(text="🏠 В меню", callback_data="menu")
-    builder.adjust(1)
-    return builder.as_markup()
+    b = InlineKeyboardBuilder()
+    b.button(text="🔙 Назад к карточке", callback_data=CompanyNav(sec="main", ident=inn))
+    b.button(text="🏠 В меню", callback_data="menu")
+    b.adjust(1)
+    return b.as_markup()
 
 
 def search_results_keyboard(results: list[dict]) -> InlineKeyboardMarkup:
-    """Keyboard with search results list."""
-    builder = InlineKeyboardBuilder()
+    b = InlineKeyboardBuilder()
+
     for item in results[:10]:
-        inn = str(item.get("ИНН") or item.get("inn") or "")
+        ident = str(
+            item.get("ИНН")
+            or item.get("ОГРН")
+            or item.get("ОГРНИП")
+            or item.get("inn")
+            or item.get("ogrn")
+            or item.get("ogrnip")
+            or ""
+        )
+
         name = (
             item.get("НаимПолн")
             or item.get("НаимСокр")
             or item.get("ФИО")
             or item.get("name")
             or item.get("shortName")
-            or inn
+            or ident
         )
-        short_name = name[:40] + "…" if len(name) > 40 else name
-        entity_type = "entrepreneur" if item.get("ОГРНИП") or len(inn) == 12 else "company"
-        builder.button(
-            text=f"{short_name} ({inn})",
-            callback_data=f"select:{entity_type}:{inn}",
-        )
-    builder.button(text="🔙 В меню", callback_data="menu")
-    builder.adjust(1)
-    return builder.as_markup()
+
+        short_name = f"{name[:40]}…" if len(name) > 40 else name
+        b.button(text=f"{short_name}", callback_data=f"select:company:{ident}")
+
+    b.button(text="🏠 В меню", callback_data="menu")
+    b.adjust(1)
+    return b.as_markup()
 
 
 def cancel_keyboard() -> InlineKeyboardMarkup:
-    """Simple cancel / back to menu keyboard."""
-    builder = InlineKeyboardBuilder()
-    builder.button(text="❌ Отмена", callback_data="menu")
-    return builder.as_markup()
-
+    b = InlineKeyboardBuilder()
+    b.button(text="❌ Отмена", callback_data="menu")
+    return b.as_markup()
 
 
 def cemetery_menu_keyboard() -> InlineKeyboardMarkup:
-    """Scenario menu for deep due-diligence flow."""
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔎 Ввести ИНН", callback_data="cem:search_inn")
-    builder.button(text="🧾 Ввести название/ФИО", callback_data="cem:search_name")
-    builder.button(text="🔙 В меню", callback_data="menu")
-    builder.adjust(1)
-    return builder.as_markup()
+    b = InlineKeyboardBuilder()
+    b.button(text="🔎 Ввести ИНН", callback_data="cem:search_inn")
+    b.button(text="🧾 Ввести название/ФИО", callback_data="cem:search_name")
+    b.button(text="🔙 В меню", callback_data="menu")
+    b.adjust(1)
+    return b.as_markup()
 
 
 def cemetery_detail_keyboard(inn: str) -> InlineKeyboardMarkup:
-    """Detail sections keyboard for cemetery scenario."""
-    builder = InlineKeyboardBuilder()
-    builder.button(text="💰 Финансы", callback_data=f"cem:financial:{inn}")
-    builder.button(text="⚖️ Арбитраж", callback_data=f"cem:arbitration:{inn}")
-    builder.button(text="🛡️ Исполн. производства", callback_data=f"cem:enforcements:{inn}")
-    builder.button(text="📑 Госконтракты", callback_data=f"cem:contracts:{inn}")
-    builder.button(text="🔍 Проверки", callback_data=f"cem:inspections:{inn}")
-    builder.button(text="📉 Банкротство", callback_data=f"cem:bankruptcy:{inn}")
-    builder.button(text="📝 История изменений", callback_data=f"cem:history:{inn}")
-    builder.button(text="📰 Федресурс", callback_data=f"cem:fedresurs:{inn}")
-    builder.button(text="📊 Риск", callback_data=f"cem:risk:{inn}")
-    builder.button(text="🔙 В карточку", callback_data=f"co:main:{inn}")
-    builder.button(text="🏠 В меню", callback_data="menu")
-    builder.adjust(2, 2, 2, 2, 1, 1, 1)
-    return builder.as_markup()
+    b = InlineKeyboardBuilder()
+    b.button(text="💰 Финансы", callback_data=f"cem:financial:{inn}")
+    b.button(text="⚖️ Арбитраж", callback_data=f"cem:arbitration:{inn}")
+    b.button(text="🛡️ Исполн. производства", callback_data=f"cem:enforcements:{inn}")
+    b.button(text="📑 Госконтракты", callback_data=f"cem:contracts:{inn}")
+    b.button(text="🔍 Проверки", callback_data=f"cem:inspections:{inn}")
+    b.button(text="📉 Банкротство", callback_data=f"cem:bankruptcy:{inn}")
+    b.button(text="📝 История изменений", callback_data=f"cem:history:{inn}")
+    b.button(text="📰 Федресурс", callback_data=f"cem:fedresurs:{inn}")
+    b.button(text="📊 Риск", callback_data=f"cem:risk:{inn}")
+    b.button(text="🔙 В карточку", callback_data=CompanyNav(sec="main", ident=inn))
+    b.button(text="🏠 В меню", callback_data="menu")
+    b.adjust(2, 2, 2, 2, 1, 1, 1)
+    return b.as_markup()

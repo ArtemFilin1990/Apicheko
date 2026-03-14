@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Awaitable, Callable
 
 from aiogram.types import InlineKeyboardMarkup
 
@@ -29,11 +29,12 @@ from bot.formatters import (
     format_taxes_screen,
     format_fssp_screen,
 )
-from bot.keyboards import back_to_company_keyboard, company_nav_keyboard
+from bot.keyboards import back_to_company_keyboard
 from services.checko_api import CheckoAPI
 from utils.checko_payload import extract_data, extract_items
 
-CardFormatter = Callable[[dict], str]
+Formatter = Callable[[dict], str]
+CardFormatter = Formatter
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,7 @@ class DetailCardSpec:
 @dataclass(frozen=True)
 class ScreenSpec:
     fetcher: str
-    formatter: CardFormatter
+    formatter: Formatter
 
 
 DETAIL_CARDS: dict[str, DetailCardSpec] = {
@@ -115,6 +116,22 @@ def _normalize_financial_payload(payload: dict) -> dict:
     return payload
 
 
+
+
+def build_identifier_params(ident: str) -> dict[str, str]:
+    return _identifier_params(ident)
+
+
+async def fetch_screen_payload(checko_api: CheckoAPI, section: str, ident: str) -> dict:
+    spec = SCREEN_SPECS.get(section)
+    if not spec:
+        raise ValueError(f"Unknown section: {section}")
+
+    fetcher: Callable[..., Awaitable[dict]] = getattr(checko_api, spec.fetcher)
+    params = build_identifier_params(ident)
+    return await fetcher(**params)
+
+
 def _normalize_detail_payload(section: str, payload: dict) -> dict:
     if section in {"financial", "fin"}:
         return _normalize_financial_payload(payload)
@@ -136,23 +153,14 @@ def _normalize_detail_payload(section: str, payload: dict) -> dict:
     return {"data": items}
 
 
-async def build_company_screen(
-    checko_api: CheckoAPI,
-    identifier: str,
-    section: str,
-) -> tuple[str, InlineKeyboardMarkup]:
+async def build_company_screen(checko_api: CheckoAPI, section: str, ident: str) -> str:
     spec = SCREEN_SPECS.get(section)
     if not spec:
         raise ValueError(f"Unknown section: {section}")
 
-    fetcher_name = spec.fetcher
-    if fetcher_name == "get_company" and len(identifier) in (12, 15):
-        fetcher_name = "get_entrepreneur"
-
-    fetcher = getattr(checko_api, fetcher_name)
-    payload = await fetcher(**_identifier_params(identifier))
+    payload = await fetch_screen_payload(checko_api, section, ident)
     normalized_payload = _normalize_detail_payload(section, payload)
-    return spec.formatter(normalized_payload), company_nav_keyboard(identifier)
+    return spec.formatter(normalized_payload)
 
 
 async def build_detail_card(
