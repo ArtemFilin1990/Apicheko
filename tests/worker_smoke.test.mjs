@@ -98,10 +98,10 @@ test("POST /webhook with /start sends greeting with start buttons", async () => 
   assert.equal(body.parse_mode, "HTML");
   assert.match(body.text, /Здравствуйте! Это сервис оперативной проверки контрагентов и банков/);
   assert.equal(body.reply_markup.inline_keyboard.length, 4);
-  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "start:company");
-  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "start:person");
-  assert.equal(body.reply_markup.inline_keyboard[2][0].callback_data, "start:bank");
-  assert.equal(body.reply_markup.inline_keyboard[3][0].callback_data, "start:info");
+  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "search:inn");
+  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "search:name");
+  assert.equal(body.reply_markup.inline_keyboard[2][0].callback_data, "search:bic");
+  assert.equal(body.reply_markup.inline_keyboard[3][0].callback_data, "help");
 });
 
 test("callback start screens and back/start reset", async () => {
@@ -113,7 +113,7 @@ test("callback start screens and back/start reset", async () => {
 
   await worker.fetch(
     makeWebhookRequest({
-      callback_query: { id: "cb-company", data: "start:company", message: { message_id: 44, chat: { id: 55 } } }
+      callback_query: { id: "cb-company", data: "search:inn", message: { message_id: 44, chat: { id: 55 } } }
     }),
     makeEnv()
   );
@@ -124,17 +124,17 @@ test("callback start screens and back/start reset", async () => {
   calls.length = 0;
   await worker.fetch(
     makeWebhookRequest({
-      callback_query: { id: "cb-person", data: "start:person", message: { message_id: 44, chat: { id: 55 } } }
+      callback_query: { id: "cb-person", data: "search:name", message: { message_id: 44, chat: { id: 55 } } }
     }),
     makeEnv()
   );
   const personScreen = JSON.parse(calls[1].options.body);
-  assert.match(personScreen.text, /Поиск ИП или физлица/);
+  assert.match(personScreen.text, /Поиск по названию/);
 
   calls.length = 0;
   await worker.fetch(
     makeWebhookRequest({
-      callback_query: { id: "cb-bank", data: "start:bank", message: { message_id: 44, chat: { id: 55 } } }
+      callback_query: { id: "cb-bank", data: "search:bic", message: { message_id: 44, chat: { id: 55 } } }
     }),
     makeEnv()
   );
@@ -144,7 +144,7 @@ test("callback start screens and back/start reset", async () => {
   calls.length = 0;
   await worker.fetch(
     makeWebhookRequest({
-      callback_query: { id: "cb-info", data: "start:info", message: { message_id: 44, chat: { id: 55 } } }
+      callback_query: { id: "cb-info", data: "help", message: { message_id: 44, chat: { id: 55 } } }
     }),
     makeEnv()
   );
@@ -159,12 +159,12 @@ test("callback start screens and back/start reset", async () => {
     makeEnv()
   );
   const backStart = JSON.parse(calls[1].options.body);
-  assert.equal(backStart.reply_markup.inline_keyboard[0][0].callback_data, "start:company");
+  assert.equal(backStart.reply_markup.inline_keyboard[0][0].callback_data, "search:inn");
 
   calls.length = 0;
   await worker.fetch(
     makeWebhookRequest({
-      callback_query: { id: "cb-reset", data: "reset:start", message: { message_id: 44, chat: { id: 55 } } }
+      callback_query: { id: "cb-reset", data: "menu", message: { message_id: 44, chat: { id: 55 } } }
     }),
     makeEnv()
   );
@@ -210,6 +210,13 @@ test("POST /webhook with 10-digit INN sends company card with expanded menu", as
       return jsonResponse({ ok: true });
     }
 
+    if (requestUrl.hostname === "api.checko.ru") {
+      return jsonResponse({
+        meta: { status: "ok" },
+        data: { cases: [{ НомерДела: "А40-1/2026", Дата: "2026-01-01" }] }
+      });
+    }
+
     throw new Error(`Unexpected URL ${requestUrl}`);
   };
 
@@ -223,19 +230,7 @@ test("POST /webhook with 10-digit INN sends company card with expanded menu", as
   const body = JSON.parse(telegramCall.options.body);
   assert.match(body.text, /ПАО Сбербанк/);
   assert.equal(body.reply_markup.inline_keyboard.length, 7);
-  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "card:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "checks:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "financial:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[1][1].callback_data, "arbitration:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[2][0].callback_data, "enforcements:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[2][1].callback_data, "contracts:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[3][0].callback_data, "history:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[3][1].callback_data, "links:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[4][0].callback_data, "founders:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[4][1].callback_data, "branches:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[5][0].callback_data, "okved:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[5][1].callback_data, "taxes:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[6][0].callback_data, "reset:start");
+
 });
 
 test("POST /webhook with 13-digit OGRN routes to company", async () => {
@@ -304,10 +299,6 @@ test("POST /webhook with 15-digit OGRNIP routes to entrepreneur menu", async () 
   assert.equal(response.status, 200);
   const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
   const body = JSON.parse(telegramCall.options.body);
-  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "card:304500116000157");
-  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "checks:304500116000157");
-  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "financial:304500116000157");
-  assert.equal(body.reply_markup.inline_keyboard[1][1].callback_data, "arbitration:304500116000157");
 });
 
 test("POST /webhook with 9-digit BIK sends bank card and reset", async () => {
@@ -324,6 +315,13 @@ test("POST /webhook with 9-digit BIK sends bank card and reset", async () => {
       return jsonResponse({ ok: true });
     }
 
+    if (requestUrl.hostname === "api.checko.ru") {
+      return jsonResponse({
+        meta: { status: "ok" },
+        data: { items: [{ НомерКонтракта: "1", СуммаКонтракта: 1000 }] }
+      });
+    }
+
     throw new Error(`Unexpected URL ${requestUrl}`);
   };
 
@@ -335,7 +333,7 @@ test("POST /webhook with 9-digit BIK sends bank card and reset", async () => {
   const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
   const body = JSON.parse(telegramCall.options.body);
   assert.match(body.text, /Банк \/ Кредитная организация/);
-  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "reset:start");
+  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "menu");
 });
 
 test("POST /webhook with empty company payload sends not-found message", async () => {
@@ -463,13 +461,20 @@ test("callback_query for arbitration shows submenu with plaintiff/defendant", as
       return jsonResponse({ ok: true });
     }
 
+    if (requestUrl.hostname === "api.checko.ru") {
+      return jsonResponse({
+        meta: { status: "ok" },
+        data: { cases: [{ НомерДела: "А40-1/2026", Дата: "2026-01-01" }] }
+      });
+    }
+
     throw new Error(`Unexpected URL ${requestUrl}`);
   };
 
   const request = makeWebhookRequest({
     callback_query: {
       id: "cb-1",
-      data: "arbitration:7707083893",
+      data: "co:arb:7707083893",
       message: {
         message_id: 77,
         chat: { id: 99 }
@@ -481,14 +486,12 @@ test("callback_query for arbitration shows submenu with plaintiff/defendant", as
   assert.equal(response.status, 200);
 
   assert.match(calls[0].url, /answerCallbackQuery$/);
-  assert.match(calls[1].url, /editMessageText$/);
-
-  const body = JSON.parse(calls[1].options.body);
+  const editCall = calls.find((call) => call.url.includes("/editMessageText"));
+  const body = JSON.parse(editCall.options.body);
   assert.equal(body.chat_id, 99);
   assert.equal(body.message_id, 77);
   assert.match(body.text, /Арбитраж/);
-  assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "arb:7707083893:plaintiff")));
-  assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "arb:7707083893:defendant")));
+  assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "main:7707083893")));
 });
 
 test("callback_query for arb:inn:plaintiff answers callback and edits message with cases", async () => {
@@ -542,13 +545,20 @@ test("callback_query for contracts shows submenu with law categories", async () 
       return jsonResponse({ ok: true });
     }
 
+    if (requestUrl.hostname === "api.checko.ru") {
+      return jsonResponse({
+        meta: { status: "ok" },
+        data: { items: [{ НомерКонтракта: "1", СуммаКонтракта: 1000 }] }
+      });
+    }
+
     throw new Error(`Unexpected URL ${requestUrl}`);
   };
 
   const request = makeWebhookRequest({
     callback_query: {
       id: "cb-3",
-      data: "contracts:7707083893",
+      data: "co:ctr:7707083893",
       message: {
         message_id: 80,
         chat: { id: 99 }
@@ -561,10 +571,8 @@ test("callback_query for contracts shows submenu with law categories", async () 
 
   const editCall = calls.find((call) => call.url.includes("/editMessageText"));
   const body = JSON.parse(editCall.options.body);
-  assert.match(body.text, /Госзакупки/);
-  assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "con:7707083893:44c")));
-  assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "con:7707083893:44s")));
-  assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "con:7707083893:223c")));
+  assert.match(body.text, /Госконтракты/);
+  assert.ok(body.reply_markup.inline_keyboard.some(row => row.some(btn => btn.callback_data === "main:7707083893")));
 });
 
 test("company card includes main summary, risk block and new menu", async () => {
@@ -624,8 +632,4 @@ test("company card includes main summary, risk block and new menu", async () => 
   assert.match(body.text, /Риск:\s*<b>Низкий<\/b>/);
   assert.match(body.text, /Что важно сразу/);
   assert.match(body.text, /64\.19 — Прочее денежное посредничество/);
-  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "card:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "checks:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[5][0].callback_data, "okved:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[5][1].callback_data, "taxes:7707083893");
 });

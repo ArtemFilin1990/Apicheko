@@ -67,14 +67,14 @@ class PersonKeyboardTests(unittest.TestCase):
             for row in markup.inline_keyboard
             for btn in row
         ]
-        self.assertIn("detail:7707083893:company", callbacks_data)
+        self.assertIn("co:main:7707083893", callbacks_data)
 
 
     def test_main_menu_contains_expected_actions(self) -> None:
         markup = main_menu_keyboard()
         labels = [btn.text for row in markup.inline_keyboard for btn in row]
 
-        self.assertIn("🔎 Поиск по ИНН", labels)
+        self.assertIn("🔎 Поиск по ИНН / ОГРН", labels)
         self.assertIn("🧾 Поиск по названию", labels)
         self.assertIn("📋 История запросов", labels)
         self.assertIn("ℹ️ Помощь", labels)

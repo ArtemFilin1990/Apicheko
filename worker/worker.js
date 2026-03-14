@@ -170,7 +170,30 @@ async function handleCallbackQuery(callbackQuery, env) {
     if (data.startsWith("noop")) {
       return;
     }
-    if (data === "back:start" || data === "reset:start") {
+    if (data === "help") {
+      const view = buildStartInfoView();
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (data === "search:inn") {
+      const view = buildCompanyInputView();
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (data === "search:name") {
+      const view = {
+        text: "🧾 <b>Поиск по названию</b>\n\nОтправьте название компании или ФИО ИП сообщением.",
+        reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
+      };
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (data === "search:bic") {
+      const view = buildBankInputView();
+      await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      return;
+    }
+    if (data === "menu" || data === "back:start" || data === "reset:start") {
       const view = buildStartView();
       await editMessage(env, chatId, messageId, view.text, view.reply_markup);
       return;
@@ -207,6 +230,59 @@ async function handleCallbackQuery(callbackQuery, env) {
       const inn2 = data.split(":")[2] || "";
       if (/^\d{12}$/.test(inn2)) {
         const view = await buildMainCardView(env, inn2, "entrepreneur");
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+      }
+      return;
+    }
+    if (data.startsWith("co:")) {
+      const [, section, ident] = data.split(":", 3);
+      if (!section || !ident || !(/^\d{10}$/.test(ident) || /^\d{12}$/.test(ident) || /^\d{13}$/.test(ident) || /^\d{15}$/.test(ident))) {
+        return;
+      }
+      if (section === "main") {
+        const view = await buildMainCardView(env, ident);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      const map = { risk: "checks", fin: "financial", arb: "arbitration", fsp: "enforcements", ctr: "contracts", his: "history", lnk: "links", own: "founders", fil: "branches", okv: "okved", tax: "taxes" };
+      const mapped = map[section];
+      if (!mapped) {
+        return;
+      }
+      const synthetic = `${mapped}:${ident}`;
+      const [mappedAction, mappedInn] = synthetic.split(":");
+      if (mappedAction === "checks") {
+        const view = await buildChecksView(env, mappedInn);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      if (mappedAction === "links") {
+        const view = await buildLinksView(env, mappedInn);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      if (mappedAction === "founders") {
+        const view = await buildFoundersView(env, mappedInn);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      if (mappedAction === "branches") {
+        const view = await buildBranchesView(env, mappedInn);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      if (mappedAction === "okved") {
+        const view = await buildOkvedView(env, mappedInn);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      if (mappedAction === "taxes") {
+        const view = await buildTaxesView(env, mappedInn);
+        await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+        return;
+      }
+      if (SECTION_CONFIG[mappedAction]) {
+        const view = await buildSectionView(env, mappedAction, mappedInn, 1);
         await editMessage(env, chatId, messageId, view.text, view.reply_markup);
       }
       return;
@@ -304,7 +380,6 @@ async function handleCallbackQuery(callbackQuery, env) {
       chatId,
       messageId,
       isCheckoNotFoundError(error) ? COMPANY_NOT_FOUND_MESSAGE : CHECKO_SERVICE_ERROR_MESSAGE,
-      { inline_keyboard: [[kb("🏠 В меню", "reset:start")]] }
     );
   }
 }
@@ -314,10 +389,10 @@ function buildStartView() {
     text: START_MESSAGE_TEXT,
     reply_markup: {
       inline_keyboard: [
-        [kb("🏢 Компания — ИНН / ОГРН", "start:company")],
-        [kb("👤 ИП / физлицо — ИНН / ОГРНИП", "start:person")],
-        [kb("🏦 Банк — БИК", "start:bank")],
-        [kb("ℹ️ Что входит в проверку", "start:info")]
+        [kb("🔎 Поиск по ИНН / ОГРН", "search:inn")],
+        [kb("🧾 Поиск по названию", "search:name")],
+        [kb("🏦 Поиск по БИК", "search:bic")],
+        [kb("ℹ️ Помощь", "help")]
       ]
     }
   };
@@ -542,13 +617,7 @@ __name(fetchSectionCount, "fetchSectionCount");
 function buildMainKeyboard(inn, counts, entityType) {
   return {
     inline_keyboard: [
-      [kb("🏢 Карточка", `card:${inn}`), kb("⚠️ Проверки", `checks:${inn}`)],
-      [kb("💰 Финансы", `financial:${inn}`), kb("⚖️ Арбитраж", `arbitration:${inn}`)],
-      [kb("🛡️ ФССП", `enforcements:${inn}`), kb("📑 Контракты", `contracts:${inn}`)],
-      [kb("🕓 История", `history:${inn}`), kb("🔗 Связи", `links:${inn}`)],
-      [kb("👥 Учредители", `founders:${inn}`), kb("🏬 Филиалы", `branches:${inn}`)],
-      [kb("🏭 ОКВЭД", `okved:${inn}`), kb("🧾 Налоги", `taxes:${inn}`)],
-      [kb("🏠 В меню", "reset:start")]
+
     ]
   };
 }
@@ -836,7 +905,6 @@ async function buildPersonView(env, inn) {
     `ИНН: <b>${escapeHtml(String(pick(data || {}, ["ИНН"]) || inn))}</b>`,
     `Связанные компании: <b>${escapeHtml(String(pick(data || {}, ["Связи", "КолСвязей"]) || "—"))}</b>`
   ].join("\n");
-  return { text, reply_markup: { inline_keyboard: [[kb("🏠 В меню", "reset:start")]] } };
 }
 __name(buildPersonView, "buildPersonView");
 async function buildBankView(env, inn) {
@@ -875,7 +943,6 @@ async function buildBicView(env, bic) {
     `Тип: <b>${escapeHtml(String(pick(bank || {}, ["Тип"]) || "—"))}</b>`,
     `Корр. счёт: <b>${escapeHtml(String(corr))}</b>`
   ].join("\n");
-  return { text, reply_markup: { inline_keyboard: [[kb("🏠 В меню", "reset:start")]] } };
 }
 __name(buildBicView, "buildBicView");
 async function buildAffiliatesView(env, inn, page) {

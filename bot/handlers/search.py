@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from bot.formatters import format_bank, format_company, format_entrepreneur, format_person, format_search_results
 from bot.keyboards import (
     cancel_keyboard,
-    company_detail_keyboard,
+    company_nav_keyboard,
     person_or_entrepreneur_keyboard,
     search_results_keyboard,
 )
@@ -78,7 +78,7 @@ async def handle_inn_input(
         elif len(identifier) == 10:
             data = await checko_api.get_company(inn=identifier)
             text = format_company(data)
-            await message.answer(text, reply_markup=company_detail_keyboard(identifier))
+            await message.answer(text, reply_markup=company_nav_keyboard(identifier))
         elif len(identifier) == 12:
             await message.answer(
                 "ИНН из 12 цифр может принадлежать ИП или физическому лицу.\nВыберите тип проверки:",
@@ -88,12 +88,12 @@ async def handle_inn_input(
             data = await checko_api.get_company(ogrn=identifier)
             text = format_company(data)
             inn = (data.get("data") or data).get("ИНН", identifier)
-            await message.answer(text, reply_markup=company_detail_keyboard(inn))
+            await message.answer(text, reply_markup=company_nav_keyboard(inn))
         elif len(identifier) == 15:
             data = await checko_api.get_entrepreneur(ogrnip=identifier)
             text = format_entrepreneur(data)
             inn = (data.get("data") or data).get("ИНН", identifier)
-            await message.answer(text, reply_markup=company_detail_keyboard(inn))
+            await message.answer(text, reply_markup=company_nav_keyboard(inn))
     except CheckoAPIError as exc:
         await message.answer(
             f"⚠️ Ошибка при получении данных:\n<i>{html.escape(str(exc))}</i>\n\n"
