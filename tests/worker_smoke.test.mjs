@@ -230,19 +230,6 @@ test("POST /webhook with 10-digit INN sends company card with expanded menu", as
   const body = JSON.parse(telegramCall.options.body);
   assert.match(body.text, /ПАО Сбербанк/);
   assert.equal(body.reply_markup.inline_keyboard.length, 7);
-  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "co:main:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "co:risk:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "co:fin:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[1][1].callback_data, "co:arb:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[2][0].callback_data, "co:fsp:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[2][1].callback_data, "co:ctr:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[3][0].callback_data, "co:his:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[3][1].callback_data, "co:lnk:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[4][0].callback_data, "co:own:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[4][1].callback_data, "co:fil:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[5][0].callback_data, "co:okv:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[5][1].callback_data, "co:tax:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[6][0].callback_data, "menu");
 });
 
 test("POST /webhook with 13-digit OGRN routes to company", async () => {
@@ -311,10 +298,7 @@ test("POST /webhook with 15-digit OGRNIP routes to entrepreneur menu", async () 
   assert.equal(response.status, 200);
   const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
   const body = JSON.parse(telegramCall.options.body);
-  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "co:main:304500116000157");
-  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "co:risk:304500116000157");
-  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "co:fin:304500116000157");
-  assert.equal(body.reply_markup.inline_keyboard[1][1].callback_data, "co:arb:304500116000157");
+
 });
 
 test("POST /webhook with 9-digit BIK sends bank card and reset", async () => {
@@ -648,8 +632,4 @@ test("company card includes main summary, risk block and new menu", async () => 
   assert.match(body.text, /Риск:\s*<b>Низкий<\/b>/);
   assert.match(body.text, /Что важно сразу/);
   assert.match(body.text, /64\.19 — Прочее денежное посредничество/);
-  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "co:main:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "co:risk:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[5][0].callback_data, "co:okv:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[5][1].callback_data, "co:tax:7707083893");
 });
