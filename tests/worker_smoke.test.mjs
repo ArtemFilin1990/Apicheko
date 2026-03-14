@@ -69,13 +69,13 @@ test("/start sends new main menu", async () => {
 
   await worker.fetch(makeWebhookRequest({ message: { text: "/start", chat: { id: 1 } } }), makeEnv());
   const body = JSON.parse(calls[0].options.body);
-  assert.match(body.text, /сервис проверки контрагентов и банков/);
+  assert.match(body.text, /Проверка контрагента/);
   assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "search:inn");
-  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "search:name");
-  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "search:bic");
+  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "search:name");
+  assert.equal(body.reply_markup.inline_keyboard[2][0].callback_data, "search:bic");
 });
 
-test("10-digit INN opens main card with 12-section keyboard", async () => {
+test("10-digit INN opens main card with compact section keyboard", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const u = new URL(String(url));
@@ -83,7 +83,7 @@ test("10-digit INN opens main card with 12-section keyboard", async () => {
     if (u.hostname === "api.checko.ru") {
       const endpoint = u.pathname.split("/").pop();
       if (endpoint === "company") {
-        return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", ОГРН: "1027700132195", НаимСокр: "ООО Тест", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }], Налоги: { СумНедоим: 0 } } });
+        return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", ОГРН: "1027700132195", НаимСокр: "ООО Тест", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }], Налоги: { СумНедоим: 0 }, Учред: [{ Наим: "ООО Учредитель" }] } });
       }
       if (["finances", "legal-cases", "enforcements", "contracts"].includes(endpoint)) {
         return jsonResponse({ meta: { status: "ok" }, data: {} });
@@ -96,8 +96,10 @@ test("10-digit INN opens main card with 12-section keyboard", async () => {
   const send = calls.find((c) => c.url.includes("/sendMessage"));
   const body = JSON.parse(send.options.body);
   assert.match(body.text, /ООО Тест/);
+  assert.doesNotMatch(body.text, /КРИТИЧЕСКИЙ РИСК/);
   assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "co:risk:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[5][0].callback_data, "co:tax:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[1][1].callback_data, "co:debt:7707083893");
+  assert.equal(body.reply_markup.inline_keyboard[3][1].callback_data, "co:tax:7707083893");
 });
 
 test("12-digit INN forces user choice", async () => {
@@ -110,7 +112,7 @@ test("12-digit INN forces user choice", async () => {
   await worker.fetch(makeWebhookRequest({ message: { text: "500100732259", chat: { id: 1 } } }), makeEnv());
   const body = JSON.parse(calls[0].options.body);
   assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "resolve12:entrepreneur:500100732259");
-  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "resolve12:person:500100732259");
+  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "resolve12:person:500100732259");
 });
 
 test("co:fin uses /finances and shows empty-state without service error", async () => {
@@ -171,7 +173,7 @@ test("BIC lookup uses /bank", async () => {
   assert.ok(calls.some((c) => c.url.includes("/bank?")));
 });
 
-test("main card applies critical risk override and founders fallback", async () => {
+test("main card keeps risk details in risks screen", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const u = new URL(String(url));
@@ -190,8 +192,8 @@ test("main card applies critical risk override and founders fallback", async () 
         }
       });
     }
-    if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs")) {
-      return jsonResponse({ meta: { status: "ok" }, data: [] });
+    if (u.pathname.endsWith("/finances")) {
+      return jsonResponse({ meta: { status: "ok" }, data: { "2023": { 2110: 1000000 } } });
     }
     throw new Error(`Unexpected URL ${u}`);
   };
@@ -200,10 +202,64 @@ test("main card applies critical risk override and founders fallback", async () 
 
   const send = calls.find((c) => c.url.includes("/sendMessage"));
   const body = JSON.parse(send.options.body);
+  assert.doesNotMatch(body.text, /КРИТИЧЕСКИЙ РИСК/);
+  assert.match(body.text, /Выручка \(последний год\): 1\s000\s000 ₽ \(2023\)/);
+  assert.match(body.text, /Учредитель \(текущий\): Учредитель Тест/);
+});
+
+test("co:risk renders critical block for inactive status", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.pathname.endsWith("/company")) {
+      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "3525405517", Статус: { Наим: "Не действует" }, Налоги: { СумНедоим: 12 } } });
+    }
+    if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs")) {
+      return jsonResponse({ meta: { status: "ok" }, data: [] });
+    }
+    if (u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/finances")) {
+      return jsonResponse({ meta: { status: "ok" }, data: [] });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-risk", data: "co:risk:3525405517", message: { message_id: 7, chat: { id: 2 } } } }),
+    makeEnv()
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
   assert.match(body.text, /КРИТИЧЕСКИЙ РИСК/);
   assert.match(body.text, /Компания не действует/);
-  assert.match(body.text, /Уровень риска: <b>Критический<\/b>/);
-  assert.match(body.text, /Учредитель \(текущий\): Учредитель Тест/);
+});
+
+test("co:debt aggregates company taxes with enforcements", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.pathname.endsWith("/company")) {
+      return jsonResponse({ meta: { status: "ok" }, data: { Налоги: { СумНедоим: 5000, СумПениШтр: 120 } } });
+    }
+    if (u.pathname.endsWith("/enforcements")) {
+      return jsonResponse({ meta: { status: "ok" }, data: [{ НомерИП: "123", Дата: "2020-01-02", Сумма: 7000, Предмет: "Штраф" }] });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-debt", data: "co:debt:7707083893", message: { message_id: 12, chat: { id: 2 } } } }),
+    makeEnv()
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Налоговая задолженность: 5\s000 ₽/);
+  assert.match(body.text, /Исполнительные производства: 1/);
 });
 
 test("co:tax distinguishes missing data from zero values", async () => {

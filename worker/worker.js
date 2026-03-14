@@ -6,16 +6,13 @@ const SEARCH_MIN_QUERY_LENGTH = 4;
 
 const COMPANY_SECTION_TITLES = {
   main: "🏢 Карточка",
-  risk: "⚠️ Проверки / Риски",
+  risk: "⚠️ Риски",
   fin: "💰 Финансы",
   arb: "⚖️ Арбитраж",
-  fsp: "🛡️ ФССП",
+  debt: "🛡️ Долги",
   ctr: "📑 Контракты",
   his: "🕓 История",
   lnk: "🔗 Связи",
-  own: "👥 Учредители",
-  fil: "🏬 Филиалы",
-  okv: "🏭 ОКВЭД",
   tax: "🧾 Налоги"
 };
 
@@ -116,7 +113,7 @@ async function buildViewForUserText(env, text) {
   }
 
   return {
-    text: "ℹ️ Отправьте ИНН, ОГРН / ОГРНИП, БИК или название компании для поиска.",
+    text: "🆔 Неверный формат. Отправьте ИНН (10/12), ОГРН (13), ОГРНИП (15), БИК (9) или название.",
     reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
   };
 }
@@ -184,10 +181,11 @@ async function buildViewForCallback(env, data) {
 
 function buildMainMenuView() {
   return {
-    text: "👋 Здравствуйте! Это сервис проверки контрагентов и банков.\n\nВыберите тип поиска ниже или отправьте реквизит сообщением.\n\nПоддерживаются:\n• ИНН\n• ОГРН / ОГРНИП\n• БИК",
+    text: "🏠 <b>Проверка контрагента</b>\n\nВыберите тип поиска или отправьте реквизит сообщением.",
     reply_markup: {
       inline_keyboard: [
-        [kb("🔎 Поиск по ИНН / ОГРН", "search:inn"), kb("🧾 Поиск по названию", "search:name")],
+        [kb("🔎 Поиск по ИНН / ОГРН", "search:inn")],
+        [kb("🧾 Поиск по названию", "search:name")],
         [kb("🏦 Поиск по БИК", "search:bic")],
         [kb("ℹ️ Помощь", "help")]
       ]
@@ -197,38 +195,39 @@ function buildMainMenuView() {
 
 function buildHelpView() {
   return {
-    text: "ℹ️ <b>Как использовать</b>\n\n1) Отправьте реквизит или название.\n2) Откройте карточку и 12 тематических экранов.\n3) Проверяйте риски, финансы, суды, ФССП, контракты, историю и связи.",
+    text: "ℹ️ <b>Как использовать</b>\n\n1) Отправьте ИНН, ОГРН / ОГРНИП, БИК или название.\n2) Откройте карточку.\n3) Перейдите в нужный раздел: риски, финансы, арбитраж, долги, контракты, история, связи, налоги.",
     reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
   };
 }
 
 function buildSearchInnView() {
   return {
-    text: "🔎 <b>Поиск компании</b>\n\nОтправьте:\n• ИНН компании\n• ОГРН\n• ОГРНИП",
+    text: "🔎 <b>Поиск по ИНН / ОГРН</b>\n\nОтправьте ИНН компании, ОГРН или ОГРНИП.",
     reply_markup: backMenuKeyboard("menu")
   };
 }
 
 function buildSearchNameView() {
   return {
-    text: "🧾 <b>Поиск по названию</b>\n\nОтправьте:\n• название компании\n• или ФИО ИП",
+    text: "🧾 <b>Поиск по названию</b>\n\nОтправьте название компании или ФИО ИП.",
     reply_markup: backMenuKeyboard("menu")
   };
 }
 
 function buildSearchBicView() {
   return {
-    text: "🏦 <b>Поиск банка</b>\n\nОтправьте:\n• БИК банка (9 цифр)",
+    text: "🏦 <b>Поиск по БИК</b>\n\nОтправьте БИК банка (9 цифр).",
     reply_markup: backMenuKeyboard("menu")
   };
 }
 
 function buildResolve12View(inn) {
   return {
-    text: "ИНН из 12 цифр может относиться к:\n\n• ИП\n• физическому лицу\n\nВыберите режим проверки.",
+    text: "🆔 <b>ИНН из 12 цифр</b>\n\nВыберите режим проверки.",
     reply_markup: {
       inline_keyboard: [
-        [kb("👔 Проверить как ИП", `resolve12:entrepreneur:${inn}`), kb("👤 Проверить как физлицо", `resolve12:person:${inn}`)],
+        [kb("👔 Проверить как ИП", `resolve12:entrepreneur:${inn}`)],
+        [kb("👤 Проверить как физлицо", `resolve12:person:${inn}`)],
         [kb("⬅️ Назад", "search:inn")],
         [kb("🏠 В меню", "menu")]
       ]
@@ -264,7 +263,7 @@ async function buildCompanyMainView(env, id) {
   const payload = await checkoRequest(env, "company", identifierParams(id));
   const data = payload.data || {};
   if (!hasIdentity(data)) throw new CheckoNotFoundError();
-  const criticalRisk = await detectCriticalRisk(env, id, data);
+  const finances = await safeSectionData(env, "finances", identifierParams(id));
 
   const title = data.НаимСокр || data.НаимПолн || "Компания";
   const okved = data.ОКВЭД ? `${data.ОКВЭД.Код || "—"} ${data.ОКВЭД.Наим || ""}`.trim() : "—";
@@ -272,43 +271,33 @@ async function buildCompanyMainView(env, id) {
   const director = data.Руковод?.[0]?.ФИО || data.Руководители?.[0]?.ФИО || "—";
   const founders = getCompanyFounders(data);
   const founder = founders[0]?.ФИО || founders[0]?.Наим || "—";
-  const branchCount = ensureArray(data.Филиалы || data.Подразделения || data.ОбособПодр || data.Фил).length;
-  const taxes = data.Налоги || {};
-
-  const risk = criticalRisk
-    ? { icon: "🔴", label: "Критический" }
-    : buildRiskLevel({ taxDebt: toNum(taxes.СумНедоим), legalCount: 0, fsspCount: 0 });
+  const latestRevenue = extractLatestRevenue(finances.data);
 
   const lines = [
     `🏢 <b>${escapeHtml(title)}</b>`,
-    criticalRisk ? `\n🔴 <b>КРИТИЧЕСКИЙ РИСК</b>\n${escapeHtml(criticalRisk)}` : null,
-    data.НаимПолн && data.НаимПолн !== title ? `Полное: ${escapeHtml(data.НаимПолн)}` : null,
-    `ОГРН: <code>${escapeHtml(String(data.ОГРН || "—"))}</code>`,
+    "",
+    "🆔 <b>Идентификаторы</b>",
     `ИНН: <code>${escapeHtml(String(data.ИНН || id))}</code>`,
+    `ОГРН: <code>${escapeHtml(String(data.ОГРН || "—"))}</code>`,
     `КПП: ${escapeHtml(String(data.КПП || "—"))}`,
+    "",
+    "📌 <b>Статус и регистрация</b>",
     `Статус: <b>${escapeHtml(String(data.Статус?.Наим || "—"))}</b>`,
     `Дата регистрации: ${escapeHtml(formatDate(data.ДатаРег))}`,
+    data.НаимПолн && data.НаимПолн !== title ? `Полное: ${escapeHtml(data.НаимПолн)}` : null,
+    "",
+    "🏭 <b>Деятельность</b>",
     `ОКВЭД: ${escapeHtml(okved)}`,
+    `💰 Выручка (последний год): ${escapeHtml(latestRevenue)}`,
+    data.УстКап?.Сумма ? `🏦 Уставный капитал: ${escapeHtml(formatMoney(data.УстКап.Сумма))}` : null,
+    "",
+    "📍 <b>Адрес и контакты</b>",
     `Адрес: ${escapeHtml(String(data.ЮрАдрес?.АдресРФ || "—"))}`,
     `Руководитель: ${escapeHtml(director)}`,
+    `Учредитель (текущий): ${escapeHtml(founder)}`,
     contacts.Тел ? `Телефон: ${escapeHtml(valueAsText(contacts.Тел))}` : null,
     contacts.Емэйл ? `Email: ${escapeHtml(valueAsText(contacts.Емэйл))}` : null,
-    data.УстКап?.Сумма ? `Уставный капитал: ${escapeHtml(formatMoney(data.УстКап.Сумма))}` : null,
-    data.РМСП?.Кат ? `Категория МСП: ${escapeHtml(String(data.РМСП.Кат))}` : null,
-    `Учредитель (текущий): ${escapeHtml(founder)}`,
-    `Филиалы: ${branchCount}`,
-    "",
-    "⚠️ <b>Краткая оценка</b>",
-    `${risk.icon} Уровень риска: <b>${risk.label}</b>`,
-    `Налоговая задолженность: ${escapeHtml(formatTaxMoney(taxes, ["СумНедоим"]))}`,
-    `Пени/штрафы: ${escapeHtml(formatTaxMoney(taxes, ["СумПениШтр", "СумШтр"]))}`,
-    `Сотрудники: ${escapeHtml(formatOptionalNumber(firstNonEmpty([data.ЧислСотр, data.Сотрудники])))}`,
-    `Выручка: ${escapeHtml(formatOptionalMoney(firstNonEmpty([data.Выручка, data.Финансы?.Выручка])))}`,
-    "",
-    "Что важно:",
-    `• Статус: ${escapeHtml(String(data.Статус?.Наим || "нет данных"))}`,
-    `• Недоимка: ${escapeHtml(formatTaxMoney(taxes, ["СумНедоим"]))}`,
-    `• Филиалы: ${branchCount}`
+    contacts.ВебСайт ? `Сайт: ${escapeHtml(valueAsText(contacts.ВебСайт))}` : null
   ].filter(Boolean);
 
   return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(id) };
@@ -319,13 +308,10 @@ async function buildCompanySectionView(env, section, id) {
   if (section === "risk") return buildRiskView(env, id);
   if (section === "fin") return buildFinancesView(env, id);
   if (section === "arb") return buildArbitrationView(env, id);
-  if (section === "fsp") return buildFsspView(env, id);
+  if (section === "debt") return buildDebtsView(env, id);
   if (section === "ctr") return buildContractsView(env, id);
   if (section === "his") return buildHistoryView(env, id);
   if (section === "lnk") return buildConnectionsView(env, id);
-  if (section === "own") return buildFoundersView(env, id);
-  if (section === "fil") return buildBranchesView(env, id);
-  if (section === "okv") return buildOkvedView(env, id);
   if (section === "tax") return buildTaxesView(env, id);
   return null;
 }
@@ -333,39 +319,48 @@ async function buildCompanySectionView(env, section, id) {
 async function buildRiskView(env, id) {
   const company = await checkoRequest(env, "company", identifierParams(id));
   const data = company.data || {};
+  const finances = await safeSectionData(env, "finances", identifierParams(id));
   const legal = await safeSectionData(env, "legal-cases", { ...identifierParams(id), sort: "-date", limit: 10 });
   const fssp = await safeSectionData(env, "enforcements", { ...identifierParams(id), sort: "-date", limit: 10 });
+  const contracts = await safeSectionData(env, "contracts", { ...identifierParams(id), law: 44, role: "supplier", sort: "-date", limit: 10 });
 
   const taxes = data.Налоги || {};
-  const branchCount = ensureArray(data.Филиалы || data.Подразделения || data.ОбособПодр || data.Фил).length;
   const criticalRisk = await detectCriticalRisk(env, id, data);
   const risk = criticalRisk
     ? { icon: "🔴", label: "Критический" }
     : buildRiskLevel({ taxDebt: toNum(taxes.СумНедоим), legalCount: takeRecords(legal).length, fsspCount: takeRecords(fssp).length });
+  const hasReorg = Boolean(data.Реорг?.Дата || data.Реорганизация?.Дата || /реорганиз/.test(String(data.Статус?.Наим || "").toLowerCase()));
+  const finSignals = summarizeFinanceSignals(finances.data);
 
   const positives = [];
   if (data.РМСП?.Кат) positives.push(`• Статус МСП: ${data.РМСП.Кат}`);
   if (hasTaxField(taxes, "СумНедоим") && toNum(taxes.СумНедоим) === 0) positives.push("• Налоговая недоимка не выявлена");
+  if (!hasReorg) positives.push("• Признаки реорганизации не обнаружены");
 
   const risks = [
+    `• Статус компании: ${String(data.Статус?.Наим || "нет данных")}`,
+    `• Ликвидация: ${data.Ликвид?.Дата ? `да (${formatDate(data.Ликвид.Дата)})` : "не выявлена"}`,
+    `• Реорганизация: ${hasReorg ? "есть признаки" : "не выявлена"}`,
     `• Налоговая задолженность: ${formatTaxMoney(taxes, ["СумНедоим"])}`,
     `• Пени / штрафы: ${formatTaxMoney(taxes, ["СумПениШтр", "СумШтр"])}`,
     `• ФССП: ${takeRecords(fssp).length}`,
     `• Арбитраж: ${takeRecords(legal).length}`,
+    `• Контракты (44-ФЗ): ${takeRecords(contracts).length}`,
+    `• Финансовые сигналы: ${finSignals || "нет данных"}`,
     `• Массовый адрес: ${data.ЮрАдрес?.Массовый ? "да" : "нет данных"}`
   ];
 
-  const hasRiskSignals = Boolean(criticalRisk) || toNum(taxes.СумНедоим) > 0 || takeRecords(fssp).length > 0 || takeRecords(legal).length > 0 || Boolean(data.ЮрАдрес?.Массовый);
+  const hasRiskSignals = Boolean(criticalRisk) || hasReorg || toNum(taxes.СумНедоим) > 0 || takeRecords(fssp).length > 0 || takeRecords(legal).length > 0 || Boolean(data.ЮрАдрес?.Массовый);
   if (!hasRiskSignals) {
     return {
-      text: "⚠️ <b>Проверки и факторы риска</b>\n\n✅ Критических факторов риска не найдено",
+      text: "⚠️ <b>Риски</b>\n\n✅ Существенных красных флагов не найдено",
       reply_markup: compactSectionKeyboard(id)
     };
   }
 
   const text = [
-    "⚠️ <b>Проверки и факторы риска</b>",
-    criticalRisk ? `\n🔴 <b>КРИТИЧЕСКИЙ РИСК</b>\n${escapeHtml(criticalRisk)}` : null,
+    "⚠️ <b>Риски</b>",
+    criticalRisk ? `\n🔴 <b>КРИТИЧЕСКИЙ РИСК</b>\n${escapeHtml(criticalRisk)}\nТребуется ручная проверка перед сделкой.` : null,
     `${risk.icon} Общий риск: <b>${risk.label}</b>`,
     "",
     "Позитивные факторы:",
@@ -373,8 +368,8 @@ async function buildRiskView(env, id) {
     "",
     "Факторы риска:",
     ...risks,
-    `• Филиалы: ${branchCount}`,
-    `• Сотрудники: ${escapeHtml(String(data.ЧислСотр || "нет данных"))}`
+    "",
+    "Часть источников может быть недоступна, оценка может быть неполной."
   ].filter(Boolean).join("\n");
   return { text, reply_markup: compactSectionKeyboard(id) };
 }
@@ -418,17 +413,30 @@ async function buildArbitrationView(env, id) {
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
 }
 
-async function buildFsspView(env, id) {
+async function buildDebtsView(env, id) {
+  const company = await checkoRequest(env, "company", identifierParams(id));
+  const taxes = company.data?.Налоги;
   const payload = await checkoRequest(env, "enforcements", { ...identifierParams(id), sort: "-date", limit: 10 });
   const items = takeRecords(payload);
-  if (items.length === 0) return { text: "🛡️ Исполнительные производства не найдены", reply_markup: compactSectionKeyboard(id) };
 
-  const lines = ["🛡️ <b>Исполнительные производства</b>", `\nНайдено: ${items.length}`];
-  items.slice(0, 10).forEach((it, idx) => {
-    lines.push(`\n• ${it.ИспПрНомер || it.НомерИП || it.Номер || "—"}`);
-    lines.push(`  Дата: ${formatDate(it.ИспПрДата || it.ДатаНачала || it.Дата)}`);
-    lines.push(`  Долг: ${formatMoney(it.СумДолг || it.СуммаДолга || it.Сумма)}`);
-    lines.push(`  Остаток: ${formatMoney(it.ОстЗадолж || it.ОстатокДолга || 0)}`);
+  const lines = ["🛡️ <b>Долги</b>"];
+  if (taxes && typeof taxes === "object") {
+    lines.push(`💸 Налоговая задолженность: ${formatTaxMoney(taxes, ["СумНедоим"])}`);
+    lines.push(`💸 Пени / штрафы: ${formatTaxMoney(taxes, ["СумПениШтр", "СумШтр"])}`);
+    lines.push(`💸 Недоимка и доначисления: ${formatTaxMoney(taxes, ["СумДоначисл", "СумДолг"])}`);
+  } else {
+    lines.push("💸 Налоговые данные: нет данных");
+  }
+
+  if (items.length === 0) {
+    lines.push("\nИсполнительные производства не найдены");
+    return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
+  }
+
+  lines.push(`\nИсполнительные производства: ${items.length}`);
+  items.slice(0, 10).forEach((it) => {
+    lines.push(`• ${it.ИспПрНомер || it.НомерИП || it.Номер || "—"} · ${formatDate(it.ИспПрДата || it.ДатаНачала || it.Дата)}`);
+    lines.push(`  Сумма: ${formatMoney(it.СумДолг || it.СуммаДолга || it.Сумма)}`);
     lines.push(`  Предмет: ${it.ПредмИсп || it.Предмет || "без предмета"}`);
   });
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
@@ -602,12 +610,10 @@ async function safeSectionData(env, endpoint, params) {
 function buildCompanyKeyboard(id) {
   return {
     inline_keyboard: [
-      [kb("⚠️ Проверки", `co:risk:${id}`), kb("💰 Финансы", `co:fin:${id}`)],
-      [kb("⚖️ Арбитраж", `co:arb:${id}`), kb("🛡️ ФССП", `co:fsp:${id}`)],
+      [kb("⚠️ Риски", `co:risk:${id}`), kb("💰 Финансы", `co:fin:${id}`)],
+      [kb("⚖️ Арбитраж", `co:arb:${id}`), kb("🛡️ Долги", `co:debt:${id}`)],
       [kb("📑 Контракты", `co:ctr:${id}`), kb("🕓 История", `co:his:${id}`)],
-      [kb("🔗 Связи", `co:lnk:${id}`), kb("👥 Учредители", `co:own:${id}`)],
-      [kb("🏬 Филиалы", `co:fil:${id}`), kb("🏭 ОКВЭД", `co:okv:${id}`)],
-      [kb("🧾 Налоги", `co:tax:${id}`)],
+      [kb("🔗 Связи", `co:lnk:${id}`), kb("🧾 Налоги", `co:tax:${id}`)],
       [kb("🏢 Карточка", `co:main:${id}`)],
       [kb("🏠 В меню", "menu")]
     ]
@@ -670,6 +676,9 @@ async function detectCriticalRisk(env, id, companyData) {
   }
   if (/банкрот/.test(statusText)) {
     return "Компания находится в статусе банкротства";
+  }
+  if (/реорганиз/.test(statusText) || companyData.Реорг?.Дата || companyData.Реорганизация?.Дата) {
+    return "Компания находится в процессе реорганизации";
   }
 
   const bankruptcy = await safeSectionData(env, "bankruptcy-messages", { ...identifierParams(id), limit: 1 });
@@ -736,6 +745,34 @@ function formatFounderAmount(...values) {
     if (value !== null && value !== undefined && value !== "") return formatMoney(value);
   }
   return "нет данных";
+}
+
+function extractLatestRevenue(financeRows) {
+  if (!financeRows || typeof financeRows !== "object") return "нет данных";
+  const years = Object.keys(financeRows).filter((y) => /^\d{4}$/.test(y)).sort((a, b) => Number(b) - Number(a));
+  for (const year of years) {
+    const row = financeRows[year] || {};
+    if (row[2110] !== null && row[2110] !== undefined && row[2110] !== "") {
+      return `${formatMoney(row[2110])} (${year})`;
+    }
+  }
+  return "нет данных";
+}
+
+function summarizeFinanceSignals(financeRows) {
+  if (!financeRows || typeof financeRows !== "object") return "нет данных";
+  const years = Object.keys(financeRows).filter((y) => /^\d{4}$/.test(y)).sort((a, b) => Number(b) - Number(a));
+  if (!years.length) return "нет данных";
+  const latest = financeRows[years[0]] || {};
+  const parts = [];
+  const profit = toNum(latest[2400]);
+  if (latest[2400] !== undefined && latest[2400] !== null && latest[2400] !== "") {
+    parts.push(profit < 0 ? "убыток" : "прибыль");
+  }
+  if (latest[2110] !== undefined && latest[2110] !== null && latest[2110] !== "") {
+    parts.push(`выручка ${formatMoney(latest[2110])}`);
+  }
+  return parts.join(", ") || "нет данных";
 }
 
 function backMenuKeyboard(backCallback) {

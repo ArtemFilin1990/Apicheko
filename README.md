@@ -11,7 +11,7 @@ Production runtime: **Cloudflare Worker** (`worker/worker.js`).
 - Главный экран `/start` в формате «1 сообщение = 1 экран».
 - Поиск по ИНН/ОГРН/ОГРНИП, БИК, названию.
 - Разрешение 12-значного ИНН через выбор: ИП или физлицо.
-- Главная карточка компании + 12 экранов разделов.
+- Главная карточка компании + 8 экранов разделов.
 - Навигация по `editMessageText`, обработка callback через `answerCallbackQuery`.
 - Строгое разделение сервисных ошибок и валидных пустых результатов.
 
@@ -38,13 +38,10 @@ co:main:<id>
 co:risk:<id>
 co:fin:<id>
 co:arb:<id>
-co:fsp:<id>
+co:debt:<id>
 co:ctr:<id>
 co:his:<id>
 co:lnk:<id>
-co:own:<id>
-co:fil:<id>
-co:okv:<id>
 co:tax:<id>
 ```
 
@@ -54,13 +51,10 @@ co:tax:<id>
 - `co:risk` → `/company`
 - `co:fin` → `/finances`
 - `co:arb` → `/legal-cases`
-- `co:fsp` → `/enforcements`
+- `co:debt` → `/company` + `/enforcements`
 - `co:ctr` → `/contracts`
 - `co:his` → `/timeline`
 - `co:lnk` → `/company` (+ `/person` при необходимости)
-- `co:own` → `/company`
-- `co:fil` → `/company`
-- `co:okv` → `/company`
 - `co:tax` → `/company`
 
 Дополнительно:
