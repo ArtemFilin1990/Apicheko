@@ -212,13 +212,22 @@ async function buildViewForCallback(env, data) {
 
 function buildMainMenuView() {
   return {
-    text: "🏠 <b>Проверка контрагента</b>\n\nВыберите тип поиска или отправьте реквизит сообщением.",
+    text: [
+      "🔍 <b>Проверка контрагента</b>",
+      "━━━━━━━━━━━━━━━━━━━━",
+      "",
+      "Отправьте реквизит или выберите способ поиска.",
+      "",
+      "<b>Поддерживаемые форматы:</b>",
+      "▸ ИНН (10 или 12 цифр)",
+      "▸ ОГРН / ОГРНИП (13 / 15 цифр)",
+      "▸ БИК банка (9 цифр)",
+      "▸ Email или название компании"
+    ].join("\n"),
     reply_markup: {
       inline_keyboard: [
-        [kb("🔎 Поиск по ИНН / ОГРН", "search:inn")],
-        [kb("🧾 Поиск по названию", "search:name")],
-        [kb("🏦 Поиск по БИК", "search:bic")],
-        [kb("✉️ Поиск по email", "search:email")],
+        [kb("🔎 По ИНН / ОГРН", "search:inn"), kb("🧾 По названию", "search:name")],
+        [kb("🏦 По БИК", "search:bic"), kb("✉️ По Email", "search:email")],
         [kb("ℹ️ Помощь", "help")]
       ]
     }
@@ -227,48 +236,95 @@ function buildMainMenuView() {
 
 function buildHelpView() {
   return {
-    text: "ℹ️ <b>Как использовать</b>\n\n1) Отправьте ИНН, ОГРН / ОГРНИП, БИК, email или название.\n2) Откройте карточку.\n3) Перейдите в нужный раздел: риски, финансы, арбитраж, долги, контракты, история, связи, налоги.",
-    reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
+    text: [
+      "ℹ️ <b>Как пользоваться ботом</b>",
+      "━━━━━━━━━━━━━━━━━━━━",
+      "",
+      "1️⃣ Отправьте реквизит компании или ИП",
+      "2️⃣ Откройте карточку",
+      "3️⃣ Выберите нужный раздел",
+      "",
+      "<b>Разделы карточки:</b>",
+      "⚠️ Риски — комплексная оценка",
+      "💰 Финансы — отчётность за 4 года",
+      "⚖️ Арбитраж — судебные дела",
+      "🛡️ Долги — ФССП и налоговые задолженности",
+      "📑 Контракты — госзакупки по 44-ФЗ",
+      "🕓 История — изменения в реестре",
+      "🔗 Связи — аффилированные лица",
+      "🧾 Налоги — данные ФНС"
+    ].join("\n"),
+    reply_markup: { inline_keyboard: [[kb("🏠 На главную", "menu")]] }
   };
 }
 
 function buildSearchInnView() {
   return {
-    text: "🔎 <b>Поиск по ИНН / ОГРН</b>\n\nОтправьте ИНН компании, ОГРН или ОГРНИП.",
+    text: [
+      "🔎 <b>Поиск по ИНН / ОГРН</b>",
+      "━━━━━━━━━━━━━━━━━━━━",
+      "",
+      "Введите один из реквизитов:",
+      "▸ ИНН компании (10 цифр)",
+      "▸ ИНН предпринимателя (12 цифр)",
+      "▸ ОГРН (13 цифр)",
+      "▸ ОГРНИП (15 цифр)"
+    ].join("\n"),
     reply_markup: backMenuKeyboard("menu")
   };
 }
 
 function buildSearchNameView() {
   return {
-    text: "🧾 <b>Поиск по названию</b>\n\nОтправьте название компании или ФИО ИП.",
+    text: [
+      "🧾 <b>Поиск по названию</b>",
+      "━━━━━━━━━━━━━━━━━━━━",
+      "",
+      "Введите название компании или ФИО ИП.",
+      "Минимальная длина запроса — 4 символа."
+    ].join("\n"),
     reply_markup: backMenuKeyboard("menu")
   };
 }
 
 function buildSearchBicView() {
   return {
-    text: "🏦 <b>Поиск по БИК</b>\n\nОтправьте БИК банка (9 цифр).",
+    text: [
+      "🏦 <b>Поиск по БИК</b>",
+      "━━━━━━━━━━━━━━━━━━━━",
+      "",
+      "Введите БИК банка (9 цифр)."
+    ].join("\n"),
     reply_markup: backMenuKeyboard("menu")
   };
 }
 
 function buildSearchEmailView() {
   return {
-    text: "✉️ <b>Поиск по email</b>\n\nОтправьте корпоративный email, например info@company.ru.",
+    text: [
+      "✉️ <b>Поиск по email</b>",
+      "━━━━━━━━━━━━━━━━━━━━",
+      "",
+      "Введите корпоративный email компании.",
+      "Например: <code>info@company.ru</code>"
+    ].join("\n"),
     reply_markup: backMenuKeyboard("menu")
   };
 }
 
 function buildResolve12View(inn) {
   return {
-    text: "🆔 <b>ИНН из 12 цифр</b>\n\nВыберите режим проверки.",
+    text: [
+      "🆔 <b>ИНН из 12 цифр</b>",
+      "━━━━━━━━━━━━━━━━━━━━",
+      "",
+      "Выберите тип проверки:"
+    ].join("\n"),
     reply_markup: {
       inline_keyboard: [
         [kb("👔 Проверить как ИП", `resolve12:entrepreneur:${inn}`)],
         [kb("👤 Проверить как физлицо", `resolve12:person:${inn}`)],
-        [kb("⬅️ Назад", "search:inn")],
-        [kb("🏠 В меню", "menu")]
+        [kb("⬅️ Назад", "search:inn"), kb("🏠 В меню", "menu")]
       ]
     }
   };
@@ -302,10 +358,18 @@ async function buildCompanyByEmailView(env, email) {
 async function buildSearchResultsView(env, query) {
   const payload = await checkoRequest(env, "search", { by: "name", obj: "org", query });
   const items = ensureArray(payload.data).slice(0, 10);
-  const lines = ["🧾 <b>Результаты поиска</b>"];
   if (items.length === 0) {
-    lines.push("Ничего не найдено.");
-    return { text: lines.join("\n"), reply_markup: backMenuKeyboard("search:name") };
+    return {
+      text: [
+        "🧾 <b>Результаты поиска</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "",
+        `Запрос: <i>${escapeHtml(query)}</i>`,
+        "",
+        "Ничего не найдено. Попробуйте другой запрос."
+      ].join("\n"),
+      reply_markup: backMenuKeyboard("search:name")
+    };
   }
 
   const buttons = items.map((item) => {
@@ -316,11 +380,18 @@ async function buildSearchResultsView(env, query) {
     const callback = item.ОГРНИП ? `select:entrepreneur:${id}` : `select:company:${id}`;
     return [kb(label, callback)];
   });
-  buttons.push([kb("⬅️ Назад", "search:name")]);
-  buttons.push([kb("🏠 В меню", "menu")]);
-  lines.push(`Запрос: ${escapeHtml(query)}`);
-  lines.push("\nВыберите организацию:");
-  return { text: lines.join("\n"), reply_markup: { inline_keyboard: buttons } };
+  buttons.push([kb("⬅️ Назад", "search:name"), kb("🏠 В меню", "menu")]);
+  return {
+    text: [
+      "🧾 <b>Результаты поиска</b>",
+      "━━━━━━━━━━━━━━━━━━━━",
+      "",
+      `Запрос: <i>${escapeHtml(query)}</i>`,
+      "",
+      "Выберите организацию из списка:"
+    ].join("\n"),
+    reply_markup: { inline_keyboard: buttons }
+  };
 }
 
 async function buildCompanyMainView(env, id) {
@@ -340,6 +411,7 @@ async function buildCompanyMainView(env, id) {
 
   const lines = [
     `🏢 <b>${escapeHtml(title)}</b>`,
+    "━━━━━━━━━━━━━━━━━━━━",
     "",
     "🆔 <b>Идентификаторы</b>",
     `ИНН: <code>${escapeHtml(String(data.ИНН || id))}</code>`,
@@ -405,21 +477,20 @@ async function buildFinancesView(env, id) {
   const rows = payload.data || {};
   const years = Object.keys(rows).filter((y) => /^\d{4}$/.test(y)).sort((a, b) => Number(b) - Number(a)).slice(0, 4);
   if (years.length === 0) {
-    return { text: "💰 <b>Финансы</b>\n\n📊 Финансовая отчетность не найдена", reply_markup: buildCompanyKeyboard(id) };
+    return { text: "💰 <b>Финансы</b>\n━━━━━━━━━━━━━━━━━━━━\n\n📊 Финансовая отчетность не найдена", reply_markup: buildCompanyKeyboard(id) };
   }
 
-  const lines = ["💰 <b>Финансы</b>"];
+  const lines = ["💰 <b>Финансы</b>", "━━━━━━━━━━━━━━━━━━━━"];
   for (const year of years) {
     const item = rows[year] || {};
-    lines.push(`📅 ${year}`);
-    lines.push(`• 💰 Выручка: ${formatMoney(item[2110])}`);
-    lines.push(`• 📈 Чистая прибыль: ${formatMoney(item[2400])}`);
-    lines.push(`• 🧱 Активы: ${formatMoney(item[1600])}`);
-    lines.push(`• 🏦 Капитал: ${formatMoney(item[1300])}`);
-    lines.push("");
+    lines.push(`\n📅 <b>${year}</b>`);
+    lines.push(`▸ 💰 Выручка: ${formatMoney(item[2110])}`);
+    lines.push(`▸ 📈 Чистая прибыль: ${formatMoney(item[2400])}`);
+    lines.push(`▸ 🧱 Активы: ${formatMoney(item[1600])}`);
+    lines.push(`▸ 🏦 Капитал: ${formatMoney(item[1300])}`);
   }
   const pdfUrl = payload["bo.nalog.ru"]?.Отчет;
-  if (pdfUrl) lines.push(`Отчетность: ${escapeHtml(String(pdfUrl))}`);
+  if (pdfUrl) lines.push(`\nОтчётность: ${escapeHtml(String(pdfUrl))}`);
 
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
 }
@@ -427,13 +498,13 @@ async function buildFinancesView(env, id) {
 async function buildArbitrationView(env, id) {
   const payload = await checkoRequest(env, "legal-cases", { ...identifierParams(id), sort: "-date", limit: 10 });
   const items = takeRecords(payload);
-  if (items.length === 0) return { text: "⚖️ Арбитражные дела не найдены", reply_markup: compactSectionKeyboard(id) };
+  if (items.length === 0) return { text: "⚖️ <b>Арбитраж</b>\n━━━━━━━━━━━━━━━━━━━━\n\nАрбитражные дела не найдены", reply_markup: compactSectionKeyboard(id) };
 
-  const lines = ["⚖️ <b>Арбитражные дела</b>", `\nНайдено: ${items.length}`];
-  items.slice(0, 10).forEach((it, idx) => {
-    lines.push(`\n• ${it.НомерДела || it.Номер || "Без номера"} — ${formatDate(it.Дата)}`);
-    lines.push(`  Суд: ${it.Суд || "—"}`);
-    lines.push(`  Роль: ${it.Роль || "—"}`);
+  const lines = ["⚖️ <b>Арбитражные дела</b>", "━━━━━━━━━━━━━━━━━━━━", `\nНайдено: <b>${items.length}</b>`];
+  items.slice(0, 10).forEach((it) => {
+    lines.push(`\n▸ ${escapeHtml(it.НомерДела || it.Номер || "Без номера")} — ${formatDate(it.Дата)}`);
+    lines.push(`  Суд: ${escapeHtml(it.Суд || "—")}`);
+    lines.push(`  Роль: ${escapeHtml(it.Роль || "—")}`);
     lines.push(`  Сумма: ${formatMoney(it.СуммаТреб || it.Сумма)}`);
   });
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
@@ -445,11 +516,12 @@ async function buildDebtsView(env, id) {
   const payload = await checkoRequest(env, "enforcements", { ...identifierParams(id), sort: "-date", limit: 10 });
   const items = takeRecords(payload);
 
-  const lines = ["🛡️ <b>Долги</b>"];
+  const lines = ["🛡️ <b>Долги</b>", "━━━━━━━━━━━━━━━━━━━━", ""];
   if (taxes && typeof taxes === "object") {
-    lines.push(`💸 Налоговая задолженность: ${formatTaxMoney(taxes, ["СумНедоим"])}`);
-    lines.push(`💸 Пени / штрафы: ${formatTaxMoney(taxes, ["СумПениШтр", "СумШтр"])}`);
-    lines.push(`💸 Недоимка и доначисления: ${formatTaxMoney(taxes, ["СумДоначисл", "СумДолг"])}`);
+    lines.push("💸 <b>Налоговые данные</b>");
+    lines.push(`▸ Налоговая задолженность: ${formatTaxMoney(taxes, ["СумНедоим"])}`);
+    lines.push(`▸ Пени / штрафы: ${formatTaxMoney(taxes, ["СумПениШтр", "СумШтр"])}`);
+    lines.push(`▸ Недоимка и доначисления: ${formatTaxMoney(taxes, ["СумДоначисл", "СумДолг"])}`);
   } else {
     lines.push("💸 Налоговые данные: нет данных");
   }
@@ -459,11 +531,11 @@ async function buildDebtsView(env, id) {
     return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
   }
 
-  lines.push(`\nИсполнительные производства: ${items.length}`);
+  lines.push(`\n📋 <b>Исполнительные производства: ${items.length}</b>`);
   items.slice(0, 10).forEach((it) => {
-    lines.push(`• ${it.ИспПрНомер || it.НомерИП || it.Номер || "—"} · ${formatDate(it.ИспПрДата || it.ДатаНачала || it.Дата)}`);
+    lines.push(`\n▸ ${escapeHtml(it.ИспПрНомер || it.НомерИП || it.Номер || "—")} · ${formatDate(it.ИспПрДата || it.ДатаНачала || it.Дата)}`);
     lines.push(`  Сумма: ${formatMoney(it.СумДолг || it.СуммаДолга || it.Сумма)}`);
-    lines.push(`  Предмет: ${it.ПредмИсп || it.Предмет || "без предмета"}`);
+    lines.push(`  Предмет: ${escapeHtml(it.ПредмИсп || it.Предмет || "без предмета")}`);
   });
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
 }
@@ -471,15 +543,15 @@ async function buildDebtsView(env, id) {
 async function buildContractsView(env, id) {
   const payload = await checkoRequest(env, "contracts", { ...identifierParams(id), law: 44, role: "supplier", sort: "-date", limit: 10 });
   const items = takeRecords(payload);
-  if (items.length === 0) return { text: "📑 Контракты не найдены", reply_markup: compactSectionKeyboard(id) };
+  if (items.length === 0) return { text: "📑 <b>Контракты</b>\n━━━━━━━━━━━━━━━━━━━━\n\nКонтракты не найдены", reply_markup: compactSectionKeyboard(id) };
 
-  const lines = ["📑 <b>Госконтракты и закупки</b>", `\nНайдено: ${items.length}`];
-  items.slice(0, 10).forEach((it, idx) => {
+  const lines = ["📑 <b>Госконтракты и закупки</b>", "━━━━━━━━━━━━━━━━━━━━", `\nНайдено: <b>${items.length}</b>`];
+  items.slice(0, 10).forEach((it) => {
     const contractNumber = firstNonEmpty([it.НомерКонтракта, it.Номер, it.Ид, it.Идентификатор, it.НомерРеестра]);
-    lines.push(`\nНомер: ${escapeHtml(contractNumber || "нет данных")}`);
-    lines.push(`Дата: ${formatDate(it.Дата || it.ДатаЗакл)}`);
-    lines.push(`Предмет: ${escapeHtml(String(it.Предмет || "без предмета"))}`);
-    lines.push(`Сумма: ${formatMoney(it.Цена || it.СуммаКонтракта)}`);
+    lines.push(`\n▸ Номер: ${escapeHtml(contractNumber || "нет данных")}`);
+    lines.push(`  Дата: ${formatDate(it.Дата || it.ДатаЗакл)}`);
+    lines.push(`  Предмет: ${escapeHtml(String(it.Предмет || "без предмета"))}`);
+    lines.push(`  Сумма: ${formatMoney(it.Цена || it.СуммаКонтракта)}`);
   });
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
 }
@@ -487,10 +559,10 @@ async function buildContractsView(env, id) {
 async function buildHistoryView(env, id) {
   const payload = await checkoRequest(env, "timeline", { ...identifierParams(id), limit: 15 });
   const items = ensureArray(payload.data).slice(0, 15);
-  if (items.length === 0) return { text: "🕓 История изменений не найдена", reply_markup: compactSectionKeyboard(id) };
+  if (items.length === 0) return { text: "🕓 <b>История</b>\n━━━━━━━━━━━━━━━━━━━━\n\nИстория изменений не найдена", reply_markup: compactSectionKeyboard(id) };
 
-  const lines = ["🕓 <b>История изменений</b>"];
-  items.forEach((it, idx) => lines.push(`${idx + 1}. ${formatDate(it.Дата || it.date)} — ${it.Описание || it.Наим || it.event || "Событие"}`));
+  const lines = ["🕓 <b>История изменений</b>", "━━━━━━━━━━━━━━━━━━━━"];
+  items.forEach((it, idx) => lines.push(`${idx + 1}. ${formatDate(it.Дата || it.date)} — ${escapeHtml(it.Описание || it.Наим || it.event || "Событие")}`));
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
 }
 
@@ -597,15 +669,28 @@ async function buildEntrepreneurView(env, id) {
 
   const lines = [
     "👔 <b>Карточка предпринимателя</b>",
-    `ФИО: ${escapeHtml(String(data.ФИО || "—"))}`,
+    "━━━━━━━━━━━━━━━━━━━━",
+    "",
+    `ФИО: <b>${escapeHtml(String(data.ФИО || "—"))}</b>`,
     `ИНН: <code>${escapeHtml(String(data.ИНН || id))}</code>`,
     `ОГРНИП: <code>${escapeHtml(String(data.ОГРНИП || "—"))}</code>`,
-    `Статус: ${escapeHtml(String(data.Статус?.Наим || "—"))}`,
+    "",
+    `Статус: <b>${escapeHtml(String(data.Статус?.Наим || "—"))}</b>`,
     `Дата регистрации: ${escapeHtml(formatDate(data.ДатаРег))}`,
     `ОКВЭД: ${escapeHtml(`${data.ОКВЭД?.Код || "—"} ${data.ОКВЭД?.Наим || ""}`.trim())}`,
+    `Категория МСП: ${escapeHtml(String(data.РМСП?.Кат || "—"))}`,
     `Риск-маркеры: ${escapeHtml(String(data.Риски?.Уровень || "нет данных"))}`
   ];
-  return { text: lines.join("\n"), reply_markup: { inline_keyboard: [[kb("⚠️ Проверки", `ep:risk:${id}`), kb("🕓 История", `ep:his:${id}`)], [kb("🔗 Связи", `ep:lnk:${id}`)], [kb("🏠 В меню", "menu")]] } };
+  return {
+    text: lines.join("\n"),
+    reply_markup: {
+      inline_keyboard: [
+        [kb("⚠️ Проверки", `ep:risk:${id}`), kb("🕓 История", `ep:his:${id}`)],
+        [kb("🔗 Связи", `ep:lnk:${id}`)],
+        [kb("🏠 В меню", "menu")]
+      ]
+    }
+  };
 }
 
 async function buildPersonView(env, id) {
@@ -618,11 +703,14 @@ async function buildPersonView(env, id) {
   const ents = ensureArray(data.ИП);
   const lines = [
     "👤 <b>Карточка физлица</b>",
-    `ФИО: ${escapeHtml(String(data.ФИО || "—"))}`,
+    "━━━━━━━━━━━━━━━━━━━━",
+    "",
+    `ФИО: <b>${escapeHtml(String(data.ФИО || "—"))}</b>`,
     `ИНН: <code>${escapeHtml(String(data.ИНН || id))}</code>`,
-    `Организации (руководитель): ${directors.length || 0}`,
-    `Организации (учредитель): ${founders.length || 0}`,
-    `Записи ИП: ${ents.length || 0}`
+    "",
+    `Организаций (руководитель): ${directors.length || 0}`,
+    `Организаций (учредитель): ${founders.length || 0}`,
+    `Записей ИП: ${ents.length || 0}`
   ];
   return { text: lines.join("\n"), reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] } };
 }
@@ -634,12 +722,15 @@ async function buildBankView(env, bic) {
 
   const lines = [
     "🏦 <b>Банк</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    "",
     `БИК: <code>${escapeHtml(String(data.БИК || bic))}</code>`,
     `Наименование: ${escapeHtml(String(data.Наим || data.Наименование || "—"))}`,
     `Наименование (англ.): ${escapeHtml(String(data.НаимАнгл || "—"))}`,
+    "",
     `Адрес: ${escapeHtml(String(data.Адрес || "—"))}`,
     `Тип организации: ${escapeHtml(String(data.Тип || "—"))}`,
-    `Корр. счет: ${escapeHtml(String(data.КорСчет || data.КоррСчет || "—"))}`
+    `Корр. счёт: <code>${escapeHtml(String(data.КорСчет || data.КоррСчет || "—"))}</code>`
   ];
   return { text: lines.join("\n"), reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] } };
 }
@@ -668,15 +759,17 @@ function buildCompanyKeyboard(id) {
       [kb("⚖️ Арбитраж", `co:arb:${id}`), kb("🛡️ Долги", `co:debt:${id}`)],
       [kb("📑 Контракты", `co:ctr:${id}`), kb("🕓 История", `co:his:${id}`)],
       [kb("🔗 Связи", `co:lnk:${id}`), kb("🧾 Налоги", `co:tax:${id}`)],
-      [kb("🏢 Карточка", `co:main:${id}`)],
-      [kb("🏠 В меню", "menu")]
+      [kb("🏢 Карточка", `co:main:${id}`), kb("🏠 В меню", "menu")]
     ]
   };
 }
 
 function compactSectionKeyboard(id) {
   return {
-    inline_keyboard: [[kb("🏢 Карточка", `co:main:${id}`)], [kb("🏠 В меню", "menu")]]
+    inline_keyboard: [
+      [kb("⚠️ Риски", `co:risk:${id}`), kb("💰 Финансы", `co:fin:${id}`)],
+      [kb("🏢 Карточка", `co:main:${id}`), kb("🏠 В меню", "menu")]
+    ]
   };
 }
 
@@ -831,7 +924,7 @@ function summarizeFinanceSignals(financeRows) {
 
 function backMenuKeyboard(backCallback) {
   return {
-    inline_keyboard: [[kb("⬅️ Назад", backCallback)], [kb("🏠 В меню", "menu")]]
+    inline_keyboard: [[kb("⬅️ Назад", backCallback), kb("🏠 В меню", "menu")]]
   };
 }
 

@@ -98,9 +98,9 @@ test("/start sends new main menu", async () => {
   const body = JSON.parse(calls[0].options.body);
   assert.match(body.text, /Проверка контрагента/);
   assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "search:inn");
-  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "search:name");
-  assert.equal(body.reply_markup.inline_keyboard[2][0].callback_data, "search:bic");
-  assert.equal(body.reply_markup.inline_keyboard[3][0].callback_data, "search:email");
+  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "search:name");
+  assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "search:bic");
+  assert.equal(body.reply_markup.inline_keyboard[1][1].callback_data, "search:email");
 });
 
 test("10-digit INN opens main card with compact section keyboard", async () => {
