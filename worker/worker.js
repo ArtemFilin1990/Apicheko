@@ -21,7 +21,10 @@ const COMPANY_SECTION_TITLES = {
   ctr: "📑 Контракты",
   his: "🕓 История",
   lnk: "🔗 Связи",
-  tax: "🧾 Налоги"
+  tax: "🧾 Налоги",
+  own: "👥 Учредители",
+  fil: "🏬 Филиалы",
+  okv: "🏭 ОКВЭД"
 };
 
 const COMPANY_SECTION_BUILDERS = {
@@ -33,7 +36,10 @@ const COMPANY_SECTION_BUILDERS = {
   ctr: buildContractsView,
   his: buildHistoryView,
   lnk: buildConnectionsView,
-  tax: buildTaxesView
+  tax: buildTaxesView,
+  own: buildFoundersView,
+  fil: buildBranchesView,
+  okv: buildOkvedView
 };
 
 class CheckoServiceError extends Error {
@@ -764,6 +770,7 @@ function buildCompanyKeyboard(id) {
       [kb("⚖️ Арбитраж", `co:arb:${id}`), kb("🛡️ Долги", `co:debt:${id}`)],
       [kb("📑 Контракты", `co:ctr:${id}`), kb("🕓 История", `co:his:${id}`)],
       [kb("🔗 Связи", `co:lnk:${id}`), kb("🧾 Налоги", `co:tax:${id}`)],
+      [kb("👥 Учредители", `co:own:${id}`), kb("🏬 Филиалы", `co:fil:${id}`), kb("🏭 ОКВЭД", `co:okv:${id}`)],
       [kb("🏢 Карточка", `co:main:${id}`), kb("🏠 В меню", "menu")]
     ]
   };

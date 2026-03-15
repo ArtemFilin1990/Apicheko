@@ -113,7 +113,7 @@ test("10-digit INN opens main card with compact section keyboard", async () => {
       if (endpoint === "company") {
         return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", ОГРН: "1027700132195", НаимСокр: "ООО Тест", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }], Налоги: { СумНедоим: 0 }, Учред: [{ Наим: "ООО Учредитель" }] } });
       }
-      if (["finances", "legal-cases", "enforcements", "contracts"].includes(endpoint)) {
+      if (["finance", "legal-cases", "enforcements", "contracts"].includes(endpoint)) {
         return jsonResponse({ meta: { status: "ok" }, data: {} });
       }
     }
@@ -143,13 +143,13 @@ test("12-digit INN forces user choice", async () => {
   assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "resolve12:person:500100732259");
 });
 
-test("co:fin uses /finances and shows empty-state without service error", async () => {
+test("co:fin uses /finance and shows empty-state without service error", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.pathname.endsWith("/finances")) return jsonResponse({ meta: { status: "ok" }, data: {} });
+    if (u.pathname.endsWith("/finance")) return jsonResponse({ meta: { status: "ok" }, data: {} });
     throw new Error(`Unexpected URL ${u}`);
   };
 
@@ -256,7 +256,7 @@ test("main card keeps risk details in risks screen", async () => {
         }
       });
     }
-    if (u.pathname.endsWith("/finances")) {
+    if (u.pathname.endsWith("/finance")) {
       return jsonResponse({ meta: { status: "ok" }, data: { "2023": { 2110: 1000000 } } });
     }
     throw new Error(`Unexpected URL ${u}`);
@@ -283,7 +283,7 @@ test("co:risk renders deterministic score and reasons for inactive company", asy
     if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs")) {
       return jsonResponse({ meta: { status: "ok" }, data: [{ id: 1 }] });
     }
-    if (u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/finances")) {
+    if (u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/finance")) {
       return jsonResponse({ meta: { status: "ok" }, data: [] });
     }
     throw new Error(`Unexpected URL ${u}`);
@@ -321,7 +321,7 @@ test("co:risk shows low or medium profile for normal company", async () => {
         }
       });
     }
-    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finance")) {
       return jsonResponse({ meta: { status: "ok" }, data: { "2023": { 2110: 5000000, 2400: 400000 } } });
     }
     if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs") || u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts")) {
@@ -506,7 +506,7 @@ test("email lookup opens company card by INN via DaData", async () => {
     if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
       return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", НаимСокр: "ООО Email Тест", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }] } });
     }
-    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finance")) {
       return jsonResponse({ meta: { status: "ok" }, data: {} });
     }
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
@@ -593,7 +593,7 @@ test("DaData outage does not break Checko flow", async () => {
     if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
       return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", НаимСокр: "ООО Надежность", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }] } });
     }
-    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finance")) {
       return jsonResponse({ meta: { status: "ok" }, data: {} });
     }
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
@@ -621,7 +621,7 @@ test("repeated company lookup uses KV cache", async () => {
       companyCalls += 1;
       return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", НаимСокр: "ООО Кеш", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }] } });
     }
-    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finance")) {
       return jsonResponse({ meta: { status: "ok" }, data: {} });
     }
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
@@ -653,7 +653,7 @@ test("KV get failure does not break flow", async () => {
     if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
       return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", НаимСокр: "ООО Без KV", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }] } });
     }
-    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finance")) {
       return jsonResponse({ meta: { status: "ok" }, data: {} });
     }
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
