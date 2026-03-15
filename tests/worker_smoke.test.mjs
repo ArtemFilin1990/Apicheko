@@ -161,7 +161,7 @@ test("co:fin uses /finance and shows empty-state without service error", async (
   assert.ok(calls.some((c) => c.url.includes("/answerCallbackQuery")));
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Финансовая отчетность не найдена/);
+  assert.match(body.text, /Финансовая отч[её]тность не найдена/);
 });
 
 test("Checko non-JSON response returns service error instead of crashing", async () => {
@@ -521,7 +521,7 @@ test("email lookup opens company card by INN via DaData", async () => {
   const send = calls.find((c) => c.url.includes("/sendMessage"));
   const body = JSON.parse(send.options.body);
   assert.match(body.text, /ООО Email Тест/);
-  assert.match(body.text, /DaData/);
+  assert.match(body.text, /Доп\. данные/);
   assert.ok(calls.some((c) => c.url.includes("/findByEmail/company")));
 });
 
