@@ -1227,7 +1227,9 @@ async function collectAffiliatedCompanies(env, sourceInn) {
   );
 
   const sourceInnNormalized = String(sourceInn || "").trim();
-  const seen = new Set([sourceInnNormalized]);
+  const seenManagers = new Set([sourceInnNormalized]);
+  const seenFounders = new Set([sourceInnNormalized]);
+  const seenTotal = new Set();
   const managers = [];
   const founders = [];
   let unavailableCount = 0;
@@ -1244,16 +1246,23 @@ async function collectAffiliatedCompanies(env, sourceInn) {
     const { group } = scopeConfigs[i];
     for (const item of result.value) {
       const inn = String(item?.inn || "").trim();
-      if (!inn || seen.has(inn)) continue;
-      seen.add(inn);
+      if (!inn) continue;
       const normalized = {
         name: item?.name?.short_with_opf || item?.name?.full_with_opf || "Без названия",
         inn,
         status: item?.state?.status || "",
         context: item?.okved || item?.address?.data?.city || ""
       };
-      if (group === "managers") managers.push(normalized);
-      else founders.push(normalized);
+      if (group === "managers") {
+        if (seenManagers.has(inn)) continue;
+        seenManagers.add(inn);
+        managers.push(normalized);
+      } else {
+        if (seenFounders.has(inn)) continue;
+        seenFounders.add(inn);
+        founders.push(normalized);
+      }
+      seenTotal.add(inn);
     }
   }
 
@@ -1261,16 +1270,17 @@ async function collectAffiliatedCompanies(env, sourceInn) {
     return { managers: [], founders: [], total: 0, state: "unavailable" };
   }
 
-  return { managers, founders, total: managers.length + founders.length, state: "ok" };
+  return { managers, founders, total: seenTotal.size, state: "ok" };
 }
 
 function buildAffiliatedGroupLines(title, items, limit) {
   if (!items.length) return [];
+  const relationLabel = /руковод/i.test(title) ? "через руководителя" : "через учредителя";
   const lines = ["", `<b>${escapeHtml(title)}</b>`];
   for (const item of items.slice(0, limit)) {
     const statusText = item.status ? ` · ${escapeHtml(String(item.status))}` : "";
     const contextText = item.context ? ` · ${escapeHtml(String(item.context))}` : "";
-    lines.push(`• <b>${escapeHtml(item.name)}</b>  ·  ИНН <code>${escapeHtml(item.inn)}</code>${statusText}${contextText}`);
+    lines.push(`• <b>${escapeHtml(item.name)}</b>  ·  ИНН <code>${escapeHtml(item.inn)}</code> · ${escapeHtml(relationLabel)}${statusText}${contextText}`);
   }
   if (items.length > limit) {
     lines.push(`… и ещё ${items.length - limit}`);

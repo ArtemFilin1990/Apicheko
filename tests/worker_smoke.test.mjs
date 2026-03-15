@@ -609,9 +609,43 @@ test("co:lnk renders DaData affiliated companies", async () => {
   assert.match(body.text, /Через учредителя/);
   assert.match(body.text, /ООО Альфа/);
   assert.match(body.text, /ООО Бета/);
+  assert.match(body.text, /через руководителя/);
+  assert.match(body.text, /через учредителя/);
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/company")));
   const affiliatedCalls = calls.filter((c) => c.url.includes("/findAffiliated/party"));
   assert.equal(affiliatedCalls.length, 2);
+});
+
+test("co:lnk keeps cross-channel affiliation visible in both groups", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
+      const payload = JSON.parse(options.body);
+      if (Array.isArray(payload.scope) && payload.scope.includes("MANAGERS")) {
+        return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Перекрёст" }, state: { status: "ACTIVE" } } }] });
+      }
+      if (Array.isArray(payload.scope) && payload.scope.includes("FOUNDERS")) {
+        return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Перекрёст" }, state: { status: "ACTIVE" } } }] });
+      }
+      return jsonResponse({ suggestions: [] });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-lnk-cross", data: "co:lnk:7707083893", message: { message_id: 9, chat: { id: 3 } } } }),
+    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Через руководителя: <b>1<\/b>/);
+  assert.match(body.text, /Через учредителя: <b>1<\/b>/);
+  assert.match(body.text, /Общий объём сети: <b>1<\/b>/);
+  assert.equal((body.text.match(/ООО Перекрёст/g) || []).length, 2);
 });
 
 test("co:lnk renders no-affiliations complete screen", async () => {
