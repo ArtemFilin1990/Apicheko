@@ -283,7 +283,7 @@ test("co:risk renders deterministic score and reasons for inactive company", asy
     if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs-messages")) {
       return jsonResponse({ meta: { status: "ok" }, data: [{ id: 1 }] });
     }
-    if (u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/finance")) {
+    if (u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/finance") || u.pathname.endsWith("/timeline")) {
       return jsonResponse({ meta: { status: "ok" }, data: [] });
     }
     throw new Error(`Unexpected URL ${u}`);
@@ -298,6 +298,7 @@ test("co:risk renders deterministic score and reasons for inactive company", asy
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Риск: <b>Критический<\/b>/);
   assert.match(body.text, /Score: <b>\d+\/100<\/b>/);
+  assert.match(body.text, /Решение: <b>reject_or_legal_review<\/b>/);
   assert.match(body.text, /Компания недействующая/);
   assert.match(body.text, /Что делать:/);
 });
@@ -324,7 +325,7 @@ test("co:risk shows low or medium profile for normal company", async () => {
     if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finance")) {
       return jsonResponse({ meta: { status: "ok" }, data: { "2023": { 2110: 5000000, 2400: 400000 } } });
     }
-    if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs-messages") || u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts")) {
+    if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs-messages") || u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/timeline")) {
       return jsonResponse({ meta: { status: "ok" }, data: [] });
     }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
@@ -341,6 +342,7 @@ test("co:risk shows low or medium profile for normal company", async () => {
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Риск: <b>(Низкий|Средний)<\/b>/);
+  assert.match(body.text, /Решение: <b>(approve_standard|approve_caution)<\/b>/);
   assert.match(body.text, /Плюсы:/);
   assert.match(body.text, /Что делать:/);
 });
@@ -368,6 +370,31 @@ test("co:risk handles partial data without crash", async () => {
   assert.match(body.text, /Score: <b>\d+\/100<\/b>/);
 });
 
+
+
+test("risk scoring is deterministic for the same input", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const payload = {
+    companyData: {
+      Статус: { Наим: "Действующее" },
+      ДатаРег: "2014-01-01",
+      Налоги: { СумНедоим: 0 },
+      Контакты: { Тел: ["+7 000 000 00 00"], Емэйл: ["a@b.ru"] }
+    },
+    financesData: { "2023": { 2110: 4000000, 2400: 500000 } },
+    legalData: [],
+    fsspData: [],
+    contractsData: [],
+    bankruptcyData: [],
+    fedresursData: [],
+    historyData: [],
+    dadataParty: { employee_count: 15, invalid: false, phones: [{ value: "+7" }] }
+  };
+
+  const one = riskModule.calculateCompanyRiskScore(payload);
+  const two = riskModule.calculateCompanyRiskScore(payload);
+  assert.deepEqual(one, two);
+});
 test("co:debt aggregates company taxes with enforcements", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {

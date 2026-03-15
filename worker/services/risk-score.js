@@ -7,30 +7,60 @@ export const RISK_LEVEL_THRESHOLDS = {
 };
 
 const RULE_POINTS = {
+  // legal
   INACTIVE_STATUS: -35,
-  LIQUIDATION_STATUS: -30,
-  BANKRUPTCY_SIGNAL: -25,
-  ADDRESS_INVALID: -20,
+  LIQUIDATION_STATUS: -28,
+  BANKRUPTCY_SIGNAL: -24,
+  ADDRESS_INVALID: -14,
+  COMPANY_INVALID: -16,
+  MASS_ADDRESS: -8,
+  DIRECTOR_PROBLEM: -12,
+  TOXIC_HISTORY: -8,
+
+  // financial
   TAX_DEBT_HIGH: -18,
-  FSSP_SERIOUS: -16,
-  DIRECTOR_PROBLEM: -14,
-  MASS_ADDRESS: -10,
+  TAX_DEBT_MEDIUM: -10,
+  TAX_PENALTY_HIGH: -8,
+  FSSP_SERIOUS: -14,
+  FSSP_MEDIUM: -8,
+  LEGAL_LOAD_HIGH: -10,
+  LEGAL_LOAD_MEDIUM: -6,
+  BANKRUPTCY_CONTEXT: -8,
+  NO_ACTIVITY: -10,
+  LOSS_MAKING: -6,
+  FINANCE_GAP: -4,
+
+  // operational
   VERY_YOUNG_COMPANY: -10,
   YOUNG_COMPANY: -6,
-  ONE_EMPLOYEE: -8,
-  NO_REVENUE: -10,
-  ARBITRATION_LOAD_HIGH: -10,
-  ARBITRATION_LOAD_MEDIUM: -6,
-  AFFILIATED_OVERLOAD: -6,
-  SCALE_MISMATCH: -8,
-  NO_CONTACTS: -5,
-  OLD_COMPANY: 10,
-  NO_CRITICAL_FLAGS: 8,
+  NO_CONTACTS: -7,
+  ONE_EMPLOYEE: -7,
+  OPERATIONAL_FOOTPRINT_WEAK: -8,
+  SCALE_MISMATCH: -9,
+
+  // network
+  AFFILIATED_OVERLOAD: -8,
+  AFFILIATED_MANAGERS_HIGH: -6,
+  AFFILIATED_FOUNDERS_HIGH: -6,
+
+  // compound
+  CMP_INACTIVE_BANKRUPTCY: -12,
+  CMP_INVALID_NO_CONTACTS_YOUNG: -10,
+  CMP_SCALE_MISMATCH_STRONG: -8,
+  CMP_AFFILIATIONS_WEAK_OPERATIONS: -8,
+  CMP_AFFILIATIONS_DEBT: -8,
+  CMP_AFFILIATIONS_YOUNG: -6,
+  CMP_STABLE_OLD_CLEAN: 12,
+
+  // positives
+  OLD_COMPANY: 8,
+  NO_CRITICAL_FLAGS: 6,
   STAFF_OK: 6,
   REVENUE_OK: 6,
-  CONTACTS_OK: 4,
-  FINANCE_STABLE: 4,
-  LOW_DEBT_LOAD: 6
+  CONTACTS_OK: 5,
+  FINANCE_STABLE: 6,
+  LOW_DEBT_LOAD: 7,
+  OPERATIONAL_FOOTPRINT_STRONG: 6
 };
 
 const MAX_TOP_FACTORS = 3;
@@ -44,92 +74,32 @@ export function calculateCompanyRiskScore(input) {
   addUnknown(unknowns, metrics.registrationDate, "Нет даты регистрации");
   addUnknown(unknowns, metrics.employeeCount, "Нет данных о числе сотрудников");
   addUnknown(unknowns, metrics.revenue, "Нет данных о выручке");
+  addUnknown(unknowns, metrics.netProfit, "Нет данных о чистой прибыли");
+  addUnknown(unknowns, metrics.dadataIncome, "Нет DaData данных о доходах");
+  addUnknown(unknowns, metrics.dadataExpense, "Нет DaData данных о расходах");
   addUnknown(unknowns, metrics.contactCount, "Нет данных по контактам");
 
-  if (metrics.flags.isInactive) {
-    pushFactor(factors, "INACTIVE_STATUS", "Компания недействующая", "critical", RULE_POINTS.INACTIVE_STATUS, metrics.statusText);
-  }
-  if (metrics.flags.isInLiquidation) {
-    pushFactor(factors, "LIQUIDATION_STATUS", "Ликвидация / прекращение деятельности", "critical", RULE_POINTS.LIQUIDATION_STATUS, metrics.statusText);
-  }
-  if (metrics.flags.hasBankruptcy) {
-    pushFactor(factors, "BANKRUPTCY_SIGNAL", "Признаки банкротства", "critical", RULE_POINTS.BANKRUPTCY_SIGNAL, metrics.flags.bankruptcyEvidence);
-  }
-  if (metrics.flags.addressInvalid) {
-    pushFactor(factors, "ADDRESS_INVALID", "Недостоверный адрес или реквизиты", "high", RULE_POINTS.ADDRESS_INVALID, metrics.flags.addressEvidence);
-  }
-  if (metrics.taxDebt >= 500000) {
-    pushFactor(factors, "TAX_DEBT_HIGH", "Серьезная налоговая задолженность", "high", RULE_POINTS.TAX_DEBT_HIGH, `Недоимка: ${metrics.taxDebt}`);
-  }
-  if (metrics.fsspCount >= 3) {
-    pushFactor(factors, "FSSP_SERIOUS", "Есть нагрузка по ФССП", "high", RULE_POINTS.FSSP_SERIOUS, `Производств: ${metrics.fsspCount}`);
-  }
-  if (metrics.flags.directorProblem) {
-    pushFactor(factors, "DIRECTOR_PROBLEM", "Есть рисковый статус руководителя", "high", RULE_POINTS.DIRECTOR_PROBLEM, metrics.flags.directorEvidence);
-  }
-  if (metrics.flags.massAddress) {
-    pushFactor(factors, "MASS_ADDRESS", "Массовый юридический адрес", "medium", RULE_POINTS.MASS_ADDRESS, "company.data.ЮрАдрес.Массовый");
-  }
-
-  if (metrics.ageYears !== null && metrics.ageYears < 1) {
-    pushFactor(factors, "VERY_YOUNG_COMPANY", "Компания очень молодая", "medium", RULE_POINTS.VERY_YOUNG_COMPANY, `Возраст: ${metrics.ageYears} лет`);
-  } else if (metrics.ageYears !== null && metrics.ageYears < 3) {
-    pushFactor(factors, "YOUNG_COMPANY", "Небольшой срок работы компании", "low", RULE_POINTS.YOUNG_COMPANY, `Возраст: ${metrics.ageYears} лет`);
-  }
-  if (metrics.employeeCount === 1) {
-    pushFactor(factors, "ONE_EMPLOYEE", "Только 1 сотрудник", "medium", RULE_POINTS.ONE_EMPLOYEE, "DaData.employee_count=1");
-  }
-  if (metrics.revenue === 0 && (metrics.ageYears === null || metrics.ageYears >= 1)) {
-    pushFactor(factors, "NO_REVENUE", "Нет выручки / нулевая активность", "medium", RULE_POINTS.NO_REVENUE, "finances[latest][2110]=0");
-  }
-  if (metrics.legalCasesCount >= 5) {
-    pushFactor(factors, "ARBITRATION_LOAD_HIGH", "Высокая судебная нагрузка", "medium", RULE_POINTS.ARBITRATION_LOAD_HIGH, `Арбитражных дел: ${metrics.legalCasesCount}`);
-  } else if (metrics.legalCasesCount >= 2) {
-    pushFactor(factors, "ARBITRATION_LOAD_MEDIUM", "Есть судебная нагрузка", "low", RULE_POINTS.ARBITRATION_LOAD_MEDIUM, `Арбитражных дел: ${metrics.legalCasesCount}`);
-  }
-  if (metrics.affiliatedCount >= 8) {
-    pushFactor(factors, "AFFILIATED_OVERLOAD", "Много аффилированных связей у участников", "low", RULE_POINTS.AFFILIATED_OVERLOAD, `Связанных лиц: ${metrics.affiliatedCount}`);
-  }
-  if (metrics.revenue >= 100000000 && metrics.employeeCount !== null && metrics.employeeCount <= 3) {
-    pushFactor(factors, "SCALE_MISMATCH", "Несоответствие масштаба: высокая выручка при малом штате", "medium", RULE_POINTS.SCALE_MISMATCH, `Выручка: ${metrics.revenue}, сотрудники: ${metrics.employeeCount}`);
-  }
-  if (metrics.contactCount === 0) {
-    pushFactor(factors, "NO_CONTACTS", "Слабая верифицируемость контактов", "low", RULE_POINTS.NO_CONTACTS, "Нет телефона, email и сайта");
-  }
-
-  if (metrics.ageYears !== null && metrics.ageYears >= 5) {
-    pushFactor(factors, "OLD_COMPANY", "Компания действует давно", "low", RULE_POINTS.OLD_COMPANY, `Возраст: ${metrics.ageYears} лет`);
-  }
-  if (!hasCriticalNegativeFactor(factors)) {
-    pushFactor(factors, "NO_CRITICAL_FLAGS", "Нет критичных красных флагов", "low", RULE_POINTS.NO_CRITICAL_FLAGS, "Нет факторов critical severity");
-  }
-  if (metrics.employeeCount !== null && metrics.employeeCount >= 10) {
-    pushFactor(factors, "STAFF_OK", "Есть штат и операционная активность", "low", RULE_POINTS.STAFF_OK, `Сотрудники: ${metrics.employeeCount}`);
-  }
-  if (metrics.revenue > 0) {
-    pushFactor(factors, "REVENUE_OK", "Есть выручка", "low", RULE_POINTS.REVENUE_OK, `Выручка: ${metrics.revenue}`);
-  }
-  if (metrics.contactCount > 0) {
-    pushFactor(factors, "CONTACTS_OK", "Контакты подтверждаются", "low", RULE_POINTS.CONTACTS_OK, `Контактов: ${metrics.contactCount}`);
-  }
-  if (metrics.netProfit !== null && metrics.netProfit > 0) {
-    pushFactor(factors, "FINANCE_STABLE", "Есть признаки стабильной финансовой деятельности", "low", RULE_POINTS.FINANCE_STABLE, `Чистая прибыль: ${metrics.netProfit}`);
-  }
-  if (metrics.taxDebt === 0 && metrics.fsspCount === 0) {
-    pushFactor(factors, "LOW_DEBT_LOAD", "Нет выраженной долговой нагрузки", "low", RULE_POINTS.LOW_DEBT_LOAD, "Недоимка=0 и ФССП=0");
-  }
+  applyLegalRules(factors, metrics);
+  applyFinancialRules(factors, metrics);
+  applyOperationalRules(factors, metrics);
+  applyNetworkRules(factors, metrics);
+  applyCompoundRules(factors, metrics);
+  applyPositiveRules(factors, metrics);
 
   const score = clampScore(BASE_SCORE + factors.reduce((sum, factor) => sum + factor.points, 0));
   const level = scoreToLevel(score);
+  const decision = decisionByScoreAndSignals(score, level, factors, metrics);
+
   const negatives = factors.filter((factor) => factor.points < 0).sort((a, b) => Math.abs(b.points) - Math.abs(a.points));
   const positives = factors.filter((factor) => factor.points > 0).sort((a, b) => b.points - a.points);
 
-  const recommendation = recommendationByLevel(level);
-  const summary = buildSummary(level, score, negatives.length, positives.length, unknowns.length);
+  const recommendation = recommendationByDecision(decision);
+  const summary = buildSummary(level, score, decision, negatives.length, positives.length, unknowns.length);
 
   return {
     score,
     level,
+    decision,
     factors,
     positives: positives.map((factor) => factor.title),
     negatives: negatives.map((factor) => factor.title),
@@ -143,9 +113,10 @@ export function calculateCompanyRiskScore(input) {
 export function formatRiskResultForTelegram(result) {
   const levelText = levelToRussian(result.level);
   const lines = [
-    "⚠️ <b>Риски</b>",
+    "⚠️ <b>Риски v2 (Checko + DaData Maximum)</b>",
     `Риск: <b>${levelText}</b>`,
     `Score: <b>${result.score}/100</b>`,
+    `Решение: <b>${escapeHtml(String(result.decision || "manual_review"))}</b>`,
     "",
     "Почему:"
   ];
@@ -169,7 +140,7 @@ export function formatRiskResultForTelegram(result) {
 
   if (result.unknowns.length > 0) {
     lines.push("", "Неизвестно:");
-    for (const title of result.unknowns.slice(0, 2)) {
+    for (const title of result.unknowns.slice(0, 3)) {
       lines.push(`• ${title}`);
     }
   }
@@ -189,51 +160,184 @@ export function extractRiskMetrics(input) {
 
   const financeRows = input?.financesData || {};
   const latestFinance = pickLatestFinanceRow(financeRows);
-  const revenue = valueOrNull(latestFinance?.[2110]);
-  const netProfit = valueOrNull(latestFinance?.[2400]);
+  const revenue = toNumOrNull(latestFinance?.[2110]);
+  const netProfit = toNumOrNull(latestFinance?.[2400]);
 
   const dadata = input?.dadataParty || null;
-  const employeeCount = valueOrNull(dadata?.employee_count);
+  const dadataIncome = toNumOrNull(dadata?.finance?.income);
+  const dadataExpense = toNumOrNull(dadata?.finance?.expense);
+  const employeeCount = toNumOrNull(dadata?.employee_count);
 
   const contacts = companyData.Контакты || {};
-  const contactCount = countContacts(contacts, dadata);
+  const phonesCount = normalizeArray(contacts.Тел).length + normalizeArray(dadata?.phones).length;
+  const emailsCount = normalizeArray(contacts.Емэйл).length + normalizeArray(dadata?.emails).length;
+  const websitesCount = normalizeArray(contacts.ВебСайт).length;
+  const contactCount = phonesCount + emailsCount + websitesCount;
+
+  const affiliatedManagersCount = normalizeArray(dadata?.managers).length;
+  const affiliatedFoundersCount = normalizeArray(dadata?.founders).length;
+  const affiliatedCount = affiliatedManagersCount + affiliatedFoundersCount;
 
   const directors = normalizeArray(companyData.Руковод);
-  const affiliatedCount = normalizeArray(dadata?.founders).length + normalizeArray(dadata?.managers).length;
+  const statusLc = statusText.toLowerCase();
 
   const bankruptcyCount = safeLength(input?.bankruptcyData) + safeLength(input?.fedresursData) + safeLength(companyData.ЕФРСБ);
+  const historySignals = extractHistorySignals(input?.historyData);
 
-  const flags = {
-    isInactive: /не\s*действ|прекращ/.test(statusText.toLowerCase()),
-    isInLiquidation: Boolean(companyData.Ликвид?.Дата) || /ликвидац/.test(statusText.toLowerCase()),
-    hasBankruptcy: /банкрот/.test(statusText.toLowerCase()) || bankruptcyCount > 0,
-    bankruptcyEvidence: bankruptcyCount > 0 ? `Сообщений о банкротстве/ЕФРСБ: ${bankruptcyCount}` : statusText,
-    addressInvalid: Boolean(dadata?.invalid),
-    addressEvidence: dadata?.invalid ? "DaData.data.invalid=true" : "нет",
-    massAddress: Boolean(companyData.ЮрАдрес?.Массовый),
-    directorProblem: directors.some((item) => /дисквалиф|недостовер/.test(String(item?.Статус || item?.Наим || "").toLowerCase())),
-    directorEvidence: directors.map((item) => String(item?.Статус || item?.Наим || "")).filter(Boolean).join(", ") || "company.data.Руковод"
-  };
+  const taxDebt = toNumOrNull(taxes.СумНедоим);
+  const taxPenalties = toNumOrNull(taxes.СумПениШтр);
+
+  const hasRevenueSignal = (revenue !== null && revenue > 0) || (dadataIncome !== null && dadataIncome > 0);
+  const hasOperationalFootprint = Boolean((employeeCount !== null && employeeCount >= 2) || contactCount > 0 || hasRevenueSignal);
+  const hasVerifiedContacts = phonesCount > 0 || emailsCount > 0 || websitesCount > 0;
+
+  const scaleMismatch = Boolean(
+    ((revenue !== null && revenue >= 100000000) || (dadataIncome !== null && dadataIncome >= 100000000)) &&
+      employeeCount !== null &&
+      employeeCount <= 1
+  );
+
+  const addressInvalid = Boolean(dadata?.invalid || dadata?.address?.data?.invalid);
+  const companyInvalid = Boolean(dadata?.state?.status === "LIQUIDATING" || dadata?.state?.status === "LIQUIDATED");
+  const massAddress = Boolean(companyData.ЮрАдрес?.Массовый || dadata?.address?.data?.qc_complete === "5");
+  const directorProblem = directors.some((item) => /дисквалиф|недостовер|массов/.test(String(item?.Статус || item?.Наим || "").toLowerCase()));
 
   return {
     statusText,
     registrationDate,
     ageYears,
-    taxDebt: toNum(taxes.СумНедоим),
-    legalCasesCount: safeLength(input?.legalData),
+    taxDebt,
+    taxPenalties,
     fsspCount: safeLength(input?.fsspData),
+    legalCasesCount: safeLength(input?.legalData),
     contractsCount: safeLength(input?.contractsData),
-    revenue: revenue === null ? null : toNum(revenue),
-    netProfit: netProfit === null ? null : toNum(netProfit),
-    employeeCount: employeeCount === null ? null : toNum(employeeCount),
+    revenue,
+    netProfit,
+    dadataIncome,
+    dadataExpense,
+    employeeCount,
     contactCount,
+    phonesCount,
+    emailsCount,
     affiliatedCount,
-    flags
+    affiliatedManagersCount,
+    affiliatedFoundersCount,
+    addressInvalid,
+    companyInvalid,
+    massAddress,
+    directorProblem,
+    bankruptcyCount,
+    historySignals,
+    scaleMismatch,
+    hasVerifiedContacts,
+    hasOperationalFootprint,
+    isInactive: /не\s*действ|прекращ/.test(statusLc),
+    isInLiquidation: Boolean(companyData.Ликвид?.Дата) || /ликвидац/.test(statusLc),
+    hasBankruptcy: /банкрот/.test(statusLc) || bankruptcyCount > 0
   };
 }
 
-function pushFactor(factors, code, title, severity, points, evidence) {
-  factors.push({ code, title, severity, points, evidence: String(evidence || "") });
+function applyLegalRules(factors, metrics) {
+  if (metrics.isInactive) pushFactor(factors, "legal", "INACTIVE_STATUS", "Компания недействующая", "critical", RULE_POINTS.INACTIVE_STATUS, metrics.statusText);
+  if (metrics.isInLiquidation) pushFactor(factors, "legal", "LIQUIDATION_STATUS", "Ликвидация / прекращение деятельности", "critical", RULE_POINTS.LIQUIDATION_STATUS, metrics.statusText);
+  if (metrics.hasBankruptcy) pushFactor(factors, "legal", "BANKRUPTCY_SIGNAL", "Признаки банкротства / ЕФРСБ", "critical", RULE_POINTS.BANKRUPTCY_SIGNAL, `Сигналов: ${metrics.bankruptcyCount}`);
+  if (metrics.addressInvalid) pushFactor(factors, "legal", "ADDRESS_INVALID", "Недостоверный адрес", "high", RULE_POINTS.ADDRESS_INVALID, "DaData.invalid/address.invalid");
+  if (metrics.companyInvalid) pushFactor(factors, "legal", "COMPANY_INVALID", "Есть признаки недостоверности компании", "high", RULE_POINTS.COMPANY_INVALID, "DaData.state.status");
+  if (metrics.massAddress) pushFactor(factors, "legal", "MASS_ADDRESS", "Массовый юридический адрес", "medium", RULE_POINTS.MASS_ADDRESS, "company.ЮрАдрес.Массовый");
+  if (metrics.directorProblem) pushFactor(factors, "legal", "DIRECTOR_PROBLEM", "Есть рисковый статус руководителя", "high", RULE_POINTS.DIRECTOR_PROBLEM, "company.Руковод[*].Статус");
+  if (metrics.historySignals > 0) pushFactor(factors, "legal", "TOXIC_HISTORY", "Токсичная история изменений", "medium", RULE_POINTS.TOXIC_HISTORY, `Сигналов: ${metrics.historySignals}`);
+}
+
+function applyFinancialRules(factors, metrics) {
+  if (metrics.taxDebt !== null && metrics.taxDebt >= 500000) pushFactor(factors, "financial", "TAX_DEBT_HIGH", "Серьезная налоговая задолженность", "high", RULE_POINTS.TAX_DEBT_HIGH, `Недоимка: ${metrics.taxDebt}`);
+  else if (metrics.taxDebt !== null && metrics.taxDebt >= 100000) pushFactor(factors, "financial", "TAX_DEBT_MEDIUM", "Налоговая задолженность", "medium", RULE_POINTS.TAX_DEBT_MEDIUM, `Недоимка: ${metrics.taxDebt}`);
+
+  if (metrics.taxPenalties !== null && metrics.taxPenalties >= 50000) pushFactor(factors, "financial", "TAX_PENALTY_HIGH", "Значимые пени / штрафы", "medium", RULE_POINTS.TAX_PENALTY_HIGH, `Пени/штрафы: ${metrics.taxPenalties}`);
+
+  if (metrics.fsspCount >= 3) pushFactor(factors, "financial", "FSSP_SERIOUS", "Высокая нагрузка по ФССП", "high", RULE_POINTS.FSSP_SERIOUS, `Производств: ${metrics.fsspCount}`);
+  else if (metrics.fsspCount >= 1) pushFactor(factors, "financial", "FSSP_MEDIUM", "Есть исполнительные производства", "medium", RULE_POINTS.FSSP_MEDIUM, `Производств: ${metrics.fsspCount}`);
+
+  if (metrics.legalCasesCount >= 8) pushFactor(factors, "financial", "LEGAL_LOAD_HIGH", "Высокая судебная нагрузка", "medium", RULE_POINTS.LEGAL_LOAD_HIGH, `Дел: ${metrics.legalCasesCount}`);
+  else if (metrics.legalCasesCount >= 3) pushFactor(factors, "financial", "LEGAL_LOAD_MEDIUM", "Есть судебная нагрузка", "low", RULE_POINTS.LEGAL_LOAD_MEDIUM, `Дел: ${metrics.legalCasesCount}`);
+
+  if (metrics.bankruptcyCount >= 2) pushFactor(factors, "financial", "BANKRUPTCY_CONTEXT", "Накопленный контекст банкротства", "high", RULE_POINTS.BANKRUPTCY_CONTEXT, `Сообщений: ${metrics.bankruptcyCount}`);
+
+  const revenueValue = preferNumber(metrics.revenue, metrics.dadataIncome);
+  if (revenueValue !== null && revenueValue === 0 && (metrics.ageYears === null || metrics.ageYears >= 1)) {
+    pushFactor(factors, "financial", "NO_ACTIVITY", "Нулевая экономическая активность", "medium", RULE_POINTS.NO_ACTIVITY, "Выручка/доход = 0");
+  }
+
+  if (metrics.netProfit !== null && metrics.netProfit < 0) {
+    pushFactor(factors, "financial", "LOSS_MAKING", "Убыток по последней отчетности", "medium", RULE_POINTS.LOSS_MAKING, `Чистая прибыль: ${metrics.netProfit}`);
+  }
+
+  if (metrics.revenue === null && metrics.dadataIncome === null) {
+    pushFactor(factors, "financial", "FINANCE_GAP", "Недостаточно финансовых данных", "low", RULE_POINTS.FINANCE_GAP, "Нет revenue/income");
+  }
+}
+
+function applyOperationalRules(factors, metrics) {
+  if (metrics.ageYears !== null && metrics.ageYears < 1) pushFactor(factors, "operational", "VERY_YOUNG_COMPANY", "Компания очень молодая", "medium", RULE_POINTS.VERY_YOUNG_COMPANY, `Возраст: ${metrics.ageYears} лет`);
+  else if (metrics.ageYears !== null && metrics.ageYears < 3) pushFactor(factors, "operational", "YOUNG_COMPANY", "Небольшой срок работы компании", "low", RULE_POINTS.YOUNG_COMPANY, `Возраст: ${metrics.ageYears} лет`);
+
+  if (metrics.contactCount === 0) pushFactor(factors, "operational", "NO_CONTACTS", "Слабая верифицируемость контактов", "medium", RULE_POINTS.NO_CONTACTS, "Нет телефона, email и сайта");
+  if (metrics.employeeCount === 1) pushFactor(factors, "operational", "ONE_EMPLOYEE", "Только 1 сотрудник", "medium", RULE_POINTS.ONE_EMPLOYEE, "DaData.employee_count=1");
+  if (!metrics.hasOperationalFootprint) pushFactor(factors, "operational", "OPERATIONAL_FOOTPRINT_WEAK", "Слабый операционный след", "high", RULE_POINTS.OPERATIONAL_FOOTPRINT_WEAK, "Нет сотрудников/контактов/активности");
+  if (metrics.scaleMismatch) pushFactor(factors, "operational", "SCALE_MISMATCH", "Несоответствие масштаба: высокий оборот при микроштабе", "high", RULE_POINTS.SCALE_MISMATCH, `Выручка: ${preferNumber(metrics.revenue, metrics.dadataIncome)}, сотрудники: ${metrics.employeeCount}`);
+}
+
+function applyNetworkRules(factors, metrics) {
+  if (metrics.affiliatedCount >= 12) pushFactor(factors, "network", "AFFILIATED_OVERLOAD", "Перегруженная сеть аффилированных компаний", "medium", RULE_POINTS.AFFILIATED_OVERLOAD, `Связей: ${metrics.affiliatedCount}`);
+  if (metrics.affiliatedManagersCount >= 8) pushFactor(factors, "network", "AFFILIATED_MANAGERS_HIGH", "Много связей через руководителей", "low", RULE_POINTS.AFFILIATED_MANAGERS_HIGH, `Manager-links: ${metrics.affiliatedManagersCount}`);
+  if (metrics.affiliatedFoundersCount >= 8) pushFactor(factors, "network", "AFFILIATED_FOUNDERS_HIGH", "Много связей через учредителей", "low", RULE_POINTS.AFFILIATED_FOUNDERS_HIGH, `Founder-links: ${metrics.affiliatedFoundersCount}`);
+}
+
+function applyCompoundRules(factors, metrics) {
+  if (metrics.isInactive && metrics.hasBankruptcy) {
+    pushFactor(factors, "compound", "CMP_INACTIVE_BANKRUPTCY", "Комбинация: недействующая + банкротство", "critical", RULE_POINTS.CMP_INACTIVE_BANKRUPTCY, "inactive + bankruptcy");
+  }
+
+  if (metrics.addressInvalid && metrics.contactCount === 0 && metrics.ageYears !== null && metrics.ageYears <= 2) {
+    pushFactor(factors, "compound", "CMP_INVALID_NO_CONTACTS_YOUNG", "Комбинация: недостоверный адрес + нет контактов + молодая компания", "high", RULE_POINTS.CMP_INVALID_NO_CONTACTS_YOUNG, "invalid address + no contacts + young");
+  }
+
+  if (metrics.scaleMismatch) {
+    pushFactor(factors, "compound", "CMP_SCALE_MISMATCH_STRONG", "Комбинация: высокий оборот при минимальном штате", "high", RULE_POINTS.CMP_SCALE_MISMATCH_STRONG, "high revenue + <=1 employee");
+  }
+
+  if (metrics.affiliatedCount >= 12 && !metrics.hasOperationalFootprint) {
+    pushFactor(factors, "compound", "CMP_AFFILIATIONS_WEAK_OPERATIONS", "Комбинация: много аффилированности + слабая операционная реальность", "high", RULE_POINTS.CMP_AFFILIATIONS_WEAK_OPERATIONS, "many affiliations + weak ops");
+  }
+
+  if (metrics.affiliatedCount >= 12 && ((metrics.taxDebt !== null && metrics.taxDebt > 0) || metrics.fsspCount > 0)) {
+    pushFactor(factors, "compound", "CMP_AFFILIATIONS_DEBT", "Комбинация: много аффилированности + долговые сигналы", "high", RULE_POINTS.CMP_AFFILIATIONS_DEBT, "many affiliations + debt");
+  }
+
+  if (metrics.affiliatedCount >= 12 && metrics.ageYears !== null && metrics.ageYears <= 2) {
+    pushFactor(factors, "compound", "CMP_AFFILIATIONS_YOUNG", "Комбинация: много аффилированности + молодая компания", "medium", RULE_POINTS.CMP_AFFILIATIONS_YOUNG, "many affiliations + young");
+  }
+
+  if (metrics.ageYears !== null && metrics.ageYears >= 7 && (metrics.taxDebt === 0 || metrics.taxDebt === null) && metrics.fsspCount === 0 && metrics.netProfit !== null && metrics.netProfit > 0) {
+    pushFactor(factors, "compound", "CMP_STABLE_OLD_CLEAN", "Комбинация: зрелая компания без долгов и с прибылью", "low", RULE_POINTS.CMP_STABLE_OLD_CLEAN, "old + clean debt + stable finance");
+  }
+}
+
+function applyPositiveRules(factors, metrics) {
+  if (metrics.ageYears !== null && metrics.ageYears >= 5) pushFactor(factors, "operational", "OLD_COMPANY", "Компания действует давно", "low", RULE_POINTS.OLD_COMPANY, `Возраст: ${metrics.ageYears} лет`);
+  if (!hasCriticalNegativeFactor(factors)) pushFactor(factors, "legal", "NO_CRITICAL_FLAGS", "Нет критичных красных флагов", "low", RULE_POINTS.NO_CRITICAL_FLAGS, "Нет факторов critical severity");
+  if (metrics.employeeCount !== null && metrics.employeeCount >= 10) pushFactor(factors, "operational", "STAFF_OK", "Есть штат и операционная активность", "low", RULE_POINTS.STAFF_OK, `Сотрудники: ${metrics.employeeCount}`);
+
+  const revenueValue = preferNumber(metrics.revenue, metrics.dadataIncome);
+  if (revenueValue !== null && revenueValue > 0) pushFactor(factors, "financial", "REVENUE_OK", "Есть выручка / доход", "low", RULE_POINTS.REVENUE_OK, `Выручка/доход: ${revenueValue}`);
+
+  if (metrics.hasVerifiedContacts) pushFactor(factors, "operational", "CONTACTS_OK", "Контакты подтверждаются", "low", RULE_POINTS.CONTACTS_OK, `Контактов: ${metrics.contactCount}`);
+  if (metrics.netProfit !== null && metrics.netProfit > 0) pushFactor(factors, "financial", "FINANCE_STABLE", "Есть признаки стабильной финансовой деятельности", "low", RULE_POINTS.FINANCE_STABLE, `Чистая прибыль: ${metrics.netProfit}`);
+  if (metrics.taxDebt === 0 && metrics.fsspCount === 0) pushFactor(factors, "financial", "LOW_DEBT_LOAD", "Нет выраженной долговой нагрузки", "low", RULE_POINTS.LOW_DEBT_LOAD, "Недоимка=0 и ФССП=0");
+  if (metrics.hasOperationalFootprint) pushFactor(factors, "operational", "OPERATIONAL_FOOTPRINT_STRONG", "Бизнес операционно верифицируется", "low", RULE_POINTS.OPERATIONAL_FOOTPRINT_STRONG, "Есть операционный след");
+}
+
+function pushFactor(factors, group, code, title, severity, points, evidence) {
+  factors.push({ group, code, title, severity, points, evidence: String(evidence || "") });
 }
 
 function hasCriticalNegativeFactor(factors) {
@@ -247,11 +351,24 @@ function scoreToLevel(score) {
   return "low";
 }
 
-function recommendationByLevel(level) {
-  if (level === "low") return "Можно работать на стандартных условиях.";
-  if (level === "medium") return "Запросите базовый пакет документов и ограничьте отсрочку.";
-  if (level === "high") return "Работайте только с ограничением риска и проверьте бенефициаров/руководство.";
-  return "Не давайте отсрочку: только полная предоплата или ручная проверка юр/фин контроля.";
+function decisionByScoreAndSignals(score, level, factors, metrics) {
+  const hasCritical = factors.some((factor) => factor.points < 0 && factor.severity === "critical");
+  const hasHighLegal = factors.some((factor) => factor.group === "legal" && factor.points < 0 && (factor.severity === "critical" || factor.severity === "high"));
+  const hasDebtPressure = (metrics.taxDebt !== null && metrics.taxDebt >= 100000) || metrics.fsspCount >= 1;
+
+  if (score <= 24 || hasCritical || (metrics.isInactive && metrics.hasBankruptcy)) return "reject_or_legal_review";
+  if (score <= 40 || (hasHighLegal && hasDebtPressure)) return "prepay_only";
+  if (level === "high" || score <= 55) return "manual_review";
+  if (level === "medium") return "approve_caution";
+  return "approve_standard";
+}
+
+function recommendationByDecision(decision) {
+  if (decision === "approve_standard") return "Можно работать на стандартных условиях.";
+  if (decision === "approve_caution") return "Согласуйте лимит, запросите базовые документы и сократите отсрочку.";
+  if (decision === "manual_review") return "Перед сделкой проведите ручную проверку юр/фин блока и бенефициаров.";
+  if (decision === "prepay_only") return "Рекомендуется полная или поэтапная предоплата до снятия рисков.";
+  return "Рекомендуется отказ или обязательная правовая проверка до любых обязательств.";
 }
 
 function levelToRussian(level) {
@@ -261,8 +378,8 @@ function levelToRussian(level) {
   return "Критический";
 }
 
-function buildSummary(level, score, negativeCount, positiveCount, unknownCount) {
-  return `Итог: ${levelToRussian(level)} риск (${score}/100). Факторов: -${negativeCount} / +${positiveCount}. Неизвестных полей: ${unknownCount}.`;
+function buildSummary(level, score, decision, negativeCount, positiveCount, unknownCount) {
+  return `Итог: ${levelToRussian(level)} риск (${score}/100), решение: ${decision}. Факторов: -${negativeCount} / +${positiveCount}. Неизвестных полей: ${unknownCount}.`;
 }
 
 function clampScore(value) {
@@ -272,9 +389,7 @@ function clampScore(value) {
 }
 
 function addUnknown(unknowns, value, message) {
-  if (value === null || value === undefined || value === "") {
-    unknowns.push(message);
-  }
+  if (value === null || value === undefined || value === "") unknowns.push(message);
 }
 
 function calcAgeYears(dateValue) {
@@ -293,19 +408,6 @@ function pickLatestFinanceRow(financeRows) {
   return financeRows[years[0]] || null;
 }
 
-function countContacts(contacts, dadata) {
-  const fromCompany = [contacts.Тел, contacts.Емэйл, contacts.ВебСайт].flat().filter(Boolean).length;
-  const dadataPhones = normalizeArray(dadata?.phones).length;
-  const dadataEmails = normalizeArray(dadata?.emails).length;
-  const total = fromCompany + dadataPhones + dadataEmails;
-  return total;
-}
-
-function valueOrNull(value) {
-  if (value === null || value === undefined || value === "") return null;
-  return value;
-}
-
 function safeLength(source) {
   if (Array.isArray(source)) return source.length;
   if (Array.isArray(source?.data)) return source.data.length;
@@ -319,7 +421,27 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function toNum(value) {
+function toNumOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
-  return Number.isFinite(number) ? number : 0;
+  return Number.isFinite(number) ? number : null;
+}
+
+function extractHistorySignals(historyData) {
+  const rows = normalizeArray(historyData?.data || historyData);
+  if (!rows.length) return 0;
+  return rows.filter((item) => /смена|ликвид|реорган|адрес|руковод|учред/.test(String(item?.Наим || item?.Событие || item?.Содержание || "").toLowerCase())).length;
+}
+
+function preferNumber(primary, secondary) {
+  if (primary !== null && primary !== undefined) return primary;
+  if (secondary !== null && secondary !== undefined) return secondary;
+  return null;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
