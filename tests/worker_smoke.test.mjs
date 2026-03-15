@@ -29,6 +29,25 @@ function makeEnv(overrides = {}) {
   };
 }
 
+
+function makeKvNamespace() {
+  const store = new Map();
+  return {
+    stats: { get: 0, put: 0 },
+    async get(key, type) {
+      this.stats.get += 1;
+      const raw = store.get(key);
+      if (raw === undefined) return null;
+      if (type === "json") return JSON.parse(raw);
+      return raw;
+    },
+    async put(key, value) {
+      this.stats.put += 1;
+      store.set(key, String(value));
+    }
+  };
+}
+
 function makeWebhookRequest(payload, secret = "secret-token") {
   return new Request("https://example.com/webhook", {
     method: "POST",
@@ -73,6 +92,7 @@ test("/start sends new main menu", async () => {
   assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "search:inn");
   assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "search:name");
   assert.equal(body.reply_markup.inline_keyboard[2][0].callback_data, "search:bic");
+  assert.equal(body.reply_markup.inline_keyboard[3][0].callback_data, "search:email");
 });
 
 test("10-digit INN opens main card with compact section keyboard", async () => {
@@ -377,4 +397,197 @@ test("co:lnk shows only non-empty sections and collapsed empty note", async () =
   assert.match(body.text, /Связи по адресу: Москва/);
   assert.match(body.text, /Нет данных по: учредителям, телефону, email/);
   assert.doesNotMatch(body.text, /Связи по телефону:/);
+});
+
+test("search:email callback opens email hint screen", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    return jsonResponse({ ok: true });
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-email", data: "search:email", message: { message_id: 5, chat: { id: 4 } } } }),
+    makeEnv()
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Поиск по email/);
+});
+
+test("email lookup opens company card by INN via DaData", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findByEmail/company")) {
+      return jsonResponse({ suggestions: [{ data: { company: { inn: "7707083893" } } }] });
+    }
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({ suggestions: [{ data: { employee_count: 15, invalid: false, phones: [{ value: "+7 495 111-22-33" }] } }] });
+    }
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", НаимСокр: "ООО Email Тест", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }] } });
+    }
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
+      return jsonResponse({ meta: { status: "ok" }, data: {} });
+    }
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ message: { text: "info@example.ru", chat: { id: 1 } } }),
+    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
+  );
+
+  const send = calls.find((c) => c.url.includes("/sendMessage"));
+  const body = JSON.parse(send.options.body);
+  assert.match(body.text, /ООО Email Тест/);
+  assert.match(body.text, /DaData/);
+  assert.ok(calls.some((c) => c.url.includes("/findByEmail/company")));
+});
+
+test("email lookup empty-state when company is not found", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findByEmail/company")) {
+      return jsonResponse({ suggestions: [] });
+    }
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ message: { text: "unknown@example.ru", chat: { id: 1 } } }),
+    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
+  );
+
+  const send = calls.find((c) => c.url.includes("/sendMessage"));
+  const body = JSON.parse(send.options.body);
+  assert.match(body.text, /Компания по email не найдена/);
+});
+
+test("co:lnk renders DaData affiliated companies", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", Руковод: [{ ФИО: "Иванов И.И." }] } });
+    }
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({ suggestions: [{ data: { founders: [{ inn: "500000000000" }], managers: [{ inn: "600000000000" }] } }] });
+    }
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
+      const payload = JSON.parse(options.body);
+      if (payload.query === "500000000000") {
+        return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Альфа" }, state: { status: "ACTIVE" }, address: { data: { city: "Казань" } } } }] });
+      }
+      return jsonResponse({ suggestions: [{ data: { inn: "2222222222", name: { short_with_opf: "ООО Бета" }, state: { status: "ACTIVE" }, okved: "62.01" } }] });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-lnk-aff", data: "co:lnk:7707083893", message: { message_id: 9, chat: { id: 3 } } } }),
+    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Аффилированные компании/);
+  assert.match(body.text, /ООО Альфа/);
+  assert.match(body.text, /через учредителя/);
+  assert.match(body.text, /ООО Бета/);
+});
+
+test("DaData outage does not break Checko flow", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return new Response("upstream failed", { status: 502 });
+    }
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", НаимСокр: "ООО Надежность", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }] } });
+    }
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
+      return jsonResponse({ meta: { status: "ok" }, data: {} });
+    }
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ message: { text: "7707083893", chat: { id: 1 } } }),
+    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
+  );
+
+  const send = calls.find((c) => c.url.includes("/sendMessage"));
+  const body = JSON.parse(send.options.body);
+  assert.match(body.text, /ООО Надежность/);
+});
+
+
+test("repeated company lookup uses KV cache", async () => {
+  const kv = makeKvNamespace();
+  let companyCalls = 0;
+
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      companyCalls += 1;
+      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", НаимСокр: "ООО Кеш", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }] } });
+    }
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
+      return jsonResponse({ meta: { status: "ok" }, data: {} });
+    }
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru") return jsonResponse({ suggestions: [] });
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  const env = makeEnv({ COMPANY_CACHE: kv });
+  await worker.fetch(makeWebhookRequest({ message: { text: "7707083893", chat: { id: 1 } } }), env);
+  await worker.fetch(makeWebhookRequest({ message: { text: "7707083893", chat: { id: 1 } } }), env);
+
+  assert.equal(companyCalls, 1);
+  assert.ok(kv.stats.get >= 2);
+  assert.ok(kv.stats.put >= 1);
+});
+
+test("KV get failure does not break flow", async () => {
+  const brokenKv = {
+    async get() {
+      throw new Error("KV unavailable");
+    },
+    async put() {
+      throw new Error("KV unavailable");
+    }
+  };
+
+  globalThis.fetch = async (url) => {
+    const u = new URL(String(url));
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", НаимСокр: "ООО Без KV", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }] } });
+    }
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
+      return jsonResponse({ meta: { status: "ok" }, data: {} });
+    }
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru") return jsonResponse({ suggestions: [] });
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  const response = await worker.fetch(
+    makeWebhookRequest({ message: { text: "7707083893", chat: { id: 1 } } }),
+    makeEnv({ COMPANY_CACHE: brokenKv })
+  );
+  assert.equal(response.status, 200);
 });

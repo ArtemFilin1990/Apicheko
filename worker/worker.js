@@ -3,6 +3,12 @@ const DEFAULT_WEBHOOK_PATH = "/webhook";
 const COMPANY_NOT_FOUND_MESSAGE = "❌ Компания не найдена";
 const CHECKO_SERVICE_ERROR_MESSAGE = "⚠️ Ошибка сервиса Checko";
 const SEARCH_MIN_QUERY_LENGTH = 4;
+const DEFAULT_DADATA_API_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs";
+const AFFILIATED_LIMIT = 8;
+const CACHE_TTL_COMPANY_SECONDS = 12 * 60 * 60;
+const CACHE_TTL_DADATA_PARTY_SECONDS = 12 * 60 * 60;
+const CACHE_TTL_AFFILIATED_SECONDS = 24 * 60 * 60;
+const CACHE_TTL_EMAIL_SECONDS = 6 * 60 * 60;
 
 const COMPANY_SECTION_TITLES = {
   main: "🏢 Карточка",
@@ -16,6 +22,18 @@ const COMPANY_SECTION_TITLES = {
   tax: "🧾 Налоги"
 };
 
+const COMPANY_SECTION_BUILDERS = {
+  main: buildCompanyMainView,
+  risk: buildRiskView,
+  fin: buildFinancesView,
+  arb: buildArbitrationView,
+  debt: buildDebtsView,
+  ctr: buildContractsView,
+  his: buildHistoryView,
+  lnk: buildConnectionsView,
+  tax: buildTaxesView
+};
+
 class CheckoServiceError extends Error {
   constructor(message) {
     super(message);
@@ -27,6 +45,13 @@ class CheckoNotFoundError extends Error {
   constructor(message = COMPANY_NOT_FOUND_MESSAGE) {
     super(message);
     this.name = "CheckoNotFoundError";
+  }
+}
+
+class DadataServiceError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "DadataServiceError";
   }
 }
 
@@ -72,13 +97,13 @@ async function handleTelegramUpdate(request, env) {
 
   if (text === "/start" || text === "/help") {
     const view = buildMainMenuView();
-    await sendMessage(env, { chat_id: chatId, text: view.text, parse_mode: "HTML", reply_markup: view.reply_markup });
+    await sendHtmlMessage(env, chatId, view);
     return jsonResponse({ ok: true });
   }
 
   try {
     const view = await buildViewForUserText(env, text);
-    await sendMessage(env, { chat_id: chatId, text: view.text, parse_mode: "HTML", reply_markup: view.reply_markup });
+    await sendHtmlMessage(env, chatId, view);
   } catch (error) {
     if (error instanceof CheckoNotFoundError) {
       await sendMessage(env, { chat_id: chatId, text: COMPANY_NOT_FOUND_MESSAGE });
@@ -107,13 +132,16 @@ async function buildViewForUserText(env, text) {
   if (/^\d{9}$/.test(token)) {
     return buildBankView(env, token);
   }
+  if (isValidEmail(text)) {
+    return buildCompanyByEmailView(env, text);
+  }
 
   if (text.length >= SEARCH_MIN_QUERY_LENGTH) {
     return buildSearchResultsView(env, text);
   }
 
   return {
-    text: "🆔 Неверный формат. Отправьте ИНН (10/12), ОГРН (13), ОГРНИП (15), БИК (9) или название.",
+    text: "🆔 Неверный формат. Отправьте ИНН (10/12), ОГРН (13), ОГРНИП (15), БИК (9), email или название.",
     reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
   };
 }
@@ -149,6 +177,7 @@ async function buildViewForCallback(env, data) {
   if (data === "search:inn") return buildSearchInnView();
   if (data === "search:name") return buildSearchNameView();
   if (data === "search:bic") return buildSearchBicView();
+  if (data === "search:email") return buildSearchEmailView();
 
   if (data.startsWith("resolve12:entrepreneur:")) {
     return buildEntrepreneurView(env, data.split(":").pop());
@@ -187,6 +216,7 @@ function buildMainMenuView() {
         [kb("🔎 Поиск по ИНН / ОГРН", "search:inn")],
         [kb("🧾 Поиск по названию", "search:name")],
         [kb("🏦 Поиск по БИК", "search:bic")],
+        [kb("✉️ Поиск по email", "search:email")],
         [kb("ℹ️ Помощь", "help")]
       ]
     }
@@ -195,7 +225,7 @@ function buildMainMenuView() {
 
 function buildHelpView() {
   return {
-    text: "ℹ️ <b>Как использовать</b>\n\n1) Отправьте ИНН, ОГРН / ОГРНИП, БИК или название.\n2) Откройте карточку.\n3) Перейдите в нужный раздел: риски, финансы, арбитраж, долги, контракты, история, связи, налоги.",
+    text: "ℹ️ <b>Как использовать</b>\n\n1) Отправьте ИНН, ОГРН / ОГРНИП, БИК, email или название.\n2) Откройте карточку.\n3) Перейдите в нужный раздел: риски, финансы, арбитраж, долги, контракты, история, связи, налоги.",
     reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
   };
 }
@@ -221,6 +251,13 @@ function buildSearchBicView() {
   };
 }
 
+function buildSearchEmailView() {
+  return {
+    text: "✉️ <b>Поиск по email</b>\n\nОтправьте корпоративный email, например info@company.ru.",
+    reply_markup: backMenuKeyboard("menu")
+  };
+}
+
 function buildResolve12View(inn) {
   return {
     text: "🆔 <b>ИНН из 12 цифр</b>\n\nВыберите режим проверки.",
@@ -233,6 +270,31 @@ function buildResolve12View(inn) {
       ]
     }
   };
+}
+
+async function buildCompanyByEmailView(env, email) {
+  if (!isDadataConfigured(env)) {
+    return {
+      text: "ℹ️ Поиск по email не настроен. Попросите администратора добавить ключи DaData.",
+      reply_markup: backMenuKeyboard("search:email")
+    };
+  }
+
+  const suggestion = await safeFindCompanyByEmail(env, email);
+  if (suggestion.error === "unavailable") {
+    return {
+      text: "⚠️ Поиск по email временно недоступен. Попробуйте позже.",
+      reply_markup: backMenuKeyboard("search:email")
+    };
+  }
+  if (!suggestion.inn) {
+    return {
+      text: "📭 Компания по email не найдена. Проверьте адрес или используйте ИНН/ОГРН.",
+      reply_markup: backMenuKeyboard("search:email")
+    };
+  }
+
+  return buildCompanyMainView(env, suggestion.inn);
 }
 
 async function buildSearchResultsView(env, query) {
@@ -264,6 +326,7 @@ async function buildCompanyMainView(env, id) {
   const data = payload.data || {};
   if (!hasIdentity(data)) throw new CheckoNotFoundError();
   const finances = await safeSectionData(env, "finances", identifierParams(id));
+  const dadataParty = await safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id));
 
   const title = data.НаимСокр || data.НаимПолн || "Компания";
   const okved = data.ОКВЭД ? `${data.ОКВЭД.Код || "—"} ${data.ОКВЭД.Наим || ""}`.trim() : "—";
@@ -297,23 +360,16 @@ async function buildCompanyMainView(env, id) {
     `Учредитель (текущий): ${escapeHtml(founder)}`,
     contacts.Тел ? `Телефон: ${escapeHtml(valueAsText(contacts.Тел))}` : null,
     contacts.Емэйл ? `Email: ${escapeHtml(valueAsText(contacts.Емэйл))}` : null,
-    contacts.ВебСайт ? `Сайт: ${escapeHtml(valueAsText(contacts.ВебСайт))}` : null
+    contacts.ВебСайт ? `Сайт: ${escapeHtml(valueAsText(contacts.ВебСайт))}` : null,
+    ...buildDadataMainLines(dadataParty)
   ].filter(Boolean);
 
   return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(id) };
 }
 
 async function buildCompanySectionView(env, section, id) {
-  if (section === "main") return buildCompanyMainView(env, id);
-  if (section === "risk") return buildRiskView(env, id);
-  if (section === "fin") return buildFinancesView(env, id);
-  if (section === "arb") return buildArbitrationView(env, id);
-  if (section === "debt") return buildDebtsView(env, id);
-  if (section === "ctr") return buildContractsView(env, id);
-  if (section === "his") return buildHistoryView(env, id);
-  if (section === "lnk") return buildConnectionsView(env, id);
-  if (section === "tax") return buildTaxesView(env, id);
-  return null;
+  const builder = COMPANY_SECTION_BUILDERS[section];
+  return builder ? builder(env, id) : null;
 }
 
 async function buildRiskView(env, id) {
@@ -481,17 +537,36 @@ async function buildConnectionsView(env, id) {
     { label: "Связи по телефону", value: contactPhone },
     { label: "Связи по email", value: contactEmail }
   ];
-  const nonEmptyGroups = groups.filter((g) => hasText(g.value));
-  if (nonEmptyGroups.length === 0) return { text: "🔗 Связи не найдены", reply_markup: compactSectionKeyboard(id) };
 
+  const dadataParty = await safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id));
+  const affiliated = await collectAffiliatedCompanies(env, dadataParty, String(data.ИНН || id));
+
+  const nonEmptyGroups = groups.filter((g) => hasText(g.value));
+  const lines = ["🔗 <b>Связи</b>"];
+  if (nonEmptyGroups.length === 0 && affiliated.total === 0) {
+    return { text: "🔗 Связи не найдены", reply_markup: compactSectionKeyboard(id) };
+  }
+
+  lines.push(...nonEmptyGroups.map((g) => `${g.label}: ${escapeHtml(String(g.value))}`));
   const emptyLabels = groups.filter((g) => !hasText(g.value)).map((g) => g.label.replace("Связи по ", ""));
-  const lines = [
-    "🔗 <b>Связи</b>",
-    ...nonEmptyGroups.map((g) => `${g.label}: ${escapeHtml(String(g.value))}`)
-  ];
   if (emptyLabels.length > 0) {
     lines.push(`Нет данных по: ${escapeHtml(emptyLabels.join(", "))}`);
   }
+
+  if (affiliated.total > 0) {
+    lines.push("", "🤝 <b>Аффилированные компании (DaData)</b>");
+    for (const item of affiliated.items.slice(0, AFFILIATED_LIMIT)) {
+      const postfix = [item.status, item.okvedOrCity].filter(Boolean).join(" · ");
+      lines.push(`• ${escapeHtml(item.name)} · ИНН ${escapeHtml(item.inn)}`);
+      lines.push(`  ${escapeHtml(item.linkType)}${postfix ? ` · ${escapeHtml(postfix)}` : ""}`);
+    }
+    if (affiliated.total > AFFILIATED_LIMIT) {
+      lines.push(`… и ещё ${affiliated.total - AFFILIATED_LIMIT}`);
+    }
+  } else if (isDadataConfigured(env)) {
+    lines.push("", "🤝 Аффилированные компании не найдены");
+  }
+
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
 }
 
@@ -605,6 +680,15 @@ async function safeSectionData(env, endpoint, params) {
   } catch {
     return { data: [] };
   }
+}
+
+async function sendHtmlMessage(env, chatId, view) {
+  await sendMessage(env, {
+    chat_id: chatId,
+    text: view.text,
+    parse_mode: "HTML",
+    reply_markup: view.reply_markup
+  });
 }
 
 function buildCompanyKeyboard(id) {
@@ -784,6 +868,14 @@ function backMenuKeyboard(backCallback) {
 async function checkoRequest(env, endpoint, params = {}) {
   if (!env.CHECKO_API_KEY) throw new CheckoServiceError("Missing CHECKO_API_KEY");
 
+  const cacheKey = getCheckoCacheKey(endpoint, params);
+  if (cacheKey) {
+    return withCache(env, cacheKey, CACHE_TTL_COMPANY_SECONDS, () => loadCheckoRequest(env, endpoint, params));
+  }
+  return loadCheckoRequest(env, endpoint, params);
+}
+
+async function loadCheckoRequest(env, endpoint, params = {}) {
   const baseUrl = (env.CHECKO_API_URL || DEFAULT_CHECKO_API_URL).replace(/\/$/, "");
   const url = new URL(`${baseUrl}/${endpoint}`);
   url.searchParams.set("key", env.CHECKO_API_KEY);
@@ -816,6 +908,217 @@ async function checkoRequest(env, endpoint, params = {}) {
   }
 
   return payload;
+}
+
+
+async function safeFindCompanyByEmail(env, email) {
+  try {
+    return await findCompanyByEmail(env, email);
+  } catch (error) {
+    if (error instanceof DadataServiceError) {
+      return { error: "unavailable" };
+    }
+    throw error;
+  }
+}
+
+async function safeFindPartyByInnOrOgrn(env, query) {
+  if (!isDadataConfigured(env) || !query) return null;
+  try {
+    return await findPartyByInnOrOgrn(env, query);
+  } catch (error) {
+    if (error instanceof DadataServiceError) return null;
+    throw error;
+  }
+}
+
+async function findCompanyByEmail(env, email) {
+  const normalizedEmail = normalizeEmail(email);
+  const payload = await withCache(env, `email:${normalizedEmail}`, CACHE_TTL_EMAIL_SECONDS, () =>
+    dadataPost(env, "findByEmail/company", { query: normalizedEmail })
+  );
+  return normalizeEmailSuggestion(payload);
+}
+
+async function findPartyByInnOrOgrn(env, query) {
+  const normalizedQuery = String(query || "").trim();
+  const payload = await withCache(env, `dadata:party:${normalizedQuery}`, CACHE_TTL_DADATA_PARTY_SECONDS, () =>
+    dadataPost(env, "findById/party", { query: normalizedQuery })
+  );
+  const suggestions = ensureArray(payload.suggestions);
+  return suggestions[0]?.data || null;
+}
+
+async function findAffiliatedByInn(env, inn, scope) {
+  const normalizedScope = ensureArray(scope).join(",") || "all";
+  const payload = await withCache(env, `affiliated:${inn}:${normalizedScope}`, CACHE_TTL_AFFILIATED_SECONDS, () =>
+    dadataPost(env, "findAffiliated/party", { query: inn, scope })
+  );
+  return ensureArray(payload.suggestions).map((item) => item?.data).filter(Boolean);
+}
+
+async function collectAffiliatedCompanies(env, partyData, sourceInn) {
+  if (!isDadataConfigured(env) || !partyData) return { items: [], total: 0 };
+
+  const founders = ensureArray(partyData.founders).map((item) => item?.inn).filter(Boolean);
+  const managers = ensureArray(partyData.managers).map((item) => item?.inn).filter(Boolean);
+  const linked = [
+    ...founders.map((inn) => ({ inn, scope: ["FOUNDERS"], type: "через учредителя" })),
+    ...managers.map((inn) => ({ inn, scope: ["MANAGERS"], type: "через руководителя" }))
+  ];
+  if (!linked.length) return { items: [], total: 0 };
+
+  const seen = new Set();
+  const items = [];
+  for (const target of linked) {
+    const key = `${target.type}:${target.inn}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    let suggestions;
+    try {
+      suggestions = await findAffiliatedByInn(env, target.inn, target.scope);
+    } catch (error) {
+      if (error instanceof DadataServiceError) continue;
+      throw error;
+    }
+
+    for (const item of suggestions) {
+      const inn = String(item?.inn || "").trim();
+      const ogrn = String(item?.ogrn || "").trim();
+      const uniq = `${inn}:${ogrn}`;
+      if (!inn || inn === sourceInn || seen.has(uniq)) continue;
+      seen.add(uniq);
+      items.push({
+        name: item?.name?.short_with_opf || item?.name?.full_with_opf || "Без названия",
+        inn,
+        status: item?.state?.status || "",
+        okvedOrCity: item?.okved || item?.address?.data?.city || "",
+        linkType: target.type
+      });
+    }
+  }
+
+  return { items, total: items.length };
+}
+
+function normalizeEmailSuggestion(payload) {
+  const suggestions = ensureArray(payload.suggestions);
+  const data = suggestions[0]?.data || {};
+  const company = data.company || {};
+  return {
+    inn: String(company.inn || "").trim(),
+    ogrn: String(company.ogrn || "").trim(),
+    name: company.name || ""
+  };
+}
+
+function buildDadataMainLines(partyData) {
+  if (!partyData) return [];
+  const lines = ["", "🧩 <b>DaData</b>"];
+  if (partyData.employee_count) lines.push(`Сотрудники: ${escapeHtml(String(partyData.employee_count))}`);
+  if (partyData.finance?.income) lines.push(`Доход: ${escapeHtml(formatMoney(partyData.finance.income))}`);
+  if (partyData.finance?.expense) lines.push(`Расход: ${escapeHtml(formatMoney(partyData.finance.expense))}`);
+  if (partyData.invalid !== undefined) lines.push(`Признак invalid: ${partyData.invalid ? "да" : "нет"}`);
+  if (partyData.phones?.length) lines.push(`Телефоны: ${escapeHtml(partyData.phones.slice(0, 2).map((p) => p.value).filter(Boolean).join(", "))}`);
+  if (partyData.emails?.length) lines.push(`Email: ${escapeHtml(partyData.emails.slice(0, 2).map((e) => e.value).filter(Boolean).join(", "))}`);
+  if (partyData.managers?.length) {
+    const manager = partyData.managers[0];
+    lines.push(`DaData руководитель: ${escapeHtml(String(manager.name || manager.fio || "—"))}`);
+  }
+  if (partyData.founders?.length) {
+    const founder = partyData.founders[0];
+    lines.push(`DaData учредитель: ${escapeHtml(String(founder.name || founder.fio || "—"))}`);
+  }
+  return lines.length > 2 ? lines : [];
+}
+
+function isDadataConfigured(env) {
+  return Boolean(env.DADATA_API_KEY && env.DADATA_SECRET_KEY);
+}
+
+async function dadataPost(env, endpoint, payload) {
+  if (!isDadataConfigured(env)) {
+    throw new DadataServiceError("Missing DADATA credentials");
+  }
+
+  const baseUrl = (env.DADATA_API_URL || DEFAULT_DADATA_API_URL).replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/${endpoint}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Token ${env.DADATA_API_KEY}`,
+      "X-Secret": env.DADATA_SECRET_KEY
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const raw = await response.text();
+  const snippet = buildSnippet(raw);
+  if (response.status !== 200) {
+    throw new DadataServiceError(`DaData HTTP ${response.status}; snippet=${snippet}`);
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new DadataServiceError(`DaData non-JSON; snippet=${snippet}`);
+  }
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function getCheckoCacheKey(endpoint, params) {
+  if (endpoint !== "company") return null;
+  if (params?.inn) return `company:inn:${params.inn}`;
+  if (params?.ogrn) return `company:ogrn:${params.ogrn}`;
+  return null;
+}
+
+async function getCache(env, key) {
+  if (!env.COMPANY_CACHE || isCacheBypass(env)) return null;
+  try {
+    const cached = await env.COMPANY_CACHE.get(key, "json");
+    if (cached !== null) console.log("cache_hit", { key: summarizeCacheKey(key) });
+    return cached;
+  } catch {
+    console.warn("cache_bypass_on_error", { key: summarizeCacheKey(key), op: "get" });
+    return null;
+  }
+}
+
+async function setCache(env, key, value, ttl) {
+  if (!env.COMPANY_CACHE || isCacheBypass(env)) return;
+  try {
+    const options = ttl ? { expirationTtl: ttl } : undefined;
+    await env.COMPANY_CACHE.put(key, JSON.stringify(value), options);
+  } catch {
+    console.warn("cache_bypass_on_error", { key: summarizeCacheKey(key), op: "put" });
+  }
+}
+
+async function withCache(env, key, ttl, loader) {
+  const cached = await getCache(env, key);
+  if (cached !== null) return cached;
+  console.log("cache_miss", { key: summarizeCacheKey(key) });
+  const fresh = await loader();
+  await setCache(env, key, fresh, ttl);
+  return fresh;
+}
+
+function isCacheBypass(env) {
+  return String(env.CACHE_BYPASS || "") === "1";
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function summarizeCacheKey(key) {
+  if (key.startsWith("email:")) return "email:<masked>";
+  return key;
 }
 
 function buildSnippet(value) {
