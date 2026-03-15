@@ -457,11 +457,12 @@ async function buildRiskView(env, id) {
   const company = await checkoRequest(env, "company", identifierParams(id));
   const data = company.data || {};
   const baseParams = identifierParams(id);
-  const [finances, legal, fssp, contracts, bankruptcy, fedresurs, dadataParty] = await Promise.all([
+  const [finances, legal, fssp, contracts, history, bankruptcy, fedresurs, dadataParty] = await Promise.all([
     safeSectionData(env, "finance", baseParams),
     safeSectionData(env, "legal-cases", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "enforcements", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "contracts", { ...baseParams, law: 44, role: "supplier", sort: "-date", limit: 10 }),
+    safeSectionData(env, "timeline", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "bankruptcy-messages", { ...baseParams, limit: 5 }),
     safeSectionData(env, "fedresurs-messages", { ...baseParams, limit: 5 }),
     safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id))
@@ -473,6 +474,7 @@ async function buildRiskView(env, id) {
     legalData: legal,
     fsspData: fssp,
     contractsData: contracts,
+    historyData: history,
     bankruptcyData: bankruptcy,
     fedresursData: fedresurs,
     dadataParty

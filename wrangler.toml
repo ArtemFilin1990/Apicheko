@@ -10,9 +10,9 @@ WEBHOOK_PATH = "/webhook"
 DADATA_API_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs"
 CACHE_BYPASS = "0"
 
-
-# Configure real IDs before deploy
-[[kv_namespaces]]
-binding = "COMPANY_CACHE"
-id = "YOUR_COMPANY_CACHE_KV_ID"
-preview_id = "YOUR_COMPANY_CACHE_KV_PREVIEW_ID"
+# KV cache is optional. Add COMPANY_CACHE binding only after creating a real KV namespace.
+# Example:
+# [[kv_namespaces]]
+# binding = "COMPANY_CACHE"
+# id = "<real_kv_namespace_id>"
+# preview_id = "<real_kv_preview_id>"

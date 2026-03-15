@@ -100,7 +100,7 @@ DaData Secrets (optional, for email search / enrichment / affiliations):
 - `DADATA_API_KEY`
 - `DADATA_SECRET_KEY`
 
-KV binding:
+KV binding (optional):
 
 - `COMPANY_CACHE` (Cloudflare KV namespace)
 
@@ -114,13 +114,21 @@ KV binding:
 - DaData `findAffiliated/party` по `affiliated:{inn}:{scope}` — TTL 24 часа
 - DaData `findByEmail/company` по `email:{normalized_email}` — TTL 6 часов
 
-Как подключить KV:
+Почему раньше падал deploy:
+
+- в `wrangler.toml` были плейсхолдеры `YOUR_COMPANY_CACHE_KV_ID` / `YOUR_COMPANY_CACHE_KV_PREVIEW_ID`;
+- Cloudflare отклоняет deploy с невалидными KV id.
+
+Теперь KV вынесен в безопасный optional-режим: без реальных id deploy проходит, а кеш просто отключён.
+
+Как подключить KV с реальными id:
 
 1. `wrangler kv namespace create COMPANY_CACHE`
 2. `wrangler kv namespace create COMPANY_CACHE --preview`
-3. Подставьте `id` и `preview_id` в `wrangler.toml` для binding `COMPANY_CACHE`.
+3. Скопируйте выданные `id` и `preview_id`.
+4. Раскомментируйте блок `[[kv_namespaces]]` в `wrangler.toml` и вставьте реальные значения.
 
-При ошибках KV worker автоматически деградирует в прямые API-вызовы (без падения user flow).
+При отсутствии/ошибках KV worker автоматически деградирует в прямые API-вызовы (без падения user flow).
 
 ## DaData integration
 
@@ -129,19 +137,16 @@ KV binding:
 - Экран связей `co:lnk` дополнительно использует `POST /findAffiliated/party` по ИНН учредителей/руководителей.
 - При отсутствии DaData ключей или временной ошибке DaData бот продолжает работать через Checko без падения.
 
-## Risk scoring v1 (`co:risk`)
+## Risk scoring v2 (`co:risk`)
 
-- Экран `co:risk` использует отдельный rule-based модуль `worker/services/risk-score.js`.
-- Формат результата scoring: `score` (0..100), `level`, `factors`, `positives`, `negatives`, `unknowns`, `recommendation`, `summary`.
-- Модель аддитивная: база `50`, далее фиксированные штрафы/бонусы по правилам, затем `clamp` до диапазона `0..100`.
-- Уровни риска задаются явными порогами: `0-24 critical`, `25-49 high`, `50-74 medium`, `75-100 low`.
-- Принцип explainability: в ответе показываются top-факторы, плюсы, неизвестные поля и практическая рекомендация.
-- Это эвристическая rule-based оценка, а не юридическое заключение и не кредитный рейтинг.
-
-Как расширять правила:
-- добавляйте новые rule codes и веса в `RULE_POINTS`;
-- добавляйте условие в `calculateCompanyRiskScore`;
-- сохраняйте детерминированность: одинаковые входные данные -> одинаковый score.
+- Экран `co:risk` использует rule-based модуль `worker/services/risk-score.js` (архитектура сохранена).
+- Формат результата scoring: `score` (0..100), `level`, `decision`, `factors`, `positives`, `negatives`, `unknowns`, `recommendation`, `summary`.
+- Модель аддитивная: база `50`, явные штрафы/бонусы + compound-правила, затем `clamp` до диапазона `0..100`.
+- Уровни риска: `0-24 critical`, `25-49 high`, `50-74 medium`, `75-100 low`.
+- Новые группы факторов: `legal`, `financial`, `operational`, `network` + отдельные compound-комбинации.
+- Источники: Checko (company/finance/legal-cases/enforcements/contracts/timeline/bankruptcy/fedresurs) + DaData Maximum (`findById/party`, `findAffiliated/party`).
+- Решения в risk-экране: `approve_standard`, `approve_caution`, `manual_review`, `prepay_only`, `reject_or_legal_review`.
+- Это explainable эвристика для первичного due diligence, а не юридическое заключение и не кредитный рейтинг.
 
 ## Локальная проверка
 
