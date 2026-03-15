@@ -145,9 +145,45 @@ test("10-digit INN opens main card from DaData only", async () => {
   assert.match(body.text, /Финансовый контур/);
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/company")));
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/finance")));
-  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "co:risk:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[1][1].callback_data, "co:debt:7707083893");
-  assert.equal(body.reply_markup.inline_keyboard[3][1].callback_data, "co:tax:7707083893");
+  const callbacks = body.reply_markup.inline_keyboard.flat().map((b) => b.callback_data);
+  assert.ok(callbacks.includes("co:risk:7707083893"));
+  assert.ok(callbacks.includes("co:debt:7707083893"));
+  assert.ok(callbacks.includes("co:tax:7707083893"));
+});
+
+test("10-digit INN hides Checko buttons when CHECKO_API_KEY is missing", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({
+        suggestions: [{
+          data: {
+            inn: "7707083893",
+            name: { short_with_opf: "ООО Тест" },
+            state: { status: "ACTIVE", registration_date: 1262304000000 }
+          }
+        }]
+      });
+    }
+    return jsonResponse({ ok: true });
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ message: { text: "7707083893", chat: { id: 1 } } }),
+    makeEnv({ CHECKO_API_KEY: "", DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
+  );
+
+  const send = calls.find((c) => c.url.includes("/sendMessage"));
+  const body = JSON.parse(send.options.body);
+  const callbacks = body.reply_markup.inline_keyboard.flat().map((b) => b.callback_data);
+
+  assert.ok(callbacks.includes("co:main:7707083893"));
+  assert.ok(callbacks.includes("co:lnk:7707083893"));
+  assert.ok(!callbacks.includes("co:risk:7707083893"));
+  assert.ok(!callbacks.includes("co:tax:7707083893"));
+  assert.ok(!callbacks.includes("co:own:7707083893"));
 });
 
 test("12-digit INN forces user choice", async () => {
@@ -299,7 +335,7 @@ test("co:risk renders deterministic score and reasons for inactive company", asy
     if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs-messages")) {
       return jsonResponse({ meta: { status: "ok" }, data: [{ id: 1 }] });
     }
-    if (u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/finance") || u.pathname.endsWith("/timeline")) {
+    if (u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/finance") || u.pathname.endsWith("/history")) {
       return jsonResponse({ meta: { status: "ok" }, data: [] });
     }
     throw new Error(`Unexpected URL ${u}`);
@@ -341,7 +377,7 @@ test("co:risk shows low or medium profile for normal company", async () => {
     if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finance")) {
       return jsonResponse({ meta: { status: "ok" }, data: { "2023": { 2110: 5000000, 2400: 400000 } } });
     }
-    if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs-messages") || u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/timeline")) {
+    if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs-messages") || u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/history")) {
       return jsonResponse({ meta: { status: "ok" }, data: [] });
     }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
@@ -435,6 +471,70 @@ test("co:debt aggregates company taxes with enforcements", async () => {
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Недоимка: 5\s000 ₽/);
   assert.match(body.text, /Исполнительных производств: <b>1<\/b>/);
+});
+
+test("co:own shows missing Checko config message without generic crash", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.checko.ru") throw new Error("Should not call Checko without key");
+    return jsonResponse({ ok: true });
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-own-no-key", data: "co:own:7707083893", message: { message_id: 21, chat: { id: 6 } } } }),
+    makeEnv({ CHECKO_API_KEY: "" })
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Checko не настроен/);
+  assert.match(body.text, /Раздел временно недоступен/);
+});
+
+test("co:tax shows missing Checko config message without generic crash", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.checko.ru") throw new Error("Should not call Checko without key");
+    return jsonResponse({ ok: true });
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-tax-no-key", data: "co:tax:7707083893", message: { message_id: 22, chat: { id: 6 } } } }),
+    makeEnv({ CHECKO_API_KEY: "" })
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Checko не настроен/);
+  assert.match(body.text, /Раздел временно недоступен/);
+});
+
+test("co:debt shows section-level temporary unavailable message on Checko failure", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.pathname.endsWith("/company")) {
+      return new Response("<html>bad gateway</html>", { status: 200 });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-debt-unavailable", data: "co:debt:7707083893", message: { message_id: 23, chat: { id: 6 } } } }),
+    makeEnv()
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Раздел временно недоступен/);
+  assert.match(body.text, /Сервис Checko недоступен/);
+  assert.doesNotMatch(body.text, /^⚠️ Ошибка сервиса Checko$/);
 });
 
 test("co:tax distinguishes missing data from zero values", async () => {
