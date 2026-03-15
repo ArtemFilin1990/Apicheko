@@ -881,6 +881,91 @@ test("repeated main card lookup uses DaData KV cache", async () => {
   assert.ok(kv.stats.put >= 1);
 });
 
+test("co:fin shows missing-config state without generic crash when CHECKO_API_KEY is absent", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.checko.ru") throw new Error("Should not call Checko without key");
+    return jsonResponse({ ok: true });
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-fin-no-key", data: "co:fin:7707083893", message: { message_id: 30, chat: { id: 6 } } } }),
+    makeEnv({ CHECKO_API_KEY: "" })
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Checko не настроен/);
+  assert.match(body.text, /Раздел временно недоступен/);
+  assert.ok(!calls.some((c) => c.url.includes("api.checko.ru")));
+});
+
+test("co:fin shows section unavailable on Checko service failure", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.pathname.endsWith("/finance")) return new Response("<html>bad gateway</html>", { status: 200 });
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-fin-fail", data: "co:fin:7707083893", message: { message_id: 31, chat: { id: 6 } } } }),
+    makeEnv()
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Раздел временно недоступен/);
+  assert.match(body.text, /Сервис Checko недоступен/);
+  assert.doesNotMatch(body.text, /^⚠️ Ошибка сервиса Checko$/);
+});
+
+test("co:arb shows missing-config state without generic crash when CHECKO_API_KEY is absent", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.checko.ru") throw new Error("Should not call Checko without key");
+    return jsonResponse({ ok: true });
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-arb-no-key", data: "co:arb:7707083893", message: { message_id: 32, chat: { id: 6 } } } }),
+    makeEnv({ CHECKO_API_KEY: "" })
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Checko не настроен/);
+  assert.match(body.text, /Раздел временно недоступен/);
+  assert.ok(!calls.some((c) => c.url.includes("api.checko.ru")));
+});
+
+test("co:his shows missing-config state without generic crash when CHECKO_API_KEY is absent", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.checko.ru") throw new Error("Should not call Checko without key");
+    return jsonResponse({ ok: true });
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-his-no-key", data: "co:his:7707083893", message: { message_id: 33, chat: { id: 6 } } } }),
+    makeEnv({ CHECKO_API_KEY: "" })
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Checko не настроен/);
+  assert.match(body.text, /Раздел временно недоступен/);
+  assert.ok(!calls.some((c) => c.url.includes("api.checko.ru")));
+});
+
 test("KV get failure does not break flow", async () => {
   const brokenKv = {
     async get() {

@@ -535,7 +535,19 @@ async function buildRiskView(env, id) {
 }
 
 async function buildFinancesView(env, id) {
-  const payload = await checkoRequest(env, "finance", identifierParams(id));
+  if (!isCheckoConfigured(env)) {
+    return buildCheckoMissingConfigView("📈 <b>Финансы</b>", id);
+  }
+
+  let payload;
+  try {
+    payload = await checkoRequest(env, "finance", identifierParams(id));
+  } catch (error) {
+    if (error instanceof CheckoServiceError) {
+      return buildCheckoTemporaryUnavailableView("📈 <b>Финансы</b>", id);
+    }
+    throw error;
+  }
   const rows = payload.data || {};
   const years = getYearsSorted(rows).slice(0, 4);
   if (years.length === 0) {
@@ -561,7 +573,19 @@ ${SECTION_DIVIDER}
 }
 
 async function buildArbitrationView(env, id) {
-  const payload = await checkoRequest(env, "legal-cases", { ...identifierParams(id), sort: "-date", limit: 10 });
+  if (!isCheckoConfigured(env)) {
+    return buildCheckoMissingConfigView("⚖️ <b>Арбитраж</b>", id);
+  }
+
+  let payload;
+  try {
+    payload = await checkoRequest(env, "legal-cases", { ...identifierParams(id), sort: "-date", limit: 10 });
+  } catch (error) {
+    if (error instanceof CheckoServiceError) {
+      return buildCheckoTemporaryUnavailableView("⚖️ <b>Арбитраж</b>", id);
+    }
+    throw error;
+  }
   const items = takeRecords(payload);
   if (items.length === 0) return { text: `⚖️ <b>Арбитраж</b>
 ${SECTION_DIVIDER}
@@ -670,7 +694,19 @@ ${SECTION_DIVIDER}
 }
 
 async function buildHistoryView(env, id) {
-  const payload = await checkoRequest(env, "history", { ...identifierParams(id), limit: 15 });
+  if (!isCheckoConfigured(env)) {
+    return buildCheckoMissingConfigView("🗓 <b>История</b>", id);
+  }
+
+  let payload;
+  try {
+    payload = await checkoRequest(env, "history", { ...identifierParams(id), limit: 15 });
+  } catch (error) {
+    if (error instanceof CheckoServiceError) {
+      return buildCheckoTemporaryUnavailableView("🗓 <b>История</b>", id);
+    }
+    throw error;
+  }
   const items = ensureArray(payload.data).slice(0, 15);
   if (items.length === 0) return { text: `🗓 <b>История</b>
 ${SECTION_DIVIDER}
