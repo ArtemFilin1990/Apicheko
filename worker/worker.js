@@ -403,11 +403,13 @@ async function buildCompanyMainView(env, id) {
   const payload = await checkoRequest(env, "company", identifierParams(id));
   const data = payload.data || {};
   if (!hasIdentity(data)) throw new CheckoNotFoundError();
-  const finances = await safeSectionData(env, "finance", identifierParams(id));
-  const dadataParty = await safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id));
+  const [finances, dadataParty] = await Promise.all([
+    safeSectionData(env, "finance", identifierParams(id)),
+    safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id))
+  ]);
 
   const title = data.НаимСокр || data.НаимПолн || "Компания";
-  const okved = data.ОКВЭД ? `${data.ОКВЭД.Код || "—"} ${data.ОКВЭД.Наим || ""}`.trim() : "—";
+  const okved = formatOkved(data.ОКВЭД);
   const contacts = data.Контакты || {};
   const director = data.Руковод?.[0]?.ФИО || data.Руководители?.[0]?.ФИО || "—";
   const founders = getCompanyFounders(data);
@@ -453,13 +455,16 @@ async function buildCompanySectionView(env, section, id) {
 async function buildRiskView(env, id) {
   const company = await checkoRequest(env, "company", identifierParams(id));
   const data = company.data || {};
-  const finances = await safeSectionData(env, "finance", identifierParams(id));
-  const legal = await safeSectionData(env, "legal-cases", { ...identifierParams(id), sort: "-date", limit: 10 });
-  const fssp = await safeSectionData(env, "enforcements", { ...identifierParams(id), sort: "-date", limit: 10 });
-  const contracts = await safeSectionData(env, "contracts", { ...identifierParams(id), law: 44, role: "supplier", sort: "-date", limit: 10 });
-  const bankruptcy = await safeSectionData(env, "bankruptcy-messages", { ...identifierParams(id), limit: 5 });
-  const fedresurs = await safeSectionData(env, "fedresurs-messages", { ...identifierParams(id), limit: 5 });
-  const dadataParty = await safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id));
+  const baseParams = identifierParams(id);
+  const [finances, legal, fssp, contracts, bankruptcy, fedresurs, dadataParty] = await Promise.all([
+    safeSectionData(env, "finance", baseParams),
+    safeSectionData(env, "legal-cases", { ...baseParams, sort: "-date", limit: 10 }),
+    safeSectionData(env, "enforcements", { ...baseParams, sort: "-date", limit: 10 }),
+    safeSectionData(env, "contracts", { ...baseParams, law: 44, role: "supplier", sort: "-date", limit: 10 }),
+    safeSectionData(env, "bankruptcy-messages", { ...baseParams, limit: 5 }),
+    safeSectionData(env, "fedresurs-messages", { ...baseParams, limit: 5 }),
+    safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id))
+  ]);
 
   const riskResult = calculateCompanyRiskScore({
     companyData: data,
@@ -484,7 +489,7 @@ async function buildFinancesView(env, id) {
     return { text: "📈 <b>Финансы</b>\n──────────────────\n\n📊 Финансовая отчётность не найдена", reply_markup: buildCompanyKeyboard(id) };
   }
 
-  const lines = ["📈 <b>Финансы</b>", "──────────────────"];
+  const lines = startSection("📈 <b>Финансы</b>");
   for (const year of years) {
     const item = rows[year] || {};
     lines.push(`\n📆 <b>${year}</b>`);
@@ -504,7 +509,7 @@ async function buildArbitrationView(env, id) {
   const items = takeRecords(payload);
   if (items.length === 0) return { text: "⚖️ <b>Арбитраж</b>\n──────────────────\n\nАрбитражные дела не найдены", reply_markup: compactSectionKeyboard(id) };
 
-  const lines = ["⚖️ <b>Арбитражные дела</b>", "──────────────────", `\nВсего: <b>${items.length}</b>`];
+  const lines = [...startSection("⚖️ <b>Арбитражные дела</b>"), `\nВсего: <b>${items.length}</b>`];
   items.slice(0, 10).forEach((it) => {
     lines.push(`\n› ${escapeHtml(it.НомерДела || it.Номер || "б/н")}  ${formatDate(it.Дата)}`);
     lines.push(`  🏛 ${escapeHtml(it.Суд || "—")}`);
@@ -519,7 +524,7 @@ async function buildDebtsView(env, id) {
   const payload = await checkoRequest(env, "enforcements", { ...identifierParams(id), sort: "-date", limit: 10 });
   const items = takeRecords(payload);
 
-  const lines = ["💳 <b>Долги</b>", "──────────────────", ""];
+  const lines = [...startSection("💳 <b>Долги</b>"), ""];
   if (taxes && typeof taxes === "object") {
     lines.push("🧾 <b>Налоги</b>");
     lines.push(`› Налоговая задолженность: ${formatTaxMoney(taxes, ["СумНедоим"])}`);
@@ -553,7 +558,7 @@ async function buildContractsView(env, id) {
   const items = [...takeRecords(p44), ...takeRecords(p94), ...takeRecords(p223)];
   if (items.length === 0) return { text: "📋 <b>Контракты</b>\n──────────────────\n\nКонтракты не найдены", reply_markup: compactSectionKeyboard(id) };
 
-  const lines = ["📋 <b>Госконтракты</b>", "──────────────────", `\nВсего: <b>${items.length}</b>`];
+  const lines = [...startSection("📋 <b>Госконтракты</b>"), `\nВсего: <b>${items.length}</b>`];
   items.slice(0, 10).forEach((it) => {
     const contractNumber = firstNonEmpty([it.НомерКонтракта, it.Номер, it.Ид, it.Идентификатор, it.НомерРеестра]);
     lines.push(`\n› Номер: ${escapeHtml(contractNumber || "нет данных")}`);
@@ -569,13 +574,16 @@ async function buildHistoryView(env, id) {
   const items = ensureArray(payload.data).slice(0, 15);
   if (items.length === 0) return { text: "🗓 <b>История</b>\n──────────────────\n\nИстория изменений не найдена", reply_markup: compactSectionKeyboard(id) };
 
-  const lines = ["🗓 <b>История изменений</b>", "──────────────────"];
+  const lines = startSection("🗓 <b>История изменений</b>");
   items.forEach((it, idx) => lines.push(`${idx + 1}.  ${formatDate(it.Дата || it.date)}  —  ${escapeHtml(it.Описание || it.Наим || it.event || "Событие")}`));
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
 }
 
 async function buildConnectionsView(env, id) {
-  const company = await checkoRequest(env, "company", identifierParams(id));
+  const [company, dadataParty] = await Promise.all([
+    checkoRequest(env, "company", identifierParams(id)),
+    safeFindPartyByInnOrOgrn(env, id)
+  ]);
   const data = company.data || {};
   const founderNames = getCompanyFounders(data).map((f) => f.ФИО || f.Наим).filter(Boolean).slice(0, 5);
   const contactPhone = asDisplayText(data.Контакты?.Тел);
@@ -588,11 +596,10 @@ async function buildConnectionsView(env, id) {
     { label: "Связи по email", value: contactEmail }
   ];
 
-  const dadataParty = await safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id));
   const affiliated = await collectAffiliatedCompanies(env, dadataParty, String(data.ИНН || id));
 
   const nonEmptyGroups = groups.filter((g) => hasText(g.value));
-  const lines = ["🔗 <b>Связи</b>", "──────────────────"];
+  const lines = startSection("🔗 <b>Связи</b>");
   if (nonEmptyGroups.length === 0 && affiliated.total === 0) {
     return { text: "🔗 <b>Связи</b>\n──────────────────\n\nСвязи не найдены", reply_markup: compactSectionKeyboard(id) };
   }
@@ -630,7 +637,7 @@ async function buildFoundersView(env, id) {
   const founders = getCompanyFounders(payload.data || {});
   if (founders.length === 0) return { text: "👥 <b>Учредители</b>\n──────────────────\n\nУчредители не найдены", reply_markup: compactSectionKeyboard(id) };
 
-  const lines = ["👥 <b>Учредители</b>", "──────────────────"];
+  const lines = startSection("👥 <b>Учредители</b>");
   founders.forEach((f, idx) => {
     lines.push(`\n${idx + 1}.  <b>${escapeHtml(f.ФИО || f.Наим || "—")}</b>`);
     lines.push(`   Доля  ${f.Доля?.Процент || f.Доля?.Проц || f.ДоляПроц || "—"}%  ·  ${formatFounderAmount(f.Доля?.Сумма, f.ДоляСумма)}`);
@@ -643,7 +650,7 @@ async function buildBranchesView(env, id) {
   const branches = ensureArray(payload.data?.Филиалы || payload.data?.Подразделения || payload.data?.ОбособПодр || payload.data?.Фил);
   if (branches.length === 0) return { text: "🏬 <b>Филиалы</b>\n──────────────────\n\nФилиалы не найдены", reply_markup: compactSectionKeyboard(id) };
 
-  const lines = ["🏬 <b>Филиалы</b>", "──────────────────", `\nВсего: <b>${branches.length}</b>`];
+  const lines = [...startSection("🏬 <b>Филиалы</b>"), `\nВсего: <b>${branches.length}</b>`];
   branches.slice(0, 20).forEach((b, idx) => lines.push(`\n${idx + 1}.  КПП ${escapeHtml(b.КПП || "—")}\n   ${escapeHtml(b.Адрес || b.АдресРФ || "—")}`));
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
 }
@@ -653,12 +660,12 @@ async function buildOkvedView(env, id) {
   const data = payload.data || {};
   const primary = data.ОКВЭД;
   const additional = ensureArray(data.ОКВЭДДоп || data.ДопОКВЭД);
-  const lines = ["🔖 <b>ОКВЭД</b>", "──────────────────"];
-  lines.push(`\n<b>Основной</b>  ${escapeHtml(`${primary?.Код || "—"}  ${primary?.Наим || ""}`.trim())}`);
+  const lines = startSection("🔖 <b>ОКВЭД</b>");
+  lines.push(`\n<b>Основной</b>  ${escapeHtml(formatOkved(primary))}`);
   if (additional.length === 0) lines.push("\nДополнительные: нет данных");
   else {
     lines.push("\n<b>Дополнительные</b>");
-    additional.slice(0, 20).forEach((o) => lines.push(`› ${escapeHtml(`${o.Код || "—"}  ${o.Наим || ""}`.trim())}`));
+    additional.slice(0, 20).forEach((o) => lines.push(`› ${escapeHtml(formatOkved(o))}`));
   }
   if (!primary && additional.length === 0) return { text: "🔖 <b>ОКВЭД</b>\n──────────────────\n\nДанные по ОКВЭД не найдены", reply_markup: compactSectionKeyboard(id) };
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
@@ -670,8 +677,7 @@ async function buildTaxesView(env, id) {
   if (!taxes || typeof taxes !== "object") return { text: "🧾 <b>Налоги</b>\n──────────────────\n\nНалоговые данные не найдены", reply_markup: compactSectionKeyboard(id) };
 
   const lines = [
-    "🧾 <b>Налоги</b>",
-    "──────────────────",
+    ...startSection("🧾 <b>Налоги</b>"),
     "",
     `Итого уплачено  ${formatTaxMoney(taxes, ["СумУпл", "СумНалогов"])}`,
     `Недоимка  ${formatTaxMoney(taxes, ["СумНедоим"])}`,
@@ -690,8 +696,7 @@ async function buildEntrepreneurView(env, id) {
   if (!hasIdentity(data)) throw new CheckoNotFoundError("👔 ИП не найден");
 
   const lines = [
-    "👔 <b>Предприниматель</b>",
-    "──────────────────",
+    ...startSection("👔 <b>Предприниматель</b>"),
     "",
     `<b>${escapeHtml(String(data.ФИО || "—"))}</b>`,
     "",
@@ -699,7 +704,7 @@ async function buildEntrepreneurView(env, id) {
     `ОГРНИП  <code>${escapeHtml(String(data.ОГРНИП || "—"))}</code>`,
     "",
     `📋 <b>${escapeHtml(String(data.Статус?.Наим || "—"))}</b>  ·  ${escapeHtml(formatDate(data.ДатаРег))}`,
-    `⚙️ ${escapeHtml(`${data.ОКВЭД?.Код || "—"}  ${data.ОКВЭД?.Наим || ""}`.trim())}`,
+    `⚙️ ${escapeHtml(formatOkved(data.ОКВЭД))}`,
     `МСП  ${escapeHtml(String(data.РМСП?.Кат || "—"))}`,
     `Риск-маркеры  ${escapeHtml(String(data.Риски?.Уровень || "нет данных"))}`
   ];
@@ -724,8 +729,7 @@ async function buildPersonView(env, id) {
   const founders = ensureArray(data.Учред);
   const ents = ensureArray(data.ИП);
   const lines = [
-    "👤 <b>Физлицо</b>",
-    "──────────────────",
+    ...startSection("👤 <b>Физлицо</b>"),
     "",
     `<b>${escapeHtml(String(data.ФИО || "—"))}</b>`,
     `🪪 ИНН  <code>${escapeHtml(String(data.ИНН || id))}</code>`,
@@ -743,8 +747,7 @@ async function buildBankView(env, bic) {
   if (!Object.keys(data).length) throw new CheckoNotFoundError("🏦 Банк не найден");
 
   const lines = [
-    "🏦 <b>Банк</b>",
-    "──────────────────",
+    ...startSection("🏦 <b>Банк</b>"),
     "",
     `<b>${escapeHtml(String(data.Наим || data.Наименование || "—"))}</b>`,
     data.НаимАнгл ? `<i>${escapeHtml(String(data.НаимАнгл))}</i>` : null,
@@ -1047,22 +1050,24 @@ async function findAffiliatedByInn(env, inn, scope) {
 async function collectAffiliatedCompanies(env, partyData, sourceInn) {
   if (!isDadataConfigured(env) || !sourceInn) return { items: [], total: 0 };
 
-  const seen = new Set([sourceInn]);
-  const items = [];
-
-  for (const { scope, linkType } of [
+  const scopeConfigs = [
     { scope: ["MANAGERS"], linkType: "общий руководитель" },
     { scope: ["FOUNDERS"], linkType: "общий учредитель" }
-  ]) {
-    let suggestions;
-    try {
-      suggestions = await findAffiliatedByInn(env, sourceInn, scope);
-    } catch (error) {
-      if (error instanceof DadataServiceError) continue;
-      throw error;
-    }
+  ];
+  const results = await Promise.allSettled(
+    scopeConfigs.map(({ scope }) => findAffiliatedByInn(env, sourceInn, scope))
+  );
 
-    for (const item of suggestions) {
+  const seen = new Set([sourceInn]);
+  const items = [];
+  for (let i = 0; i < scopeConfigs.length; i++) {
+    const result = results[i];
+    if (result.status === "rejected") {
+      if (result.reason instanceof DadataServiceError) continue;
+      throw result.reason;
+    }
+    const { linkType } = scopeConfigs[i];
+    for (const item of result.value) {
       const inn = String(item?.inn || "").trim();
       if (!inn || seen.has(inn)) continue;
       seen.add(inn);
@@ -1283,6 +1288,15 @@ function buildRiskLevel({ taxDebt = 0, legalCount = 0, fsspCount = 0 }) {
   if (score >= 8) return { icon: "🔴", label: "Высокий" };
   if (score >= 2) return { icon: "🟡", label: "Средний" };
   return { icon: "🟢", label: "Низкий" };
+}
+
+function startSection(title) {
+  return [title, "──────────────────"];
+}
+
+function formatOkved(okved) {
+  if (!okved) return "—";
+  return `${okved.Код || "—"}  ${okved.Наим || ""}`.trim();
 }
 
 function formatDate(value) {
