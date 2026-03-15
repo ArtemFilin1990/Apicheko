@@ -398,7 +398,7 @@ async function buildCompanyMainView(env, id) {
   const payload = await checkoRequest(env, "company", identifierParams(id));
   const data = payload.data || {};
   if (!hasIdentity(data)) throw new CheckoNotFoundError();
-  const finances = await safeSectionData(env, "finances", identifierParams(id));
+  const finances = await safeSectionData(env, "finance", identifierParams(id));
   const dadataParty = await safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id));
 
   const title = data.НаимСокр || data.НаимПолн || "Компания";
@@ -449,12 +449,12 @@ async function buildCompanySectionView(env, section, id) {
 async function buildRiskView(env, id) {
   const company = await checkoRequest(env, "company", identifierParams(id));
   const data = company.data || {};
-  const finances = await safeSectionData(env, "finances", identifierParams(id));
+  const finances = await safeSectionData(env, "finance", identifierParams(id));
   const legal = await safeSectionData(env, "legal-cases", { ...identifierParams(id), sort: "-date", limit: 10 });
   const fssp = await safeSectionData(env, "enforcements", { ...identifierParams(id), sort: "-date", limit: 10 });
   const contracts = await safeSectionData(env, "contracts", { ...identifierParams(id), law: 44, role: "supplier", sort: "-date", limit: 10 });
   const bankruptcy = await safeSectionData(env, "bankruptcy-messages", { ...identifierParams(id), limit: 5 });
-  const fedresurs = await safeSectionData(env, "fedresurs", { ...identifierParams(id), limit: 5 });
+  const fedresurs = await safeSectionData(env, "fedresurs-messages", { ...identifierParams(id), limit: 5 });
   const dadataParty = await safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id));
 
   const riskResult = calculateCompanyRiskScore({
@@ -473,7 +473,7 @@ async function buildRiskView(env, id) {
 }
 
 async function buildFinancesView(env, id) {
-  const payload = await checkoRequest(env, "finances", identifierParams(id));
+  const payload = await checkoRequest(env, "finance", identifierParams(id));
   const rows = payload.data || {};
   const years = Object.keys(rows).filter((y) => /^\d{4}$/.test(y)).sort((a, b) => Number(b) - Number(a)).slice(0, 4);
   if (years.length === 0) {
@@ -541,8 +541,13 @@ async function buildDebtsView(env, id) {
 }
 
 async function buildContractsView(env, id) {
-  const payload = await checkoRequest(env, "contracts", { ...identifierParams(id), law: 44, role: "supplier", sort: "-date", limit: 10 });
-  const items = takeRecords(payload);
+  const baseParams = { ...identifierParams(id), role: "supplier", sort: "-date", limit: 10 };
+  const [p44, p94, p223] = await Promise.all([
+    safeSectionData(env, "contracts", { ...baseParams, law: 44 }),
+    safeSectionData(env, "contracts", { ...baseParams, law: 94 }),
+    safeSectionData(env, "contracts", { ...baseParams, law: 223 }),
+  ]);
+  const items = [...takeRecords(p44), ...takeRecords(p94), ...takeRecords(p223)];
   if (items.length === 0) return { text: "📑 <b>Контракты</b>\n━━━━━━━━━━━━━━━━━━━━\n\nКонтракты не найдены", reply_markup: compactSectionKeyboard(id) };
 
   const lines = ["📑 <b>Госконтракты и закупки</b>", "━━━━━━━━━━━━━━━━━━━━", `\nНайдено: <b>${items.length}</b>`];
@@ -557,7 +562,7 @@ async function buildContractsView(env, id) {
 }
 
 async function buildHistoryView(env, id) {
-  const payload = await checkoRequest(env, "timeline", { ...identifierParams(id), limit: 15 });
+  const payload = await checkoRequest(env, "history", { ...identifierParams(id), limit: 15 });
   const items = ensureArray(payload.data).slice(0, 15);
   if (items.length === 0) return { text: "🕓 <b>История</b>\n━━━━━━━━━━━━━━━━━━━━\n\nИстория изменений не найдена", reply_markup: compactSectionKeyboard(id) };
 
@@ -787,7 +792,7 @@ async function buildEntrepreneurSectionView(env, section, id) {
   }
 
   if (section === "his") {
-    const payload = await checkoRequest(env, "timeline", { ...identifierParams(id), limit: 15 });
+    const payload = await checkoRequest(env, "history", { ...identifierParams(id), limit: 15 });
     const items = ensureArray(payload.data).slice(0, 15);
     const lines = ["🕓 <b>История изменений</b>"];
     if (items.length === 0) lines.push("\nСобытия не найдены.");
@@ -829,7 +834,7 @@ async function detectCriticalRisk(env, id, companyData) {
   }
 
   const bankruptcy = await safeSectionData(env, "bankruptcy-messages", { ...identifierParams(id), limit: 1 });
-  const fedresurs = await safeSectionData(env, "fedresurs", { ...identifierParams(id), limit: 1 });
+  const fedresurs = await safeSectionData(env, "fedresurs-messages", { ...identifierParams(id), limit: 1 });
   if (takeRecords(bankruptcy).length > 0 || takeRecords(fedresurs).length > 0) {
     return "Есть сообщения о банкротстве / ЕФРСБ";
   }
@@ -964,7 +969,7 @@ async function loadCheckoRequest(env, endpoint, params = {}) {
 
   const meta = payload.meta || null;
   const status = String(meta?.status || "").toLowerCase();
-  if (status !== "ok") {
+  if (status !== "ok" && status !== "success") {
     logCheckoFailure(endpoint, response.status, raw, meta);
     const message = String(meta?.message || "").trim() || "no message";
     throw new CheckoServiceError(`meta.status=${status || "missing"}; meta.message=${message}; snippet=${snippet}`);
