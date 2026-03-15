@@ -10,11 +10,12 @@ class CompanyNav(CallbackData, prefix="co"):
 
 def main_menu_keyboard() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="🔎 Поиск по ИНН / ОГРН", callback_data="search:inn")
-    b.button(text="🧾 Поиск по названию", callback_data="search:name")
-    b.button(text="📋 История запросов", callback_data="history")
+    b.button(text="🔎 По ИНН / ОГРН", callback_data="search:inn")
+    b.button(text="🧾 По названию", callback_data="search:name")
+    b.button(text="🏦 По БИК", callback_data="search:bic")
+    b.button(text="✉️ По Email", callback_data="search:email")
     b.button(text="ℹ️ Помощь", callback_data="help")
-    b.adjust(2, 2)
+    b.adjust(2, 2, 1)
     return b.as_markup()
 
 
