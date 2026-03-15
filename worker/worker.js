@@ -1,3 +1,5 @@
+import { calculateCompanyRiskScore, formatRiskResultForTelegram } from "./services/risk-score.js";
+
 const DEFAULT_CHECKO_API_URL = "https://api.checko.ru/v2";
 const DEFAULT_WEBHOOK_PATH = "/webhook";
 const COMPANY_NOT_FOUND_MESSAGE = "❌ Компания не найдена";
@@ -379,54 +381,22 @@ async function buildRiskView(env, id) {
   const legal = await safeSectionData(env, "legal-cases", { ...identifierParams(id), sort: "-date", limit: 10 });
   const fssp = await safeSectionData(env, "enforcements", { ...identifierParams(id), sort: "-date", limit: 10 });
   const contracts = await safeSectionData(env, "contracts", { ...identifierParams(id), law: 44, role: "supplier", sort: "-date", limit: 10 });
+  const bankruptcy = await safeSectionData(env, "bankruptcy-messages", { ...identifierParams(id), limit: 5 });
+  const fedresurs = await safeSectionData(env, "fedresurs", { ...identifierParams(id), limit: 5 });
+  const dadataParty = await safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id));
 
-  const taxes = data.Налоги || {};
-  const criticalRisk = await detectCriticalRisk(env, id, data);
-  const risk = criticalRisk
-    ? { icon: "🔴", label: "Критический" }
-    : buildRiskLevel({ taxDebt: toNum(taxes.СумНедоим), legalCount: takeRecords(legal).length, fsspCount: takeRecords(fssp).length });
-  const hasReorg = Boolean(data.Реорг?.Дата || data.Реорганизация?.Дата || /реорганиз/.test(String(data.Статус?.Наим || "").toLowerCase()));
-  const finSignals = summarizeFinanceSignals(finances.data);
+  const riskResult = calculateCompanyRiskScore({
+    companyData: data,
+    financesData: finances.data,
+    legalData: legal,
+    fsspData: fssp,
+    contractsData: contracts,
+    bankruptcyData: bankruptcy,
+    fedresursData: fedresurs,
+    dadataParty
+  });
 
-  const positives = [];
-  if (data.РМСП?.Кат) positives.push(`• Статус МСП: ${data.РМСП.Кат}`);
-  if (hasTaxField(taxes, "СумНедоим") && toNum(taxes.СумНедоим) === 0) positives.push("• Налоговая недоимка не выявлена");
-  if (!hasReorg) positives.push("• Признаки реорганизации не обнаружены");
-
-  const risks = [
-    `• Статус компании: ${String(data.Статус?.Наим || "нет данных")}`,
-    `• Ликвидация: ${data.Ликвид?.Дата ? `да (${formatDate(data.Ликвид.Дата)})` : "не выявлена"}`,
-    `• Реорганизация: ${hasReorg ? "есть признаки" : "не выявлена"}`,
-    `• Налоговая задолженность: ${formatTaxMoney(taxes, ["СумНедоим"])}`,
-    `• Пени / штрафы: ${formatTaxMoney(taxes, ["СумПениШтр", "СумШтр"])}`,
-    `• ФССП: ${takeRecords(fssp).length}`,
-    `• Арбитраж: ${takeRecords(legal).length}`,
-    `• Контракты (44-ФЗ): ${takeRecords(contracts).length}`,
-    `• Финансовые сигналы: ${finSignals || "нет данных"}`,
-    `• Массовый адрес: ${data.ЮрАдрес?.Массовый ? "да" : "нет данных"}`
-  ];
-
-  const hasRiskSignals = Boolean(criticalRisk) || hasReorg || toNum(taxes.СумНедоим) > 0 || takeRecords(fssp).length > 0 || takeRecords(legal).length > 0 || Boolean(data.ЮрАдрес?.Массовый);
-  if (!hasRiskSignals) {
-    return {
-      text: "⚠️ <b>Риски</b>\n\n✅ Существенных красных флагов не найдено",
-      reply_markup: compactSectionKeyboard(id)
-    };
-  }
-
-  const text = [
-    "⚠️ <b>Риски</b>",
-    criticalRisk ? `\n🔴 <b>КРИТИЧЕСКИЙ РИСК</b>\n${escapeHtml(criticalRisk)}\nТребуется ручная проверка перед сделкой.` : null,
-    `${risk.icon} Общий риск: <b>${risk.label}</b>`,
-    "",
-    "Позитивные факторы:",
-    ...(positives.length ? positives : ["• Не выявлены"]),
-    "",
-    "Факторы риска:",
-    ...risks,
-    "",
-    "Часть источников может быть недоступна, оценка может быть неполной."
-  ].filter(Boolean).join("\n");
+  const text = formatRiskResultForTelegram(riskResult);
   return { text, reply_markup: compactSectionKeyboard(id) };
 }
 

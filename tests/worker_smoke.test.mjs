@@ -6,12 +6,20 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const workerSourcePath = path.resolve("worker/worker.js");
+const riskSourcePath = path.resolve("worker/services/risk-score.js");
 
 async function loadWorkerModule() {
   const source = await fs.readFile(workerSourcePath, "utf8");
-  const tempPath = path.join(os.tmpdir(), `apicheko-worker-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
-  await fs.writeFile(tempPath, source, "utf8");
-  return import(`${pathToFileURL(tempPath).href}?v=${Date.now()}`);
+  const riskSource = await fs.readFile(riskSourcePath, "utf8");
+
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "apicheko-worker-"));
+  const tempWorkerPath = path.join(tempRoot, "worker.mjs");
+  const tempServicesDir = path.join(tempRoot, "services");
+  await fs.mkdir(tempServicesDir, { recursive: true });
+  await fs.writeFile(tempWorkerPath, source, "utf8");
+  await fs.writeFile(path.join(tempServicesDir, "risk-score.js"), riskSource, "utf8");
+
+  return import(`${pathToFileURL(tempWorkerPath).href}?v=${Date.now()}`);
 }
 
 function jsonResponse(data, status = 200) {
@@ -263,17 +271,17 @@ test("main card keeps risk details in risks screen", async () => {
   assert.match(body.text, /Учредитель \(текущий\): Учредитель Тест/);
 });
 
-test("co:risk renders critical block for inactive status", async () => {
+test("co:risk renders deterministic score and reasons for inactive company", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
     if (u.pathname.endsWith("/company")) {
-      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "3525405517", Статус: { Наим: "Не действует" }, Налоги: { СумНедоим: 12 } } });
+      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "3525405517", Статус: { Наим: "Не действует" }, Налоги: { СумНедоим: 1200000 } } });
     }
     if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs")) {
-      return jsonResponse({ meta: { status: "ok" }, data: [] });
+      return jsonResponse({ meta: { status: "ok" }, data: [{ id: 1 }] });
     }
     if (u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/finances")) {
       return jsonResponse({ meta: { status: "ok" }, data: [] });
@@ -288,8 +296,76 @@ test("co:risk renders critical block for inactive status", async () => {
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /КРИТИЧЕСКИЙ РИСК/);
-  assert.match(body.text, /Компания не действует/);
+  assert.match(body.text, /Риск: <b>Критический<\/b>/);
+  assert.match(body.text, /Score: <b>\d+\/100<\/b>/);
+  assert.match(body.text, /Компания недействующая/);
+  assert.match(body.text, /Что делать:/);
+});
+
+test("co:risk shows low or medium profile for normal company", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      return jsonResponse({
+        meta: { status: "ok" },
+        data: {
+          ИНН: "7707083893",
+          Статус: { Наим: "Действующее" },
+          ДатаРег: "2010-01-01",
+          Налоги: { СумНедоим: 0 },
+          Контакты: { Тел: ["+7 495 123-45-67"], Емэйл: ["info@test.ru"] },
+          ЮрАдрес: { Массовый: false }
+        }
+      });
+    }
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
+      return jsonResponse({ meta: { status: "ok" }, data: { "2023": { 2110: 5000000, 2400: 400000 } } });
+    }
+    if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs") || u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts")) {
+      return jsonResponse({ meta: { status: "ok" }, data: [] });
+    }
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({ suggestions: [{ data: { employee_count: 24, invalid: false } }] });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-risk-ok", data: "co:risk:7707083893", message: { message_id: 17, chat: { id: 2 } } } }),
+    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Риск: <b>(Низкий|Средний)<\/b>/);
+  assert.match(body.text, /Плюсы:/);
+  assert.match(body.text, /Что делать:/);
+});
+
+test("co:risk handles partial data without crash", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "api.checko.ru") {
+      return jsonResponse({ meta: { status: "ok" }, data: {} });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-risk-empty", data: "co:risk:7707083893", message: { message_id: 19, chat: { id: 2 } } } }),
+    makeEnv()
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Неизвестно:/);
+  assert.match(body.text, /Score: <b>\d+\/100<\/b>/);
 });
 
 test("co:debt aggregates company taxes with enforcements", async () => {
