@@ -557,14 +557,19 @@ test("co:lnk renders DaData affiliated companies", async () => {
       return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", Руковод: [{ ФИО: "Иванов И.И." }] } });
     }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
-      return jsonResponse({ suggestions: [{ data: { founders: [{ inn: "500000000000" }], managers: [{ inn: "600000000000" }] } }] });
+      return jsonResponse({ suggestions: [] });
     }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
       const payload = JSON.parse(options.body);
-      if (payload.query === "500000000000") {
+      // New logic: query is the company's own INN, scope distinguishes type
+      assert.equal(payload.query, "7707083893");
+      if (Array.isArray(payload.scope) && payload.scope.includes("MANAGERS")) {
         return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Альфа" }, state: { status: "ACTIVE" }, address: { data: { city: "Казань" } } } }] });
       }
-      return jsonResponse({ suggestions: [{ data: { inn: "2222222222", name: { short_with_opf: "ООО Бета" }, state: { status: "ACTIVE" }, okved: "62.01" } }] });
+      if (Array.isArray(payload.scope) && payload.scope.includes("FOUNDERS")) {
+        return jsonResponse({ suggestions: [{ data: { inn: "2222222222", name: { short_with_opf: "ООО Бета" }, state: { status: "ACTIVE" }, okved: "62.01" } }] });
+      }
+      return jsonResponse({ suggestions: [] });
     }
     throw new Error(`Unexpected URL ${u}`);
   };
@@ -578,8 +583,12 @@ test("co:lnk renders DaData affiliated companies", async () => {
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Аффилированные компании/);
   assert.match(body.text, /ООО Альфа/);
-  assert.match(body.text, /через учредителя/);
+  assert.match(body.text, /общий руководитель/);
   assert.match(body.text, /ООО Бета/);
+  assert.match(body.text, /общий учредитель/);
+  // Verify both calls used the company's own INN
+  const affiliatedCalls = calls.filter((c) => c.url.includes("/findAffiliated/party"));
+  assert.equal(affiliatedCalls.length, 2);
 });
 
 test("DaData outage does not break Checko flow", async () => {

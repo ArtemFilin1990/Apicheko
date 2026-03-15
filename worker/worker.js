@@ -1033,26 +1033,18 @@ async function findAffiliatedByInn(env, inn, scope) {
 }
 
 async function collectAffiliatedCompanies(env, partyData, sourceInn) {
-  if (!isDadataConfigured(env) || !partyData) return { items: [], total: 0 };
+  if (!isDadataConfigured(env) || !sourceInn) return { items: [], total: 0 };
 
-  const founders = ensureArray(partyData.founders).map((item) => item?.inn).filter(Boolean);
-  const managers = ensureArray(partyData.managers).map((item) => item?.inn).filter(Boolean);
-  const linked = [
-    ...founders.map((inn) => ({ inn, scope: ["FOUNDERS"], type: "через учредителя" })),
-    ...managers.map((inn) => ({ inn, scope: ["MANAGERS"], type: "через руководителя" }))
-  ];
-  if (!linked.length) return { items: [], total: 0 };
-
-  const seen = new Set();
+  const seen = new Set([sourceInn]);
   const items = [];
-  for (const target of linked) {
-    const key = `${target.type}:${target.inn}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
 
+  for (const { scope, linkType } of [
+    { scope: ["MANAGERS"], linkType: "общий руководитель" },
+    { scope: ["FOUNDERS"], linkType: "общий учредитель" }
+  ]) {
     let suggestions;
     try {
-      suggestions = await findAffiliatedByInn(env, target.inn, target.scope);
+      suggestions = await findAffiliatedByInn(env, sourceInn, scope);
     } catch (error) {
       if (error instanceof DadataServiceError) continue;
       throw error;
@@ -1060,16 +1052,14 @@ async function collectAffiliatedCompanies(env, partyData, sourceInn) {
 
     for (const item of suggestions) {
       const inn = String(item?.inn || "").trim();
-      const ogrn = String(item?.ogrn || "").trim();
-      const uniq = `${inn}:${ogrn}`;
-      if (!inn || inn === sourceInn || seen.has(uniq)) continue;
-      seen.add(uniq);
+      if (!inn || seen.has(inn)) continue;
+      seen.add(inn);
       items.push({
         name: item?.name?.short_with_opf || item?.name?.full_with_opf || "Без названия",
         inn,
         status: item?.state?.status || "",
         okvedOrCity: item?.okved || item?.address?.data?.city || "",
-        linkType: target.type
+        linkType
       });
     }
   }
