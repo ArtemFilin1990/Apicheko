@@ -24,7 +24,7 @@ The upstream skill depends on [`telegram-mcp`](https://github.com/chigwell/teleg
 
 ## Important Local Caution
 
-The original upstream guide uses Claude Code specific registration commands. Do not assume the same CLI command exists in the current environment. Verify the local MCP registration mechanism before telling the user to run any agent-specific command.
+The original upstream guide may use platform-specific registration commands. Do not assume the same CLI command exists in the current environment. Verify the local MCP registration mechanism before telling the user to run any agent-specific command.
 
 ## Session Handling
 

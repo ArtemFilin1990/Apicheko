@@ -557,18 +557,31 @@ async function buildDebtsView(env, id) {
 
 async function buildContractsView(env, id) {
   const baseParams = { ...identifierParams(id), role: "supplier", sort: "-date", limit: 10 };
-  const [p44, p94, p223] = await Promise.all([
-    safeSectionData(env, "contracts", { ...baseParams, law: 44 }),
-    safeSectionData(env, "contracts", { ...baseParams, law: 94 }),
-    safeSectionData(env, "contracts", { ...baseParams, law: 223 }),
+  const settled = await Promise.allSettled([
+    checkoRequest(env, "contracts", { ...baseParams, law: 44 }),
+    checkoRequest(env, "contracts", { ...baseParams, law: 94 }),
+    checkoRequest(env, "contracts", { ...baseParams, law: 223 }),
   ]);
-  const items = [...takeRecords(p44), ...takeRecords(p94), ...takeRecords(p223)];
+
+  const failedCount = settled.filter((entry) => entry.status === "rejected").length;
+  if (failedCount === settled.length) {
+    throw new CheckoServiceError("contracts: all law requests failed");
+  }
+
+  const items = settled
+    .filter((entry) => entry.status === "fulfilled")
+    .flatMap((entry) => takeRecords(entry.value))
+    .sort((a, b) => String(b.Дата || b.ДатаЗакл || "").localeCompare(String(a.Дата || a.ДатаЗакл || "")));
+
   if (items.length === 0) return { text: `📋 <b>Контракты</b>
 ${SECTION_DIVIDER}
 
 Контракты не найдены`, reply_markup: compactSectionKeyboard(id) };
 
-  const lines = [...startSection("📋 <b>Госконтракты</b>"), `\nВсего: <b>${items.length}</b>`];
+  const lines = [...startSection("📋 <b>Госконтракты</b>"), `\nПолучено записей: <b>${items.length}</b>`];
+  if (failedCount > 0) {
+    lines.push("⚠️ Часть данных временно недоступна");
+  }
   items.slice(0, 10).forEach((it) => {
     const contractNumber = firstNonEmpty([it.НомерКонтракта, it.Номер, it.Ид, it.Идентификатор, it.НомерРеестра]);
     lines.push(`\n› Номер: ${escapeHtml(contractNumber || "нет данных")}`);
@@ -609,7 +622,7 @@ async function buildConnectionsView(env, id) {
     { label: "Связи по email", value: contactEmail }
   ];
 
-  const affiliated = await collectAffiliatedCompanies(env, dadataParty, String(data.ИНН || id));
+  const affiliated = await collectAffiliatedCompanies(env, String(data.ИНН || id));
 
   const nonEmptyGroups = groups.filter((g) => hasText(g.value));
   const lines = startSection("🔗 <b>Связи</b>");
@@ -1075,7 +1088,7 @@ async function findAffiliatedByInn(env, inn, scope) {
   return ensureArray(payload.suggestions).map((item) => item?.data).filter(Boolean);
 }
 
-async function collectAffiliatedCompanies(env, partyData, sourceInn) {
+async function collectAffiliatedCompanies(env, sourceInn) {
   if (!isDadataConfigured(env) || !sourceInn) return { items: [], total: 0 };
 
   const scopeConfigs = [
