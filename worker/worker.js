@@ -401,48 +401,97 @@ async function buildSearchResultsView(env, query) {
 }
 
 async function buildCompanyMainView(env, id) {
-  const payload = await checkoRequest(env, "company", identifierParams(id));
-  const data = payload.data || {};
-  if (!hasIdentity(data)) throw new CheckoNotFoundError();
-  const [finances, dadataParty] = await Promise.all([
-    safeSectionData(env, "finance", identifierParams(id)),
-    safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id))
-  ]);
+  if (!isDadataConfigured(env)) {
+    return {
+      text: [
+        "🏢 <b>Карточка компании</b>",
+        SECTION_DIVIDER,
+        "",
+        "DaData не настроен.",
+        "Попросите администратора добавить ключи, чтобы открыть главную карточку."
+      ].join("\n"),
+      reply_markup: buildCompanyKeyboard(id)
+    };
+  }
 
-  const title = data.НаимСокр || data.НаимПолн || "Компания";
-  const okved = formatOkved(data.ОКВЭД);
-  const contacts = data.Контакты || {};
-  const director = data.Руковод?.[0]?.ФИО || data.Руководители?.[0]?.ФИО || "—";
-  const founders = getCompanyFounders(data);
-  const founder = founders[0]?.ФИО || founders[0]?.Наим || "—";
-  const latestRevenue = extractLatestRevenue(finances.data);
-  const decisionSignal = getCompanyDecisionSignal(data, dadataParty);
+  let dadataParty;
+  try {
+    dadataParty = await findPartyByInnOrOgrn(env, id);
+  } catch (error) {
+    if (error instanceof DadataServiceError) {
+      return {
+        text: [
+          "🏢 <b>Карточка компании</b>",
+          SECTION_DIVIDER,
+          "",
+          "DaData временно недоступен.",
+          "Попробуйте открыть карточку чуть позже."
+        ].join("\n"),
+        reply_markup: buildCompanyKeyboard(id)
+      };
+    }
+    throw error;
+  }
+
+  if (!dadataParty) {
+    return {
+      text: [
+        "🏢 <b>Карточка компании</b>",
+        SECTION_DIVIDER,
+        "",
+        "Компания не найдена в DaData.",
+        "Проверьте ИНН/ОГРН и повторите запрос."
+      ].join("\n"),
+      reply_markup: buildCompanyKeyboard(id)
+    };
+  }
+
+  const title = dadataParty.name?.short_with_opf || dadataParty.name?.full_with_opf || "Компания";
+  const decisionSignal = getDadataDecisionSignal(dadataParty);
+  const subtitle = getDadataSubtitle(dadataParty);
+  const founders = ensureArray(dadataParty.founders);
+  const founderPreview = founders
+    .slice(0, 2)
+    .map((item) => item?.name || "")
+    .filter(Boolean);
+  const phones = formatContactList(dadataParty.phones, 2);
+  const emails = formatContactList(dadataParty.emails, 2);
 
   const lines = [
     `🏢 <b>${escapeHtml(title)}</b>`,
     SECTION_DIVIDER,
     "",
     `🎯 <b>${escapeHtml(decisionSignal)}</b>`,
-    `📋 Статус: <b>${escapeHtml(String(data.Статус?.Наим || "—"))}</b>`,
-    `🗓 Регистрация: ${escapeHtml(formatDate(data.ДатаРег))}`,
-    data.НаимПолн && data.НаимПолн !== title ? `<i>${escapeHtml(data.НаимПолн)}</i>` : null,
+    subtitle ? `🧭 ${escapeHtml(subtitle)}` : null,
+    dadataParty.name?.full_with_opf && dadataParty.name?.full_with_opf !== title ? `<i>${escapeHtml(dadataParty.name.full_with_opf)}</i>` : null,
     "",
     "🪪 <b>Ключевые реквизиты</b>",
-    `ИНН  <code>${escapeHtml(String(data.ИНН || id))}</code>`,
-    `ОГРН  <code>${escapeHtml(String(data.ОГРН || "—"))}</code>`,
-    data.КПП ? `КПП  <code>${escapeHtml(String(data.КПП))}</code>` : null,
-    `ОКВЭД  ${escapeHtml(okved)}`,
-    `📊 Выручка (последний год): ${escapeHtml(latestRevenue)}`,
-    data.УстКап?.Сумма ? `🏦 Уставный капитал: ${escapeHtml(formatMoney(data.УстКап.Сумма))}` : null,
+    `ИНН  <code>${escapeHtml(String(dadataParty.inn || id))}</code>`,
+    `ОГРН  <code>${escapeHtml(String(dadataParty.ogrn || "—"))}</code>`,
+    dadataParty.kpp ? `КПП  <code>${escapeHtml(String(dadataParty.kpp))}</code>` : null,
+    `Регистрация  ${escapeHtml(formatDateFromMsOrIso(dadataParty.state?.registration_date))}`,
     "",
-    "👤 <b>Операционная информация</b>",
-    `📍 ${escapeHtml(String(data.ЮрАдрес?.АдресРФ || "—"))}`,
-    `👤 Руководитель  ${escapeHtml(director)}`,
-    `Учредитель (текущий): ${escapeHtml(founder)}`,
-    contacts.Тел ? `📞 ${escapeHtml(valueAsText(contacts.Тел))}` : null,
-    contacts.Емэйл ? `✉️ ${escapeHtml(valueAsText(contacts.Емэйл))}` : null,
-    contacts.ВебСайт ? `🌐 ${escapeHtml(valueAsText(contacts.ВебСайт))}` : null,
-    ...buildDadataMainLines(dadataParty)
+    "🧩 <b>Профиль</b>",
+    dadataParty.okved ? `ОКВЭД  ${escapeHtml(String(dadataParty.okved))}` : null,
+    dadataParty.opf?.full ? `Форма  ${escapeHtml(String(dadataParty.opf.full))}` : null,
+    dadataParty.branch_count !== undefined ? `Филиалы  ${escapeHtml(String(dadataParty.branch_count))}` : null,
+    dadataParty.employee_count !== undefined ? `Сотрудники  ${escapeHtml(String(dadataParty.employee_count))}` : null,
+    "",
+    "💹 <b>Финансовый контур</b>",
+    dadataParty.finance?.income ? `Доход  ${escapeHtml(formatMoney(dadataParty.finance.income))}` : null,
+    dadataParty.finance?.expense ? `Расход  ${escapeHtml(formatMoney(dadataParty.finance.expense))}` : null,
+    "",
+    "👤 <b>Управление</b>",
+    dadataParty.management?.name ? `Руководитель  ${escapeHtml(String(dadataParty.management.name))}` : null,
+    dadataParty.management?.post ? `Должность  ${escapeHtml(String(dadataParty.management.post))}` : null,
+    founderPreview.length > 0 ? `Учредители  ${escapeHtml(founderPreview.join("; "))}` : null,
+    founders.length > 2 ? `Ещё учредителей: ${escapeHtml(String(founders.length - 2))}` : null,
+    "",
+    "📍 <b>Контакты и адрес</b>",
+    dadataParty.address?.value ? `${escapeHtml(String(dadataParty.address.value))}` : null,
+    phones ? `📞 ${escapeHtml(phones)}` : null,
+    emails ? `✉️ ${escapeHtml(emails)}` : null,
+    dadataParty.invalid ? "⚠️ Адрес требует проверки" : null
   ].filter(Boolean);
 
   return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(id) };
@@ -936,14 +985,21 @@ async function detectCriticalRisk(env, id, companyData) {
 
 
 
-function getCompanyDecisionSignal(data, dadataParty) {
-  const statusText = String(data?.Статус?.Наим || "").toLowerCase();
-  if (/не\s*действ/.test(statusText)) return "Компания не действует";
-  if (/ликвидац/.test(statusText) || data?.Ликвид?.Дата) return "Есть признаки ликвидации";
-  if (/банкрот/.test(statusText)) return "Есть риск банкротства";
-  if (dadataParty?.invalid) return "Требует проверки: адрес недостоверен";
-  if (/действ/.test(statusText)) return "Статус стабильный: компания действует";
-  return "Требуется ручная проверка статуса";
+function getDadataDecisionSignal(partyData) {
+  const status = String(partyData?.state?.status || "").toLowerCase();
+  if (partyData?.state?.liquidation_date || /liquidat|ликвид/.test(status)) return "Есть признаки прекращения деятельности";
+  if (partyData?.invalid) return "Требует проверки адреса";
+  if (status === "active" || /active|действ/.test(status)) return "Статус стабильный";
+  if (!status) return "Нужна дополнительная проверка";
+  return "Проверьте актуальность статуса";
+}
+
+function getDadataSubtitle(partyData) {
+  const status = String(partyData?.state?.status || "").trim();
+  const actualityDate = formatDateFromMsOrIso(partyData?.state?.actuality_date);
+  const parts = [status ? `Статус: ${status}` : "", actualityDate !== "—" ? `Актуальность: ${actualityDate}` : ""]
+    .filter(Boolean);
+  return parts.join(" · ");
 }
 
 function firstExistingTaxValue(taxes, keys) {
@@ -1433,6 +1489,12 @@ function formatDate(value) {
   const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (m) return `${m[3]}.${m[2]}.${m[1]}`;
   return String(value);
+}
+
+function formatDateFromMsOrIso(value) {
+  if (!value && value !== 0) return "—";
+  if (typeof value === "number") return formatDate(new Date(value).toISOString());
+  return formatDate(value);
 }
 
 function formatMoney(value) {
