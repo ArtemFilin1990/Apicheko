@@ -496,7 +496,15 @@ async function buildRiskView(env, id) {
     return buildCheckoMissingConfigView("🔎 <b>Риски</b>", id);
   }
 
-  const company = await checkoRequest(env, "company", identifierParams(id));
+  let company;
+  try {
+    company = await checkoRequest(env, "company", identifierParams(id));
+  } catch (error) {
+    if (error instanceof CheckoServiceError) {
+      return buildCheckoTemporaryUnavailableView("🔎 <b>Риски</b>", id);
+    }
+    throw error;
+  }
   const data = company.data || {};
   const baseParams = identifierParams(id);
   const [finances, legal, fssp, contracts, history, bankruptcy, fedresurs, dadataParty] = await Promise.all([

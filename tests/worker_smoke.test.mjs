@@ -220,7 +220,7 @@ test("co:fin uses /finance and shows empty-state without service error", async (
   assert.match(body.text, /Финансовая отч[её]тность не найдена/);
 });
 
-test("Checko non-JSON response returns service error in co:risk", async () => {
+test("Checko non-JSON response shows section unavailable for co:risk", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const u = new URL(String(url));
@@ -238,10 +238,12 @@ test("Checko non-JSON response returns service error in co:risk", async () => {
   );
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.equal(body.text, "⚠️ Ошибка сервиса Checko");
+  assert.match(body.text, /Раздел временно недоступен/);
+  assert.match(body.text, /Сервис Checko недоступен/);
+  assert.doesNotMatch(body.text, /^⚠️ Ошибка сервиса Checko$/);
 });
 
-test("Checko payload without meta.status is treated as service error in co:risk", async () => {
+test("Checko payload without meta.status shows section unavailable for co:risk", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const u = new URL(String(url));
@@ -259,7 +261,9 @@ test("Checko payload without meta.status is treated as service error in co:risk"
   );
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.equal(body.text, "⚠️ Ошибка сервиса Checko");
+  assert.match(body.text, /Раздел временно недоступен/);
+  assert.match(body.text, /Сервис Checko недоступен/);
+  assert.doesNotMatch(body.text, /^⚠️ Ошибка сервиса Checko$/);
 });
 
 test("search by name calls /search", async () => {
