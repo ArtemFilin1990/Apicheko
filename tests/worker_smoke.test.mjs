@@ -390,8 +390,8 @@ test("co:debt aggregates company taxes with enforcements", async () => {
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Налоговая задолженность: 5\s000 ₽/);
-  assert.match(body.text, /Исполнительные производства: 1/);
+  assert.match(body.text, /Недоимка: 5\s000 ₽/);
+  assert.match(body.text, /Исполнительных производств: <b>1<\/b>/);
 });
 
 test("co:tax distinguishes missing data from zero values", async () => {
@@ -439,7 +439,7 @@ test("co:ctr renders explicit contract number fallback", async () => {
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Номер: нет данных/);
+  assert.match(body.text, /№ б\/н/);
   assert.doesNotMatch(body.text, /• —/);
 });
 
@@ -469,8 +469,8 @@ test("co:lnk shows only non-empty sections and collapsed empty note", async () =
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Связи по руководителю: Иванов И\.И\./);
-  assert.match(body.text, /Связи по адресу: Москва/);
+  assert.match(body.text, /руководителю: Иванов И\.И\./);
+  assert.match(body.text, /адресу: Москва/);
   assert.match(body.text, /Нет данных по: учредителям, телефону, email/);
   assert.doesNotMatch(body.text, /Связи по телефону:/);
 });
