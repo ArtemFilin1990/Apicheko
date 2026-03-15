@@ -678,58 +678,52 @@ ${SECTION_DIVIDER}
 }
 
 async function buildConnectionsView(env, id) {
-  const [company, dadataParty] = await Promise.all([
-    checkoRequest(env, "company", identifierParams(id)),
-    safeFindPartyByInnOrOgrn(env, id)
-  ]);
-  const data = company.data || {};
-  const founderNames = getCompanyFounders(data).map((f) => f.ФИО || f.Наим).filter(Boolean).slice(0, 5);
-  const contactPhone = asDisplayText(data.Контакты?.Тел);
-  const contactEmail = asDisplayText(data.Контакты?.Емэйл);
-  const groups = [
-    { label: "Связи по руководителю", value: data.Руковод?.[0]?.ФИО },
-    { label: "Связи по учредителям", value: founderNames.join(", ") },
-    { label: "Связи по адресу", value: data.ЮрАдрес?.АдресРФ },
-    { label: "Связи по телефону", value: contactPhone },
-    { label: "Связи по email", value: contactEmail }
-  ];
+  const affiliated = await collectAffiliatedCompanies(env, String(id));
+  if (affiliated.state === "missing_config") {
+    return {
+      text: [
+        "🔗 <b>Связи</b>",
+        SECTION_DIVIDER,
+        "",
+        "Связи недоступны: DaData не настроен.",
+        "Добавьте ключи DaData, чтобы открыть экран аффилированности."
+      ].join("\n"),
+      reply_markup: compactSectionKeyboard(id)
+    };
+  }
+  if (affiliated.state === "unavailable") {
+    return {
+      text: [
+        "🔗 <b>Связи</b>",
+        SECTION_DIVIDER,
+        "",
+        "Сервис аффилированности временно недоступен.",
+        "Попробуйте позже."
+      ].join("\n"),
+      reply_markup: compactSectionKeyboard(id)
+    };
+  }
 
-  const affiliated = await collectAffiliatedCompanies(env, String(data.ИНН || id));
-
-  const nonEmptyGroups = groups.filter((g) => hasText(g.value));
+  const managersCount = affiliated.managers.length;
+  const foundersCount = affiliated.founders.length;
+  const total = affiliated.total;
   const lines = startSection("🔗 <b>Связи</b>");
-  if (nonEmptyGroups.length === 0 && affiliated.total === 0) {
-    return { text: `🔗 <b>Связи</b>
-${SECTION_DIVIDER}
 
-Связи не найдены`, reply_markup: compactSectionKeyboard(id) };
-  }
+  lines.push("", `🎯 <b>${escapeHtml(getAffiliatedDecisionSignal(total, managersCount, foundersCount))}</b>`);
+  lines.push(`Сеть: ${escapeHtml(getAffiliatedNetworkLabel(total))}`);
+  lines.push("", "🧭 <b>Сводка</b>");
+  lines.push(`Через руководителя: <b>${managersCount}</b>`);
+  lines.push(`Через учредителя: <b>${foundersCount}</b>`);
+  lines.push(`Общий объём сети: <b>${total}</b>`);
 
-  lines.push("", `🎯 Найдено типов связей: <b>${nonEmptyGroups.length}</b> из 5`);
-  if (nonEmptyGroups.length > 0) {
-    lines.push("🧩 <b>Локальные сигналы</b>");
-    lines.push(...nonEmptyGroups.map((g) => `• ${g.label.replace("Связи по ", "")}: ${escapeHtml(String(g.value))}`));
-  }
-  const emptyLabels = groups.filter((g) => !hasText(g.value)).map((g) => g.label.replace("Связи по ", ""));
-  if (emptyLabels.length > 0) {
-    lines.push(`• Нет данных по: ${escapeHtml(emptyLabels.join(", "))}`);
+  if (total === 0) {
+    lines.push("", "Аффилированные компании не найдены");
+    return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
   }
 
-  if (affiliated.total > 0) {
-    lines.push("", `🤝 <b>Аффилированные компании</b>  ·  <b>${affiliated.total}</b>`);
-    for (const item of affiliated.items.slice(0, AFFILIATED_LIMIT)) {
-      const statusBadge = item.status === "ACTIVE" ? "✅" : item.status ? `[${escapeHtml(item.status)}]` : "";
-      const postfix = [statusBadge, item.okvedOrCity ? escapeHtml(item.okvedOrCity) : ""].filter(Boolean).join("  ");
-      lines.push(`\n• <b>${escapeHtml(item.name)}</b>  ·  ИНН <code>${escapeHtml(item.inn)}</code>`);
-      lines.push(`  ${escapeHtml(item.linkType)}`);
-      if (postfix) lines.push(`  ${postfix}`);
-    }
-    if (affiliated.total > AFFILIATED_LIMIT) {
-      lines.push(`\n…  и ещё ${affiliated.total - AFFILIATED_LIMIT}`);
-    }
-  } else if (isDadataConfigured(env)) {
-    lines.push("", "🤝 Аффилированные компании не найдены");
-  }
+  lines.push(...buildAffiliatedGroupLines("Через руководителя", affiliated.managers, AFFILIATED_LIMIT));
+  lines.push(...buildAffiliatedGroupLines("Через учредителя", affiliated.founders, AFFILIATED_LIMIT));
+  lines.push("", `Итог: ${escapeHtml(getAffiliatedNetworkLabel(total))}`);
 
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
 }
@@ -1222,40 +1216,79 @@ async function findAffiliatedByInn(env, inn, scope) {
 }
 
 async function collectAffiliatedCompanies(env, sourceInn) {
-  if (!isDadataConfigured(env) || !sourceInn) return { items: [], total: 0 };
+  if (!isDadataConfigured(env) || !sourceInn) return { managers: [], founders: [], total: 0, state: "missing_config" };
 
   const scopeConfigs = [
-    { scope: ["MANAGERS"], linkType: "общий руководитель" },
-    { scope: ["FOUNDERS"], linkType: "общий учредитель" }
+    { scope: ["MANAGERS"], group: "managers" },
+    { scope: ["FOUNDERS"], group: "founders" }
   ];
   const results = await Promise.allSettled(
     scopeConfigs.map(({ scope }) => findAffiliatedByInn(env, sourceInn, scope))
   );
 
-  const seen = new Set([sourceInn]);
-  const items = [];
+  const sourceInnNormalized = String(sourceInn || "").trim();
+  const seen = new Set([sourceInnNormalized]);
+  const managers = [];
+  const founders = [];
+  let unavailableCount = 0;
+
   for (let i = 0; i < scopeConfigs.length; i++) {
     const result = results[i];
     if (result.status === "rejected") {
-      if (result.reason instanceof DadataServiceError) continue;
+      if (result.reason instanceof DadataServiceError) {
+        unavailableCount += 1;
+        continue;
+      }
       throw result.reason;
     }
-    const { linkType } = scopeConfigs[i];
+    const { group } = scopeConfigs[i];
     for (const item of result.value) {
       const inn = String(item?.inn || "").trim();
       if (!inn || seen.has(inn)) continue;
       seen.add(inn);
-      items.push({
+      const normalized = {
         name: item?.name?.short_with_opf || item?.name?.full_with_opf || "Без названия",
         inn,
         status: item?.state?.status || "",
-        okvedOrCity: item?.okved || item?.address?.data?.city || "",
-        linkType
-      });
+        context: item?.okved || item?.address?.data?.city || ""
+      };
+      if (group === "managers") managers.push(normalized);
+      else founders.push(normalized);
     }
   }
 
-  return { items, total: items.length };
+  if (unavailableCount === scopeConfigs.length) {
+    return { managers: [], founders: [], total: 0, state: "unavailable" };
+  }
+
+  return { managers, founders, total: managers.length + founders.length, state: "ok" };
+}
+
+function buildAffiliatedGroupLines(title, items, limit) {
+  if (!items.length) return [];
+  const lines = ["", `<b>${escapeHtml(title)}</b>`];
+  for (const item of items.slice(0, limit)) {
+    const statusText = item.status ? ` · ${escapeHtml(String(item.status))}` : "";
+    const contextText = item.context ? ` · ${escapeHtml(String(item.context))}` : "";
+    lines.push(`• <b>${escapeHtml(item.name)}</b>  ·  ИНН <code>${escapeHtml(item.inn)}</code>${statusText}${contextText}`);
+  }
+  if (items.length > limit) {
+    lines.push(`… и ещё ${items.length - limit}`);
+  }
+  return lines;
+}
+
+function getAffiliatedNetworkLabel(total) {
+  if (total === 0) return "Аффилированность не обнаружена";
+  if (total <= 3) return "Слабая сеть связей";
+  if (total <= 8) return "Умеренная сеть связей";
+  return "Плотная сеть связей";
+}
+
+function getAffiliatedDecisionSignal(total, managersCount, foundersCount) {
+  if (total === 0) return "Критичных признаков аффилированности не найдено";
+  if (managersCount > 0 && foundersCount > 0 && total >= 4) return "Требует ручного анализа структуры";
+  return "Сеть связей ограниченная";
 }
 
 function normalizeEmailSuggestion(payload) {

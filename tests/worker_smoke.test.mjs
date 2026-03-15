@@ -486,22 +486,15 @@ test("co:ctr renders explicit contract number fallback", async () => {
   assert.doesNotMatch(body.text, /• —/);
 });
 
-test("co:lnk shows only non-empty sections and collapsed empty note", async () => {
+test("co:lnk shows missing-config state without Checko dependency", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
-    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.pathname.endsWith("/company")) {
-      return jsonResponse({
-        meta: { status: "ok" },
-        data: {
-          ИНН: "7707083893",
-          Руковод: [{ ФИО: "Иванов И.И." }],
-          ЮрАдрес: { АдресРФ: "Москва" }
-        }
-      });
+    if (u.hostname === "api.checko.ru") {
+      throw new Error("co:lnk must not call Checko");
     }
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
     throw new Error(`Unexpected URL ${u}`);
   };
 
@@ -512,10 +505,8 @@ test("co:lnk shows only non-empty sections and collapsed empty note", async () =
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /руководителю: Иванов И\.И\./);
-  assert.match(body.text, /адресу: Москва/);
-  assert.match(body.text, /Нет данных по: учредителям, телефону, email/);
-  assert.doesNotMatch(body.text, /Связи по телефону:/);
+  assert.match(body.text, /DaData не настроен/);
+  assert.ok(!calls.some((c) => c.url.includes("api.checko.ru")));
 });
 
 test("search:email callback opens email hint screen", async () => {
@@ -592,15 +583,8 @@ test("co:lnk renders DaData affiliated companies", async () => {
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
-      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", Руковод: [{ ФИО: "Иванов И.И." }] } });
-    }
-    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
-      return jsonResponse({ suggestions: [] });
-    }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
       const payload = JSON.parse(options.body);
-      // New logic: query is the company's own INN, scope distinguishes type
       assert.equal(payload.query, "7707083893");
       if (Array.isArray(payload.scope) && payload.scope.includes("MANAGERS")) {
         return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Альфа" }, state: { status: "ACTIVE" }, address: { data: { city: "Казань" } } } }] });
@@ -620,14 +604,59 @@ test("co:lnk renders DaData affiliated companies", async () => {
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Аффилированные компании/);
+  assert.match(body.text, /Сводка/);
+  assert.match(body.text, /Через руководителя/);
+  assert.match(body.text, /Через учредителя/);
   assert.match(body.text, /ООО Альфа/);
-  assert.match(body.text, /общий руководитель/);
   assert.match(body.text, /ООО Бета/);
-  assert.match(body.text, /общий учредитель/);
-  // Verify both calls used the company's own INN
+  assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/company")));
   const affiliatedCalls = calls.filter((c) => c.url.includes("/findAffiliated/party"));
   assert.equal(affiliatedCalls.length, 2);
+});
+
+test("co:lnk renders no-affiliations complete screen", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
+      return jsonResponse({ suggestions: [] });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-lnk-empty", data: "co:lnk:7707083893", message: { message_id: 9, chat: { id: 3 } } } }),
+    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Аффилированные компании не найдены/);
+  assert.match(body.text, /Аффилированность не обнаружена/);
+});
+
+test("co:lnk renders service-state when DaData affiliated is unavailable", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
+      return new Response("upstream failed", { status: 502 });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-lnk-unavailable", data: "co:lnk:7707083893", message: { message_id: 9, chat: { id: 3 } } } }),
+    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /временно недоступен/);
 });
 
 test("DaData outage renders graceful service-state in main card", async () => {
