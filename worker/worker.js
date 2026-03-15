@@ -399,7 +399,7 @@ async function buildCompanyMainView(env, id) {
         "DaData не настроен.",
         "Попросите администратора добавить ключи, чтобы открыть главную карточку."
       ].join("\n"),
-      reply_markup: buildCompanyKeyboard(id)
+      reply_markup: buildCompanyKeyboard(id, env)
     };
   }
 
@@ -416,7 +416,7 @@ async function buildCompanyMainView(env, id) {
           "DaData временно недоступен.",
           "Попробуйте открыть карточку чуть позже."
         ].join("\n"),
-        reply_markup: buildCompanyKeyboard(id)
+        reply_markup: buildCompanyKeyboard(id, env)
       };
     }
     throw error;
@@ -431,7 +431,7 @@ async function buildCompanyMainView(env, id) {
         "Компания не найдена в DaData.",
         "Проверьте ИНН/ОГРН и повторите запрос."
       ].join("\n"),
-      reply_markup: buildCompanyKeyboard(id)
+      reply_markup: buildCompanyKeyboard(id, env)
     };
   }
 
@@ -483,7 +483,7 @@ async function buildCompanyMainView(env, id) {
     dadataParty.invalid ? "⚠️ Адрес требует проверки" : null
   ].filter(Boolean);
 
-  return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(id) };
+  return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(id, env) };
 }
 
 async function buildCompanySectionView(env, section, id) {
@@ -492,6 +492,10 @@ async function buildCompanySectionView(env, section, id) {
 }
 
 async function buildRiskView(env, id) {
+  if (!isCheckoConfigured(env)) {
+    return buildCheckoMissingConfigView("🔎 <b>Риски</b>", id);
+  }
+
   const company = await checkoRequest(env, "company", identifierParams(id));
   const data = company.data || {};
   const baseParams = identifierParams(id);
@@ -500,7 +504,7 @@ async function buildRiskView(env, id) {
     safeSectionData(env, "legal-cases", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "enforcements", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "contracts", { ...baseParams, law: 44, role: "supplier", sort: "-date", limit: 10 }),
-    safeSectionData(env, "timeline", { ...baseParams, sort: "-date", limit: 10 }),
+    safeSectionData(env, "history", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "bankruptcy-messages", { ...baseParams, limit: 5 }),
     safeSectionData(env, "fedresurs-messages", { ...baseParams, limit: 5 }),
     safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id))
@@ -530,7 +534,7 @@ async function buildFinancesView(env, id) {
     return { text: `📈 <b>Финансы</b>
 ${SECTION_DIVIDER}
 
-📊 Финансовая отчётность не найдена`, reply_markup: buildCompanyKeyboard(id) };
+📊 Финансовая отчётность не найдена`, reply_markup: buildCompanyKeyboard(id, env) };
   }
 
   const lines = startSection("📈 <b>Финансы</b>");
@@ -566,9 +570,23 @@ ${SECTION_DIVIDER}
 }
 
 async function buildDebtsView(env, id) {
-  const company = await checkoRequest(env, "company", identifierParams(id));
+  if (!isCheckoConfigured(env)) {
+    return buildCheckoMissingConfigView("💳 <b>Долги</b>", id);
+  }
+
+  let company;
+  let payload;
+  try {
+    company = await checkoRequest(env, "company", identifierParams(id));
+    payload = await checkoRequest(env, "enforcements", { ...identifierParams(id), sort: "-date", limit: 10 });
+  } catch (error) {
+    if (error instanceof CheckoServiceError) {
+      return buildCheckoTemporaryUnavailableView("💳 <b>Долги</b>", id);
+    }
+    throw error;
+  }
+
   const taxes = company.data?.Налоги;
-  const payload = await checkoRequest(env, "enforcements", { ...identifierParams(id), sort: "-date", limit: 10 });
   const items = takeRecords(payload);
 
   const taxDebt = toNum(firstExistingTaxValue(taxes, ["СумНедоим"]));
@@ -718,7 +736,19 @@ async function buildConnectionsView(env, id) {
 }
 
 async function buildFoundersView(env, id) {
-  const payload = await checkoRequest(env, "company", identifierParams(id));
+  if (!isCheckoConfigured(env)) {
+    return buildCheckoMissingConfigView("👥 <b>Учредители</b>", id);
+  }
+
+  let payload;
+  try {
+    payload = await checkoRequest(env, "company", identifierParams(id));
+  } catch (error) {
+    if (error instanceof CheckoServiceError) {
+      return buildCheckoTemporaryUnavailableView("👥 <b>Учредители</b>", id);
+    }
+    throw error;
+  }
   const founders = getCompanyFounders(payload.data || {});
   if (founders.length === 0) return { text: `👥 <b>Учредители</b>
 ${SECTION_DIVIDER}
@@ -734,7 +764,19 @@ ${SECTION_DIVIDER}
 }
 
 async function buildBranchesView(env, id) {
-  const payload = await checkoRequest(env, "company", identifierParams(id));
+  if (!isCheckoConfigured(env)) {
+    return buildCheckoMissingConfigView("🏬 <b>Филиалы</b>", id);
+  }
+
+  let payload;
+  try {
+    payload = await checkoRequest(env, "company", identifierParams(id));
+  } catch (error) {
+    if (error instanceof CheckoServiceError) {
+      return buildCheckoTemporaryUnavailableView("🏬 <b>Филиалы</b>", id);
+    }
+    throw error;
+  }
   const branches = ensureArray(payload.data?.Филиалы || payload.data?.Подразделения || payload.data?.ОбособПодр || payload.data?.Фил);
   if (branches.length === 0) return { text: `🏬 <b>Филиалы</b>
 ${SECTION_DIVIDER}
@@ -747,7 +789,19 @@ ${SECTION_DIVIDER}
 }
 
 async function buildOkvedView(env, id) {
-  const payload = await checkoRequest(env, "company", identifierParams(id));
+  if (!isCheckoConfigured(env)) {
+    return buildCheckoMissingConfigView("🔖 <b>ОКВЭД</b>", id);
+  }
+
+  let payload;
+  try {
+    payload = await checkoRequest(env, "company", identifierParams(id));
+  } catch (error) {
+    if (error instanceof CheckoServiceError) {
+      return buildCheckoTemporaryUnavailableView("🔖 <b>ОКВЭД</b>", id);
+    }
+    throw error;
+  }
   const data = payload.data || {};
   const primary = data.ОКВЭД;
   const additional = ensureArray(data.ОКВЭДДоп || data.ДопОКВЭД);
@@ -766,7 +820,19 @@ ${SECTION_DIVIDER}
 }
 
 async function buildTaxesView(env, id) {
-  const payload = await checkoRequest(env, "company", identifierParams(id));
+  if (!isCheckoConfigured(env)) {
+    return buildCheckoMissingConfigView("🧾 <b>Налоги</b>", id);
+  }
+
+  let payload;
+  try {
+    payload = await checkoRequest(env, "company", identifierParams(id));
+  } catch (error) {
+    if (error instanceof CheckoServiceError) {
+      return buildCheckoTemporaryUnavailableView("🧾 <b>Налоги</b>", id);
+    }
+    throw error;
+  }
   const taxes = payload.data?.Налоги;
   if (!taxes || typeof taxes !== "object") return { text: `🧾 <b>Налоги</b>
 ${SECTION_DIVIDER}
@@ -875,16 +941,51 @@ async function sendHtmlMessage(env, chatId, view) {
   });
 }
 
-function buildCompanyKeyboard(id) {
-  return {
-    inline_keyboard: [
+function buildCompanyKeyboard(id, env = {}) {
+  const rows = [];
+  if (isCheckoConfigured(env)) {
+    rows.push(
       [kb("🔎 Риски", `co:risk:${id}`), kb("📈 Финансы", `co:fin:${id}`)],
       [kb("⚖️ Арбитраж", `co:arb:${id}`), kb("💳 Долги", `co:debt:${id}`)],
-      [kb("📋 Контракты", `co:ctr:${id}`), kb("🗓 История", `co:his:${id}`)],
-      [kb("🔗 Связи", `co:lnk:${id}`), kb("🧾 Налоги", `co:tax:${id}`)],
-      [kb("👥 Учредители", `co:own:${id}`), kb("🏬 Филиалы", `co:fil:${id}`), kb("🔖 ОКВЭД", `co:okv:${id}`)],
-      [kb("🏢 Карточка", `co:main:${id}`), kb("🏠 Меню", "menu")]
-    ]
+      [kb("📋 Контракты", `co:ctr:${id}`), kb("🗓 История", `co:his:${id}`)]
+    );
+  }
+
+  rows.push([kb("🔗 Связи", `co:lnk:${id}`)]);
+
+  if (isCheckoConfigured(env)) {
+    rows.push(
+      [kb("🧾 Налоги", `co:tax:${id}`)],
+      [kb("👥 Учредители", `co:own:${id}`), kb("🏬 Филиалы", `co:fil:${id}`), kb("🔖 ОКВЭД", `co:okv:${id}`)]
+    );
+  }
+
+  rows.push([kb("🏢 Карточка", `co:main:${id}`), kb("🏠 Меню", "menu")]);
+
+  return {
+    inline_keyboard: rows
+  };
+}
+
+function buildCheckoMissingConfigView(title, id) {
+  return {
+    text: `${title}
+${SECTION_DIVIDER}
+
+Раздел временно недоступен.
+Checko не настроен. Обратитесь к администратору.`,
+    reply_markup: compactSectionKeyboard(id)
+  };
+}
+
+function buildCheckoTemporaryUnavailableView(title, id) {
+  return {
+    text: `${title}
+${SECTION_DIVIDER}
+
+Раздел временно недоступен.
+Сервис Checko недоступен. Попробуйте позже.`,
+    reply_markup: compactSectionKeyboard(id)
   };
 }
 
@@ -1317,6 +1418,10 @@ function buildDadataMainLines(partyData) {
 
 function isDadataConfigured(env) {
   return Boolean(env.DADATA_API_KEY && env.DADATA_SECRET_KEY);
+}
+
+function isCheckoConfigured(env) {
+  return Boolean(env.CHECKO_API_KEY);
 }
 
 async function dadataPost(env, endpoint, payload) {
