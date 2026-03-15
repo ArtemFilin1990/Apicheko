@@ -74,9 +74,10 @@ class PersonKeyboardTests(unittest.TestCase):
         markup = main_menu_keyboard()
         labels = [btn.text for row in markup.inline_keyboard for btn in row]
 
-        self.assertIn("🔎 Поиск по ИНН / ОГРН", labels)
-        self.assertIn("🧾 Поиск по названию", labels)
-        self.assertIn("📋 История запросов", labels)
+        self.assertIn("🔎 По ИНН / ОГРН", labels)
+        self.assertIn("🧾 По названию", labels)
+        self.assertIn("🏦 По БИК", labels)
+        self.assertIn("✉️ По Email", labels)
         self.assertIn("ℹ️ Помощь", labels)
 
     def test_detail_fetchers_map_does_not_have_person_key(self) -> None:
