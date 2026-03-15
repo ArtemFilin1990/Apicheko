@@ -310,6 +310,8 @@ function safeLength(source) {
   if (Array.isArray(source)) return source.length;
   if (Array.isArray(source?.data)) return source.data.length;
   if (Array.isArray(source?.data?.Записи)) return source.data.Записи.length;
+  if (Array.isArray(source?.data?.cases)) return source.data.cases.length;
+  if (Array.isArray(source?.data?.items)) return source.data.items.length;
   return 0;
 }
 
