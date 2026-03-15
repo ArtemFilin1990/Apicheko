@@ -4,6 +4,16 @@ Telegram-бот для оперативной проверки компаний,
 
 Production runtime: **Cloudflare Worker** (`worker/worker.js`).
 
+## Agent/skill scaffold
+
+Минимальный комплект для локальных ассистентов и аудита изменений:
+
+- `AGENTS.md`
+- `.opencode/agents/review.md`
+- `.opencode/agents/deploy-check.md`
+- `.claude/skills/apicheko-section-fix/SKILL.md`
+- `.claude/skills/apicheko-deploy-audit/SKILL.md`
+
 ## Что поддерживает Worker
 
 - `GET /` — healthcheck.
