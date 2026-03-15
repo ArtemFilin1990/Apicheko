@@ -33,3 +33,6 @@ node_modules/
 
 # Local AI/dev tools
 .codex/
+
+# Local exported archives
+files (*.zip)

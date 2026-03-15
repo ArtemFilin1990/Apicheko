@@ -7,4 +7,5 @@ workers_dev = true
 NODE_ENV = "production"
 CHECKO_API_URL = "https://api.checko.ru/v2"
 WEBHOOK_PATH = "/webhook"
+DADATA_API_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs"
 

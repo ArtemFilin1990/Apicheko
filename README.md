@@ -9,9 +9,9 @@ Production runtime: **Cloudflare Worker** (`worker/worker.js`).
 - `GET /` — healthcheck.
 - `POST /webhook` (или путь из `WEBHOOK_PATH`) — Telegram webhook.
 - Главный экран `/start` в формате «1 сообщение = 1 экран».
-- Поиск по ИНН/ОГРН/ОГРНИП, БИК, названию.
+- Поиск по ИНН/ОГРН/ОГРНИП, БИК, названию и корпоративному email (DaData).
 - Разрешение 12-значного ИНН через выбор: ИП или физлицо.
-- Главная карточка компании + 8 экранов разделов.
+- Главная карточка компании + 8 экранов разделов с мягким DaData enrichment в карточке и связях.
 - Навигация по `editMessageText`, обработка callback через `answerCallbackQuery`.
 - Строгое разделение сервисных ошибок и валидных пустых результатов.
 
@@ -23,6 +23,7 @@ help
 search:inn
 search:name
 search:bic
+search:email
 
 resolve12:entrepreneur:<id>
 resolve12:person:<id>
@@ -91,6 +92,19 @@ Vars (`wrangler.toml`):
 
 - `CHECKO_API_URL=https://api.checko.ru/v2`
 - `WEBHOOK_PATH=/webhook`
+- `DADATA_API_URL=https://suggestions.dadata.ru/suggestions/api/4_1/rs`
+
+DaData Secrets (optional, for email search / enrichment / affiliations):
+
+- `DADATA_API_KEY`
+- `DADATA_SECRET_KEY`
+
+## DaData integration
+
+- Поиск по email использует `POST /findByEmail/company`.
+- Обогащение карточки `co:main` использует `POST /findById/party`.
+- Экран связей `co:lnk` дополнительно использует `POST /findAffiliated/party` по ИНН учредителей/руководителей.
+- При отсутствии DaData ключей или временной ошибке DaData бот продолжает работать через Checko без падения.
 
 ## Локальная проверка
 
