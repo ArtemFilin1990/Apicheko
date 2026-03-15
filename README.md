@@ -93,11 +93,34 @@ Vars (`wrangler.toml`):
 - `CHECKO_API_URL=https://api.checko.ru/v2`
 - `WEBHOOK_PATH=/webhook`
 - `DADATA_API_URL=https://suggestions.dadata.ru/suggestions/api/4_1/rs`
+- `CACHE_BYPASS=0` (установите `1` для отладки без KV)
 
 DaData Secrets (optional, for email search / enrichment / affiliations):
 
 - `DADATA_API_KEY`
 - `DADATA_SECRET_KEY`
+
+KV binding:
+
+- `COMPANY_CACHE` (Cloudflare KV namespace)
+
+
+## KV cache
+
+Кешируются внешние ответы (не Telegram payload):
+
+- Checko `/company` по `company:inn:{inn}` / `company:ogrn:{ogrn}` — TTL 12 часов
+- DaData `findById/party` по `dadata:party:{inn_or_ogrn}` — TTL 12 часов
+- DaData `findAffiliated/party` по `affiliated:{inn}:{scope}` — TTL 24 часа
+- DaData `findByEmail/company` по `email:{normalized_email}` — TTL 6 часов
+
+Как подключить KV:
+
+1. `wrangler kv namespace create COMPANY_CACHE`
+2. `wrangler kv namespace create COMPANY_CACHE --preview`
+3. Подставьте `id` и `preview_id` в `wrangler.toml` для binding `COMPANY_CACHE`.
+
+При ошибках KV worker автоматически деградирует в прямые API-вызовы (без падения user flow).
 
 ## DaData integration
 

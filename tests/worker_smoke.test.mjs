@@ -29,6 +29,25 @@ function makeEnv(overrides = {}) {
   };
 }
 
+
+function makeKvNamespace() {
+  const store = new Map();
+  return {
+    stats: { get: 0, put: 0 },
+    async get(key, type) {
+      this.stats.get += 1;
+      const raw = store.get(key);
+      if (raw === undefined) return null;
+      if (type === "json") return JSON.parse(raw);
+      return raw;
+    },
+    async put(key, value) {
+      this.stats.put += 1;
+      store.set(key, String(value));
+    }
+  };
+}
+
 function makeWebhookRequest(payload, secret = "secret-token") {
   return new Request("https://example.com/webhook", {
     method: "POST",
@@ -513,4 +532,62 @@ test("DaData outage does not break Checko flow", async () => {
   const send = calls.find((c) => c.url.includes("/sendMessage"));
   const body = JSON.parse(send.options.body);
   assert.match(body.text, /ООО Надежность/);
+});
+
+
+test("repeated company lookup uses KV cache", async () => {
+  const kv = makeKvNamespace();
+  let companyCalls = 0;
+
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      companyCalls += 1;
+      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", НаимСокр: "ООО Кеш", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }] } });
+    }
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
+      return jsonResponse({ meta: { status: "ok" }, data: {} });
+    }
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru") return jsonResponse({ suggestions: [] });
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  const env = makeEnv({ COMPANY_CACHE: kv });
+  await worker.fetch(makeWebhookRequest({ message: { text: "7707083893", chat: { id: 1 } } }), env);
+  await worker.fetch(makeWebhookRequest({ message: { text: "7707083893", chat: { id: 1 } } }), env);
+
+  assert.equal(companyCalls, 1);
+  assert.ok(kv.stats.get >= 2);
+  assert.ok(kv.stats.put >= 1);
+});
+
+test("KV get failure does not break flow", async () => {
+  const brokenKv = {
+    async get() {
+      throw new Error("KV unavailable");
+    },
+    async put() {
+      throw new Error("KV unavailable");
+    }
+  };
+
+  globalThis.fetch = async (url) => {
+    const u = new URL(String(url));
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", НаимСокр: "ООО Без KV", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }] } });
+    }
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
+      return jsonResponse({ meta: { status: "ok" }, data: {} });
+    }
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru") return jsonResponse({ suggestions: [] });
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  const response = await worker.fetch(
+    makeWebhookRequest({ message: { text: "7707083893", chat: { id: 1 } } }),
+    makeEnv({ COMPANY_CACHE: brokenKv })
+  );
+  assert.equal(response.status, 200);
 });

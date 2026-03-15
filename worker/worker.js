@@ -5,6 +5,10 @@ const CHECKO_SERVICE_ERROR_MESSAGE = "⚠️ Ошибка сервиса Checko"
 const SEARCH_MIN_QUERY_LENGTH = 4;
 const DEFAULT_DADATA_API_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs";
 const AFFILIATED_LIMIT = 8;
+const CACHE_TTL_COMPANY_SECONDS = 12 * 60 * 60;
+const CACHE_TTL_DADATA_PARTY_SECONDS = 12 * 60 * 60;
+const CACHE_TTL_AFFILIATED_SECONDS = 24 * 60 * 60;
+const CACHE_TTL_EMAIL_SECONDS = 6 * 60 * 60;
 
 const COMPANY_SECTION_TITLES = {
   main: "🏢 Карточка",
@@ -864,6 +868,14 @@ function backMenuKeyboard(backCallback) {
 async function checkoRequest(env, endpoint, params = {}) {
   if (!env.CHECKO_API_KEY) throw new CheckoServiceError("Missing CHECKO_API_KEY");
 
+  const cacheKey = getCheckoCacheKey(endpoint, params);
+  if (cacheKey) {
+    return withCache(env, cacheKey, CACHE_TTL_COMPANY_SECONDS, () => loadCheckoRequest(env, endpoint, params));
+  }
+  return loadCheckoRequest(env, endpoint, params);
+}
+
+async function loadCheckoRequest(env, endpoint, params = {}) {
   const baseUrl = (env.CHECKO_API_URL || DEFAULT_CHECKO_API_URL).replace(/\/$/, "");
   const url = new URL(`${baseUrl}/${endpoint}`);
   url.searchParams.set("key", env.CHECKO_API_KEY);
@@ -921,18 +933,27 @@ async function safeFindPartyByInnOrOgrn(env, query) {
 }
 
 async function findCompanyByEmail(env, email) {
-  const payload = await dadataPost(env, "findByEmail/company", { query: email });
+  const normalizedEmail = normalizeEmail(email);
+  const payload = await withCache(env, `email:${normalizedEmail}`, CACHE_TTL_EMAIL_SECONDS, () =>
+    dadataPost(env, "findByEmail/company", { query: normalizedEmail })
+  );
   return normalizeEmailSuggestion(payload);
 }
 
 async function findPartyByInnOrOgrn(env, query) {
-  const payload = await dadataPost(env, "findById/party", { query });
+  const normalizedQuery = String(query || "").trim();
+  const payload = await withCache(env, `dadata:party:${normalizedQuery}`, CACHE_TTL_DADATA_PARTY_SECONDS, () =>
+    dadataPost(env, "findById/party", { query: normalizedQuery })
+  );
   const suggestions = ensureArray(payload.suggestions);
   return suggestions[0]?.data || null;
 }
 
 async function findAffiliatedByInn(env, inn, scope) {
-  const payload = await dadataPost(env, "findAffiliated/party", { query: inn, scope });
+  const normalizedScope = ensureArray(scope).join(",") || "all";
+  const payload = await withCache(env, `affiliated:${inn}:${normalizedScope}`, CACHE_TTL_AFFILIATED_SECONDS, () =>
+    dadataPost(env, "findAffiliated/party", { query: inn, scope })
+  );
   return ensureArray(payload.suggestions).map((item) => item?.data).filter(Boolean);
 }
 
@@ -1047,6 +1068,57 @@ async function dadataPost(env, endpoint, payload) {
 
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function getCheckoCacheKey(endpoint, params) {
+  if (endpoint !== "company") return null;
+  if (params?.inn) return `company:inn:${params.inn}`;
+  if (params?.ogrn) return `company:ogrn:${params.ogrn}`;
+  return null;
+}
+
+async function getCache(env, key) {
+  if (!env.COMPANY_CACHE || isCacheBypass(env)) return null;
+  try {
+    const cached = await env.COMPANY_CACHE.get(key, "json");
+    if (cached !== null) console.log("cache_hit", { key: summarizeCacheKey(key) });
+    return cached;
+  } catch {
+    console.warn("cache_bypass_on_error", { key: summarizeCacheKey(key), op: "get" });
+    return null;
+  }
+}
+
+async function setCache(env, key, value, ttl) {
+  if (!env.COMPANY_CACHE || isCacheBypass(env)) return;
+  try {
+    const options = ttl ? { expirationTtl: ttl } : undefined;
+    await env.COMPANY_CACHE.put(key, JSON.stringify(value), options);
+  } catch {
+    console.warn("cache_bypass_on_error", { key: summarizeCacheKey(key), op: "put" });
+  }
+}
+
+async function withCache(env, key, ttl, loader) {
+  const cached = await getCache(env, key);
+  if (cached !== null) return cached;
+  console.log("cache_miss", { key: summarizeCacheKey(key) });
+  const fresh = await loader();
+  await setCache(env, key, fresh, ttl);
+  return fresh;
+}
+
+function isCacheBypass(env) {
+  return String(env.CACHE_BYPASS || "") === "1";
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function summarizeCacheKey(key) {
+  if (key.startsWith("email:")) return "email:<masked>";
+  return key;
 }
 
 function buildSnippet(value) {
