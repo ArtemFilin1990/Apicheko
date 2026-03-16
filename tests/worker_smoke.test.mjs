@@ -100,7 +100,8 @@ test("/start sends INN-first screen without buttons", async () => {
   assert.match(body.text, /Отправьте ИНН/);
   assert.match(body.text, /10 цифр — компания/);
   assert.match(body.text, /12 цифр — ИП или физлицо/);
-  assert.equal(body.reply_markup, undefined);
+  assert.equal(body.reply_markup.keyboard[0][0].text, "🔎 Новый поиск");
+  assert.equal(body.reply_markup.keyboard[1][0].text, "📁 История");
 });
 
 test("10-digit INN opens main card from DaData only", async () => {
@@ -147,8 +148,8 @@ test("10-digit INN opens main card from DaData only", async () => {
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/finance")));
   const callbacks = body.reply_markup.inline_keyboard.flat().map((b) => b.callback_data);
   assert.ok(callbacks.includes("co:risk:7707083893"));
-  assert.ok(callbacks.includes("co:debt:7707083893"));
-  assert.ok(callbacks.includes("co:tax:7707083893"));
+  assert.ok(callbacks.includes("co:lnk:7707083893"));
+  assert.ok(callbacks.includes("co:ctr:7707083893"));
 });
 
 test("10-digit INN hides Checko buttons when CHECKO_API_KEY is missing", async () => {
