@@ -145,7 +145,7 @@ test("10-digit INN opens main card from DaData only", async () => {
   assert.match(body.text, /ООО Тест/);
   assert.match(body.text, /Финансовый контур/);
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/company")));
-  assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/finance")));
+  assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/finances")));
   const callbacks = body.reply_markup.inline_keyboard.flat().map((b) => b.callback_data);
   assert.ok(callbacks.includes("co:risk:7707083893"));
   assert.ok(callbacks.includes("co:lnk:7707083893"));
@@ -200,13 +200,13 @@ test("12-digit INN forces user choice", async () => {
   assert.equal(body.reply_markup.inline_keyboard[1][0].callback_data, "resolve12:person:500100732259");
 });
 
-test("co:fin uses /finance and shows empty-state without service error", async () => {
+test("co:fin uses /finances and shows empty-state without service error", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.pathname.endsWith("/finance")) return jsonResponse({ meta: { status: "ok" }, data: {} });
+    if (u.pathname.endsWith("/finances")) return jsonResponse({ meta: { status: "ok" }, data: {} });
     throw new Error(`Unexpected URL ${u}`);
   };
 
@@ -219,6 +219,34 @@ test("co:fin uses /finance and shows empty-state without service error", async (
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Финансовая отч[её]тность не найдена/);
+});
+
+test("co:fin renders bo.nalog.ru report links without object dump", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.pathname.endsWith("/finances")) {
+      return jsonResponse({
+        meta: { status: "ok" },
+        data: { "2023": { 2110: 100000, 2400: 5000, 1600: 90000, 1300: 45000 } },
+        "bo.nalog.ru": { Отчет: { "2023": "https://bo.nalog.ru/2023.pdf", "2022": "https://bo.nalog.ru/2022.pdf" } }
+      });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-fin-reports", data: "co:fin:7707083893", message: { message_id: 40, chat: { id: 6 } } } }),
+    makeEnv()
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Отчётность ФНС:/);
+  assert.match(body.text, /2023: https:\/\/bo\.nalog\.ru\/2023\.pdf/);
+  assert.doesNotMatch(body.text, /\[object Object\]/);
 });
 
 test("Checko non-JSON response shows section unavailable for co:risk", async () => {
@@ -325,7 +353,7 @@ test("main card stays DaData-only while co:risk still uses Checko", async () => 
   const body = JSON.parse(send.options.body);
   assert.match(body.text, /ООО Риск/);
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/company")));
-  assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/finance")));
+  assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/finances")));
 });
 
 test("co:risk renders deterministic score and reasons for inactive company", async () => {
@@ -337,10 +365,10 @@ test("co:risk renders deterministic score and reasons for inactive company", asy
     if (u.pathname.endsWith("/company")) {
       return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "3525405517", Статус: { Наим: "Не действует" }, Налоги: { СумНедоим: 1200000 } } });
     }
-    if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs-messages")) {
+    if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs")) {
       return jsonResponse({ meta: { status: "ok" }, data: [{ id: 1 }] });
     }
-    if (u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/finance") || u.pathname.endsWith("/history")) {
+    if (u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/finances") || u.pathname.endsWith("/history")) {
       return jsonResponse({ meta: { status: "ok" }, data: [] });
     }
     throw new Error(`Unexpected URL ${u}`);
@@ -379,10 +407,10 @@ test("co:risk shows low or medium profile for normal company", async () => {
         }
       });
     }
-    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finance")) {
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
       return jsonResponse({ meta: { status: "ok" }, data: { "2023": { 2110: 5000000, 2400: 400000 } } });
     }
-    if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs-messages") || u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/history")) {
+    if (u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs") || u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/history")) {
       return jsonResponse({ meta: { status: "ok" }, data: [] });
     }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
@@ -656,7 +684,7 @@ test("email lookup opens company card by INN via DaData", async () => {
   assert.match(body.text, /ООО Email Тест/);
   assert.match(body.text, /Ключевые реквизиты/);
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/company")));
-  assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/finance")));
+  assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/finances")));
   assert.ok(calls.some((c) => c.url.includes("/findByEmail/company")));
 });
 
@@ -819,7 +847,7 @@ test("DaData outage renders graceful service-state in main card", async () => {
   const body = JSON.parse(send.options.body);
   assert.match(body.text, /DaData временно недоступен/);
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/company")));
-  assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/finance")));
+  assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/finances")));
 });
 
 test("main card renders DaData missing-credentials state", async () => {
@@ -909,7 +937,7 @@ test("co:fin shows section unavailable on Checko service failure", async () => {
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.pathname.endsWith("/finance")) return new Response("<html>bad gateway</html>", { status: 200 });
+    if (u.pathname.endsWith("/finances")) return new Response("<html>bad gateway</html>", { status: 200 });
     throw new Error(`Unexpected URL ${u}`);
   };
 
@@ -982,7 +1010,7 @@ test("KV get failure does not break flow", async () => {
     if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
       return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", НаимСокр: "ООО Без KV", Статус: { Наим: "Действующее" }, ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" }, ЮрАдрес: { АдресРФ: "Москва" }, Руковод: [{ ФИО: "Иванов И.И." }] } });
     }
-    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finance")) {
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/finances")) {
       return jsonResponse({ meta: { status: "ok" }, data: {} });
     }
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });

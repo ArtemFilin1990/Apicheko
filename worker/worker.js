@@ -574,13 +574,13 @@ async function buildRiskView(env, id) {
   const data = company.data || {};
   const baseParams = identifierParams(id);
   const [finances, legal, fssp, contracts, history, bankruptcy, fedresurs, dadataParty] = await Promise.all([
-    safeSectionData(env, "finance", baseParams),
+    safeSectionData(env, "finances", baseParams),
     safeSectionData(env, "legal-cases", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "enforcements", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "contracts", { ...baseParams, law: 44, role: "supplier", sort: "-date", limit: 10 }),
     safeSectionData(env, "history", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "bankruptcy-messages", { ...baseParams, limit: 5 }),
-    safeSectionData(env, "fedresurs-messages", { ...baseParams, limit: 5 }),
+    safeSectionData(env, "fedresurs", { ...baseParams, limit: 5 }),
     safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id))
   ]);
 
@@ -607,7 +607,7 @@ async function buildFinancesView(env, id) {
 
   let payload;
   try {
-    payload = await checkoRequest(env, "finance", identifierParams(id));
+    payload = await checkoRequest(env, "finances", identifierParams(id));
   } catch (error) {
     if (error instanceof CheckoServiceError) {
       return buildCheckoTemporaryUnavailableView("📈 <b>Финансы</b>", id);
@@ -633,8 +633,11 @@ ${SECTION_DIVIDER}
     lines.push(`📦 Активы: ${formatMoney(item[1600])}`);
     lines.push(`🏦 Капитал: ${formatMoney(item[1300])}`);
   }
-  const pdfUrl = payload["bo.nalog.ru"]?.Отчет;
-  if (pdfUrl) lines.push(`\nОтчётность: ${escapeHtml(String(pdfUrl))}`);
+  const reportLinks = normalizeFinanceReportLinks(payload["bo.nalog.ru"]?.Отчет);
+  if (reportLinks.length > 0) {
+    lines.push("\nОтчётность ФНС:");
+    reportLinks.forEach((link) => lines.push(`• ${escapeHtml(link.label)}: ${escapeHtml(link.url)}`));
+  }
 
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "fin") };
 }
@@ -1237,7 +1240,7 @@ async function detectCriticalRisk(env, id, companyData) {
   }
 
   const bankruptcy = await safeSectionData(env, "bankruptcy-messages", { ...identifierParams(id), limit: 1 });
-  const fedresurs = await safeSectionData(env, "fedresurs-messages", { ...identifierParams(id), limit: 1 });
+  const fedresurs = await safeSectionData(env, "fedresurs", { ...identifierParams(id), limit: 1 });
   if (takeRecords(bankruptcy).length > 0 || takeRecords(fedresurs).length > 0) {
     return "Есть сообщения о банкротстве / ЕФРСБ";
   }
@@ -1585,6 +1588,21 @@ function normalizeEmailSuggestion(payload) {
     ogrn: String(company.ogrn || "").trim(),
     name: company.name || ""
   };
+}
+
+function normalizeFinanceReportLinks(reportPayload) {
+  if (!reportPayload) return [];
+  if (typeof reportPayload === "string") {
+    return [{ label: "Источник", url: reportPayload }];
+  }
+  if (typeof reportPayload !== "object") return [];
+
+  const entries = Object.entries(reportPayload)
+    .filter(([, url]) => typeof url === "string" && url.trim())
+    .map(([year, url]) => ({ label: year, url: url.trim() }))
+    .sort((a, b) => String(b.label).localeCompare(String(a.label)));
+
+  return entries.slice(0, 4);
 }
 
 function buildDadataMainLines(partyData) {
