@@ -105,26 +105,20 @@ async function handleTelegramUpdate(request, env) {
   const chatId = msg.chat.id;
   const text = msg.text.trim();
 
-  if (text === "/start" || text === "/help") {
+  if (text === "/start" || text === "🔎 Новый поиск") {
     const view = buildMainMenuView();
+    await sendHtmlMessage(env, chatId, view);
+    return jsonResponse({ ok: true });
+  }
+
+  if (text === "/help" || text === "💬 Поддержка") {
+    const view = buildHelpView();
     await sendHtmlMessage(env, chatId, view);
     return jsonResponse({ ok: true });
   }
 
   if (text === "📁 История" || text === "/history") {
     const view = await buildLookupHistoryView(env, chatId);
-    await sendHtmlMessage(env, chatId, view);
-    return jsonResponse({ ok: true });
-  }
-
-  if (text === "💬 Поддержка") {
-    const view = buildHelpView();
-    await sendHtmlMessage(env, chatId, view);
-    return jsonResponse({ ok: true });
-  }
-
-  if (text === "🔎 Новый поиск") {
-    const view = buildMainMenuView();
     await sendHtmlMessage(env, chatId, view);
     return jsonResponse({ ok: true });
   }
@@ -244,9 +238,15 @@ function buildMainMenuView() {
       "👋 <b>Проверка контрагента</b>",
       SECTION_DIVIDER,
       "",
-      "Готовим сводку, анализируем риски и связи перед сделкой.",
+      "Помогу быстро понять, с кем вы имеете дело перед сделкой.",
       "",
-      "👇 Отправьте ИНН в чат",
+      "Покажу главное:",
+      "• статус компании",
+      "• риски и долги",
+      "• связи и аффилированность",
+      "• финансовые сигналы",
+      "",
+      "👇 Отправьте ИНН одним сообщением",
       "• 10 цифр — компания",
       "• 12 цифр — ИП или физлицо"
     ].join("\n"),
@@ -257,21 +257,18 @@ function buildMainMenuView() {
 function buildHelpView() {
   return {
     text: [
-      "ℹ️ <b>Как пользоваться</b>",
+      "💬 <b>Как пользоваться</b>",
       SECTION_DIVIDER,
       "",
-      "Отправьте реквизит → откройте карточку → выберите раздел.",
+      "Отправьте ИНН, а бот соберёт короткую сводку по компании:",
+      "• статус",
+      "• риски",
+      "• связи",
+      "• финансы",
       "",
-      "<b>Разделы карточки:</b>",
-      "🔎 Риски — комплексная оценка",
-      "📈 Финансы — отчётность за 4 года",
-      "⚖️ Арбитраж — судебные дела",
-      "💳 Долги — ФССП и задолженности",
-      "📋 Контракты — госзакупки",
-      "🗓 История — изменения в реестре",
-      "🔗 Связи — аффилированные лица",
-      "🧾 Налоги — данные ФНС",
-      "👥 Учредители · 🏬 Филиалы · 🔖 ОКВЭД"
+      "Дальше можно открыть детали по кнопкам внутри карточки.",
+      "",
+      "Если какой-то источник временно недоступен, бот покажет это отдельно и предложит следующий шаг."
     ].join("\n"),
     reply_markup: buildGlobalReplyKeyboard()
   };
@@ -931,8 +928,8 @@ async function buildOkvedView(env, id) {
   if (!primary && additional.length === 0) return { text: `🔖 <b>ОКВЭД</b>
 ${SECTION_DIVIDER}
 
-Данные по ОКВЭД не найдены`, reply_markup: compactSectionKeyboard(id, "fin") };
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "fin") };
+Данные по ОКВЭД не найдены`, reply_markup: compactSectionKeyboard(id, "lnk") };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk") };
 }
 
 async function buildTaxesView(env, id) {
@@ -1062,8 +1059,7 @@ function buildCompanyKeyboard(id, env = {}) {
   if (isCheckoConfigured(env)) {
     rows.push(
       [kb("⚖️ Риски", `co:risk:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
-      [kb("📊 Финансы", `co:fin:${id}`)],
-      [kb("📋 Контракты", `co:ctr:${id}`)]
+      [kb("📊 Финансы", `co:fin:${id}`), kb("📋 Контракты", `co:ctr:${id}`)]
     );
   } else {
     rows.push([kb("🔗 Связи", `co:lnk:${id}`)]);
@@ -1118,6 +1114,7 @@ function compactSectionKeyboard(id, section = "main") {
     return {
       inline_keyboard: [
         [kb("👥 Учредители", `co:own:${id}`), kb("🏢 Филиалы", `co:fil:${id}`)],
+        [kb("🏷 ОКВЭД", `co:okv:${id}`)],
         [kb("🔙 В карточку", `co:main:${id}`)]
       ]
     };
@@ -1125,7 +1122,6 @@ function compactSectionKeyboard(id, section = "main") {
   if (section === "fin") {
     return {
       inline_keyboard: [
-        [kb("🏷 ОКВЭД", `co:okv:${id}`)],
         [kb("🔙 В карточку", `co:main:${id}`)]
       ]
     };
