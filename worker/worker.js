@@ -571,13 +571,13 @@ async function buildRiskView(env, id) {
   const data = company.data || {};
   const baseParams = identifierParams(id);
   const [finances, legal, fssp, contracts, history, bankruptcy, fedresurs, dadataParty] = await Promise.all([
-    safeSectionData(env, "finances", baseParams),
+    safeSectionData(env, "financ", baseParams),
     safeSectionData(env, "legal-cases", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "enforcements", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "contracts", { ...baseParams, law: 44, role: "supplier", sort: "-date", limit: 10 }),
-    safeSectionData(env, "history", { ...baseParams, sort: "-date", limit: 10 }),
+    safeSectionData(env, "timeline", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "bankruptcy-messages", { ...baseParams, limit: 5 }),
-    safeSectionData(env, "fedresurs", { ...baseParams, limit: 5 }),
+    safeSectionData(env, "fedresu", { ...baseParams, limit: 5 }),
     safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id))
   ]);
 
@@ -604,7 +604,7 @@ async function buildFinancesView(env, id) {
 
   let payload;
   try {
-    payload = await checkoRequest(env, "finances", identifierParams(id));
+    payload = await checkoRequest(env, "financ", identifierParams(id));
   } catch (error) {
     if (error instanceof CheckoServiceError) {
       return buildCheckoTemporaryUnavailableView("📈 <b>Финансы</b>", id);
@@ -768,7 +768,7 @@ async function buildHistoryView(env, id) {
 
   let payload;
   try {
-    payload = await checkoRequest(env, "history", { ...identifierParams(id), limit: 15 });
+    payload = await checkoRequest(env, "timeline", { ...identifierParams(id), limit: 15 });
   } catch (error) {
     if (error instanceof CheckoServiceError) {
       return buildCheckoTemporaryUnavailableView("🗓 <b>История</b>", id);
@@ -779,7 +779,8 @@ async function buildHistoryView(env, id) {
   if (items.length === 0) return { text: `🗓 <b>История</b>
 ${SECTION_DIVIDER}
 
-История изменений не найдена`, reply_markup: compactSectionKeyboard(id, "risk") };
+История изменений не найдена.
+Существенных событий за период не зафиксировано.`, reply_markup: compactSectionKeyboard(id, "risk") };
 
   const lines = startSection("🗓 <b>Ключевые изменения</b>");
   lines.push("", `🎯 Показано событий: <b>${items.length}</b>`);
@@ -865,7 +866,8 @@ async function buildFoundersView(env, id) {
   if (founders.length === 0) return { text: `👥 <b>Учредители</b>
 ${SECTION_DIVIDER}
 
-Учредители не найдены`, reply_markup: compactSectionKeyboard(id, "lnk") };
+Учредители не найдены.
+Структура владения по данным источника не раскрыта.`, reply_markup: compactSectionKeyboard(id, "lnk") };
 
   const lines = startSection("👥 <b>Учредители</b>");
   founders.forEach((f, idx) => {
@@ -893,7 +895,8 @@ async function buildBranchesView(env, id) {
   if (branches.length === 0) return { text: `🏬 <b>Филиалы</b>
 ${SECTION_DIVIDER}
 
-Филиалы не найдены`, reply_markup: compactSectionKeyboard(id, "lnk") };
+Филиалы не найдены.
+Вероятно, компания работает без обособленных подразделений.`, reply_markup: compactSectionKeyboard(id, "lnk") };
 
   const lines = [...startSection("🏬 <b>Филиалы</b>"), `\nВсего: <b>${branches.length}</b>`];
   branches.slice(0, 20).forEach((b, idx) => lines.push(`\n${idx + 1}.  КПП ${escapeHtml(b.КПП || "—")}\n   ${escapeHtml(b.Адрес || b.АдресРФ || "—")}`));
@@ -1191,7 +1194,7 @@ async function buildEntrepreneurSectionView(env, section, id) {
   }
 
   if (section === "his") {
-    const payload = await checkoRequest(env, "history", { ...identifierParams(id), limit: 15 });
+    const payload = await checkoRequest(env, "timeline", { ...identifierParams(id), limit: 15 });
     const items = ensureArray(payload.data).slice(0, 15);
     const lines = ["🕓 <b>История ИП</b>", SECTION_DIVIDER];
     if (items.length === 0) lines.push("", "События не найдены");
@@ -1236,7 +1239,7 @@ async function detectCriticalRisk(env, id, companyData) {
   }
 
   const bankruptcy = await safeSectionData(env, "bankruptcy-messages", { ...identifierParams(id), limit: 1 });
-  const fedresurs = await safeSectionData(env, "fedresurs", { ...identifierParams(id), limit: 1 });
+  const fedresurs = await safeSectionData(env, "fedresu", { ...identifierParams(id), limit: 1 });
   if (takeRecords(bankruptcy).length > 0 || takeRecords(fedresurs).length > 0) {
     return "Есть сообщения о банкротстве / ЕФРСБ";
   }

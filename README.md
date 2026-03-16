@@ -60,7 +60,7 @@ co:tax:<id>
 
 - `co:main` → `/company`
 - `co:risk` → `/company`
-- `co:fin` → `/finances`
+- `co:fin` → `/financ`
 - `co:arb` → `/legal-cases`
 - `co:debt` → `/company` + `/enforcements`
 - `co:ctr` → `/contracts`
@@ -154,7 +154,7 @@ KV binding (optional):
 - Модель аддитивная: база `50`, явные штрафы/бонусы + compound-правила, затем `clamp` до диапазона `0..100`.
 - Уровни риска: `0-24 critical`, `25-49 high`, `50-74 medium`, `75-100 low`.
 - Новые группы факторов: `legal`, `financial`, `operational`, `network` + отдельные compound-комбинации.
-- Источники: Checko (company/finance/legal-cases/enforcements/contracts/timeline/bankruptcy/fedresurs) + DaData Maximum (`findById/party`, `findAffiliated/party`).
+- Источники: Checko (company/financ/legal-cases/enforcements/contracts/timeline/bankruptcy/fedresu) + DaData Maximum (`findById/party`, `findAffiliated/party`).
 - Решения в risk-экране: `approve_standard`, `approve_caution`, `manual_review`, `prepay_only`, `reject_or_legal_review`.
 - Это explainable эвристика для первичного due diligence, а не юридическое заключение и не кредитный рейтинг.
 
