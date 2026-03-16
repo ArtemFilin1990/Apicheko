@@ -1,4 +1,5 @@
 const BASE_SCORE = 50;
+const MONTHS_24 = 24;
 
 export const RISK_LEVEL_THRESHOLDS = {
   criticalMax: 24,
@@ -23,12 +24,18 @@ const RULE_POINTS = {
   TAX_PENALTY_HIGH: -8,
   FSSP_SERIOUS: -14,
   FSSP_MEDIUM: -8,
-  LEGAL_LOAD_HIGH: -10,
-  LEGAL_LOAD_MEDIUM: -6,
+  LEGAL_LOAD_HIGH: -8,
+  LEGAL_LOAD_MEDIUM: -5,
   BANKRUPTCY_CONTEXT: -8,
-  NO_ACTIVITY: -10,
+  NO_ACTIVITY: -8,
   LOSS_MAKING: -6,
-  FINANCE_GAP: -4,
+  FINANCE_GAP: -3,
+
+  // litigation
+  DEFENDANT_CASES_24M_LOW: -3,
+  DEFENDANT_CASES_24M_MEDIUM: -8,
+  DEFENDANT_CASES_24M_HIGH: -13,
+  DEFENDANT_CASES_24M_PATTERN: -4,
 
   // operational
   VERY_YOUNG_COMPANY: -10,
@@ -50,6 +57,7 @@ const RULE_POINTS = {
   CMP_AFFILIATIONS_WEAK_OPERATIONS: -8,
   CMP_AFFILIATIONS_DEBT: -8,
   CMP_AFFILIATIONS_YOUNG: -6,
+  CMP_DEFENDANT_DEBT_PRESSURE: -8,
   CMP_STABLE_OLD_CLEAN: 12,
 
   // positives
@@ -81,6 +89,7 @@ export function calculateCompanyRiskScore(input) {
 
   applyLegalRules(factors, metrics);
   applyFinancialRules(factors, metrics);
+  applyLitigationRules(factors, metrics);
   applyOperationalRules(factors, metrics);
   applyNetworkRules(factors, metrics);
   applyCompoundRules(factors, metrics);
@@ -121,28 +130,16 @@ export function formatRiskResultForTelegram(result) {
     "Почему:"
   ];
 
-  if (result.topFactors.length === 0) {
-    lines.push("• Существенных негативных факторов не выявлено");
-  } else {
-    for (const factor of result.topFactors) {
-      lines.push(`• ${factor.title}`);
-    }
-  }
+  if (result.topFactors.length === 0) lines.push("• Существенных негативных факторов не выявлено");
+  else for (const factor of result.topFactors) lines.push(`• ${factor.title}`);
 
   lines.push("", "Плюсы:");
-  if (result.positives.length === 0) {
-    lines.push("• Не выявлены");
-  } else {
-    for (const title of result.positives.slice(0, MAX_TOP_FACTORS)) {
-      lines.push(`• ${title}`);
-    }
-  }
+  if (result.positives.length === 0) lines.push("• Не выявлены");
+  else for (const title of result.positives.slice(0, MAX_TOP_FACTORS)) lines.push(`• ${title}`);
 
   if (result.unknowns.length > 0) {
     lines.push("", "Неизвестно:");
-    for (const title of result.unknowns.slice(0, 3)) {
-      lines.push(`• ${title}`);
-    }
+    for (const title of result.unknowns.slice(0, 3)) lines.push(`• ${title}`);
   }
 
   lines.push("", "Что делать:", `• ${result.recommendation}`);
@@ -187,14 +184,15 @@ export function extractRiskMetrics(input) {
   const taxDebt = toNumOrNull(taxes.СумНедоим);
   const taxPenalties = toNumOrNull(taxes.СумПениШтр);
 
+  const legalCases = extractCaseRows(input?.legalData);
+  const litigation24m = analyzeDefendantCases24m(legalCases);
+
   const hasRevenueSignal = (revenue !== null && revenue > 0) || (dadataIncome !== null && dadataIncome > 0);
   const hasOperationalFootprint = Boolean((employeeCount !== null && employeeCount >= 2) || contactCount > 0 || hasRevenueSignal);
   const hasVerifiedContacts = phonesCount > 0 || emailsCount > 0 || websitesCount > 0;
 
   const scaleMismatch = Boolean(
-    ((revenue !== null && revenue >= 100000000) || (dadataIncome !== null && dadataIncome >= 100000000)) &&
-      employeeCount !== null &&
-      employeeCount <= 1
+    ((revenue !== null && revenue >= 100000000) || (dadataIncome !== null && dadataIncome >= 100000000)) && employeeCount !== null && employeeCount <= 1
   );
 
   const addressInvalid = Boolean(dadata?.invalid || dadata?.address?.data?.invalid);
@@ -209,7 +207,9 @@ export function extractRiskMetrics(input) {
     taxDebt,
     taxPenalties,
     fsspCount: safeLength(input?.fsspData),
-    legalCasesCount: safeLength(input?.legalData),
+    legalCasesCount: legalCases.length,
+    nonDefendantLegalCasesCount: litigation24m.nonDefendantCasesCount,
+    litigation24m,
     contractsCount: safeLength(input?.contractsData),
     revenue,
     netProfit,
@@ -257,22 +257,43 @@ function applyFinancialRules(factors, metrics) {
   if (metrics.fsspCount >= 3) pushFactor(factors, "financial", "FSSP_SERIOUS", "Высокая нагрузка по ФССП", "high", RULE_POINTS.FSSP_SERIOUS, `Производств: ${metrics.fsspCount}`);
   else if (metrics.fsspCount >= 1) pushFactor(factors, "financial", "FSSP_MEDIUM", "Есть исполнительные производства", "medium", RULE_POINTS.FSSP_MEDIUM, `Производств: ${metrics.fsspCount}`);
 
-  if (metrics.legalCasesCount >= 8) pushFactor(factors, "financial", "LEGAL_LOAD_HIGH", "Высокая судебная нагрузка", "medium", RULE_POINTS.LEGAL_LOAD_HIGH, `Дел: ${metrics.legalCasesCount}`);
-  else if (metrics.legalCasesCount >= 3) pushFactor(factors, "financial", "LEGAL_LOAD_MEDIUM", "Есть судебная нагрузка", "low", RULE_POINTS.LEGAL_LOAD_MEDIUM, `Дел: ${metrics.legalCasesCount}`);
+  const genericCasesCount = Math.max(metrics.nonDefendantLegalCasesCount, 0);
+  if (genericCasesCount >= 8) pushFactor(factors, "financial", "LEGAL_LOAD_HIGH", "Высокая судебная нагрузка", "medium", RULE_POINTS.LEGAL_LOAD_HIGH, `Не defendant дел: ${genericCasesCount}`);
+  else if (genericCasesCount >= 3) pushFactor(factors, "financial", "LEGAL_LOAD_MEDIUM", "Есть судебная нагрузка", "low", RULE_POINTS.LEGAL_LOAD_MEDIUM, `Не defendant дел: ${genericCasesCount}`);
 
   if (metrics.bankruptcyCount >= 2) pushFactor(factors, "financial", "BANKRUPTCY_CONTEXT", "Накопленный контекст банкротства", "high", RULE_POINTS.BANKRUPTCY_CONTEXT, `Сообщений: ${metrics.bankruptcyCount}`);
 
-  const revenueValue = preferNumber(metrics.revenue, metrics.dadataIncome);
-  if (revenueValue !== null && revenueValue === 0 && (metrics.ageYears === null || metrics.ageYears >= 1)) {
-    pushFactor(factors, "financial", "NO_ACTIVITY", "Нулевая экономическая активность", "medium", RULE_POINTS.NO_ACTIVITY, "Выручка/доход = 0");
+  const hasFinanceData = metrics.revenue !== null || metrics.dadataIncome !== null;
+  const explicitZeroRevenue = metrics.revenue === 0 || metrics.dadataIncome === 0;
+  if (hasFinanceData && explicitZeroRevenue && (metrics.ageYears === null || metrics.ageYears >= 1)) {
+    pushFactor(factors, "financial", "NO_ACTIVITY", "Нулевая экономическая активность", "medium", RULE_POINTS.NO_ACTIVITY, "Подтверждено revenue/income = 0");
   }
 
   if (metrics.netProfit !== null && metrics.netProfit < 0) {
     pushFactor(factors, "financial", "LOSS_MAKING", "Убыток по последней отчетности", "medium", RULE_POINTS.LOSS_MAKING, `Чистая прибыль: ${metrics.netProfit}`);
   }
 
-  if (metrics.revenue === null && metrics.dadataIncome === null) {
+  if (!hasFinanceData && (metrics.ageYears === null || metrics.ageYears >= 1)) {
     pushFactor(factors, "financial", "FINANCE_GAP", "Недостаточно финансовых данных", "low", RULE_POINTS.FINANCE_GAP, "Нет revenue/income");
+  }
+}
+
+function applyLitigationRules(factors, metrics) {
+  const { highConfidenceCount, mediumConfidenceCount, materialDefendantCount, totalAmount, repeatedPattern, zeroOrMissingOnly, totalConsideredCount } = metrics.litigation24m;
+
+  if (highConfidenceCount >= 6 || materialDefendantCount >= 8 || totalAmount >= 20000000) {
+    pushFactor(factors, "litigation", "DEFENDANT_CASES_24M_HIGH", "Высокая нагрузка по делам ответчика за 24 месяца", "high", RULE_POINTS.DEFENDANT_CASES_24M_HIGH, `high=${highConfidenceCount}, sum=${Math.round(totalAmount)}`);
+  } else if (highConfidenceCount >= 3 || materialDefendantCount >= 4 || totalAmount >= 3000000) {
+    pushFactor(factors, "litigation", "DEFENDANT_CASES_24M_MEDIUM", "Повышенная нагрузка по делам ответчика за 24 месяца", "medium", RULE_POINTS.DEFENDANT_CASES_24M_MEDIUM, `high=${highConfidenceCount}, sum=${Math.round(totalAmount)}`);
+  } else if (totalConsideredCount >= 1) {
+    const points = zeroOrMissingOnly ? -2 : RULE_POINTS.DEFENDANT_CASES_24M_LOW;
+    pushFactor(factors, "litigation", "DEFENDANT_CASES_24M_LOW", "Единичные дела ответчика за 24 месяца", "low", points, `cases=${totalConsideredCount}, sum=${Math.round(totalAmount)}`);
+  }
+
+  if (repeatedPattern && (highConfidenceCount >= 2 || materialDefendantCount >= 3)) {
+    pushFactor(factors, "litigation", "DEFENDANT_CASES_24M_PATTERN", "Повторяемый паттерн дел ответчика", "medium", RULE_POINTS.DEFENDANT_CASES_24M_PATTERN, `Повторы истца/предмета, high=${highConfidenceCount}`);
+  } else if (mediumConfidenceCount > 0 && highConfidenceCount === 0) {
+    pushFactor(factors, "litigation", "DEFENDANT_CASES_24M_LOW", "Есть неоднозначные сигналы роли ответчика", "low", -1, `medium=${mediumConfidenceCount}`);
   }
 }
 
@@ -293,6 +314,9 @@ function applyNetworkRules(factors, metrics) {
 }
 
 function applyCompoundRules(factors, metrics) {
+  const defendantCases = metrics.litigation24m.highConfidenceCount;
+  const debtPressure = (metrics.taxDebt !== null && metrics.taxDebt >= 100000) || metrics.fsspCount >= 1;
+
   if (metrics.isInactive && metrics.hasBankruptcy) {
     pushFactor(factors, "compound", "CMP_INACTIVE_BANKRUPTCY", "Комбинация: недействующая + банкротство", "critical", RULE_POINTS.CMP_INACTIVE_BANKRUPTCY, "inactive + bankruptcy");
   }
@@ -315,6 +339,10 @@ function applyCompoundRules(factors, metrics) {
 
   if (metrics.affiliatedCount >= 12 && metrics.ageYears !== null && metrics.ageYears <= 2) {
     pushFactor(factors, "compound", "CMP_AFFILIATIONS_YOUNG", "Комбинация: много аффилированности + молодая компания", "medium", RULE_POINTS.CMP_AFFILIATIONS_YOUNG, "many affiliations + young");
+  }
+
+  if (defendantCases >= 3 && debtPressure) {
+    pushFactor(factors, "compound", "CMP_DEFENDANT_DEBT_PRESSURE", "Комбинация: дела ответчика + долговое давление", "high", RULE_POINTS.CMP_DEFENDANT_DEBT_PRESSURE, `defendant=${defendantCases}, debt=${debtPressure}`);
   }
 
   if (metrics.ageYears !== null && metrics.ageYears >= 7 && (metrics.taxDebt === 0 || metrics.taxDebt === null) && metrics.fsspCount === 0 && metrics.netProfit !== null && metrics.netProfit > 0) {
@@ -355,10 +383,12 @@ function decisionByScoreAndSignals(score, level, factors, metrics) {
   const hasCritical = factors.some((factor) => factor.points < 0 && factor.severity === "critical");
   const hasHighLegal = factors.some((factor) => factor.group === "legal" && factor.points < 0 && (factor.severity === "critical" || factor.severity === "high"));
   const hasDebtPressure = (metrics.taxDebt !== null && metrics.taxDebt >= 100000) || metrics.fsspCount >= 1;
+  const hasDefendantHigh = factors.some((factor) => factor.code === "DEFENDANT_CASES_24M_HIGH");
+  const hasDefendantPattern = factors.some((factor) => factor.code === "DEFENDANT_CASES_24M_PATTERN");
 
   if (score <= 24 || hasCritical || (metrics.isInactive && metrics.hasBankruptcy)) return "reject_or_legal_review";
-  if (score <= 40 || (hasHighLegal && hasDebtPressure)) return "prepay_only";
-  if (level === "high" || score <= 55) return "manual_review";
+  if (score <= 40 || (hasHighLegal && hasDebtPressure) || (hasDefendantHigh && hasDebtPressure)) return "prepay_only";
+  if (level === "high" || score <= 55 || (hasDefendantPattern && hasDebtPressure)) return "manual_review";
   if (level === "medium") return "approve_caution";
   return "approve_standard";
 }
@@ -409,12 +439,7 @@ function pickLatestFinanceRow(financeRows) {
 }
 
 function safeLength(source) {
-  if (Array.isArray(source)) return source.length;
-  if (Array.isArray(source?.data)) return source.data.length;
-  if (Array.isArray(source?.data?.Записи)) return source.data.Записи.length;
-  if (Array.isArray(source?.data?.cases)) return source.data.cases.length;
-  if (Array.isArray(source?.data?.items)) return source.data.items.length;
-  return 0;
+  return extractCaseRows(source).length;
 }
 
 function normalizeArray(value) {
@@ -423,7 +448,7 @@ function normalizeArray(value) {
 
 function toNumOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
-  const number = Number(value);
+  const number = Number(String(value).replace(/\s|₽|руб\.?/gi, "").replace(/,/g, "."));
   return Number.isFinite(number) ? number : null;
 }
 
@@ -444,4 +469,104 @@ function escapeHtml(value) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function extractCaseRows(source) {
+  if (Array.isArray(source)) return source;
+  if (Array.isArray(source?.data)) return source.data;
+  if (Array.isArray(source?.data?.Записи)) return source.data.Записи;
+  if (Array.isArray(source?.data?.cases)) return source.data.cases;
+  if (Array.isArray(source?.data?.items)) return source.data.items;
+  return [];
+}
+
+function analyzeDefendantCases24m(legalCases) {
+  const recentCases = legalCases.filter((item) => isWithinMonths(item, MONTHS_24));
+
+  let highConfidenceCount = 0;
+  let mediumConfidenceCount = 0;
+  let lowConfidenceCount = 0;
+  let totalAmount = 0;
+  let materialDefendantCount = 0;
+  let zeroOrMissingOnly = true;
+  const claimants = new Map();
+  const subjects = new Map();
+
+  for (const item of recentCases) {
+    const confidence = getDefendantConfidence(item);
+    const amount = extractCaseAmount(item);
+    const claimant = String(item?.Истец || item?.claimant || item?.plaintiff || item?.Кредитор || "").trim().toLowerCase();
+    const subject = String(item?.Категория || item?.Предмет || item?.subject || "").trim().toLowerCase();
+
+    if (confidence === "high") {
+      highConfidenceCount += 1;
+      if (amount !== null) totalAmount += Math.max(amount, 0);
+      if (amount !== null && amount > 0) {
+        materialDefendantCount += 1;
+        zeroOrMissingOnly = false;
+      }
+      if (claimant) claimants.set(claimant, (claimants.get(claimant) || 0) + 1);
+      if (subject) subjects.set(subject, (subjects.get(subject) || 0) + 1);
+    } else if (confidence === "medium") {
+      mediumConfidenceCount += 1;
+    } else {
+      lowConfidenceCount += 1;
+    }
+  }
+
+  const repeatedPattern = hasRepeat(claimants) || hasRepeat(subjects);
+  const totalConsideredCount = highConfidenceCount + (mediumConfidenceCount > 0 ? 1 : 0);
+
+  return {
+    highConfidenceCount,
+    mediumConfidenceCount,
+    lowConfidenceCount,
+    materialDefendantCount,
+    totalAmount,
+    repeatedPattern,
+    zeroOrMissingOnly,
+    totalConsideredCount,
+    nonDefendantCasesCount: Math.max(legalCases.length - highConfidenceCount, 0)
+  };
+}
+
+function getDefendantConfidence(item) {
+  const explicitRole = String(item?.Роль || item?.role || item?.ПроцРоль || item?.role_name || "").toLowerCase();
+  if (/ответчик|defendant|respondent/.test(explicitRole)) return "high";
+
+  const sideRole = String(item?.Сторона || item?.Участник || item?.party_role || "").toLowerCase();
+  if (/ответчик|defendant|respondent/.test(sideRole)) return "high";
+
+  const text = [item?.Описание, item?.description, item?.Содержание, item?.Наим, item?.subject, item?.participants].map((v) => String(v || "").toLowerCase()).join(" ");
+  if (/ответчик|defendant|respondent/.test(text)) return "medium";
+
+  return "low";
+}
+
+function extractCaseAmount(item) {
+  const amount =
+    toNumOrNull(item?.Сумма) ??
+    toNumOrNull(item?.СуммаИска) ??
+    toNumOrNull(item?.amount) ??
+    toNumOrNull(item?.claim_amount) ??
+    toNumOrNull(item?.sum);
+  return amount;
+}
+
+function isWithinMonths(item, months) {
+  const dateValue = item?.Дата || item?.date || item?.date_start || item?.ДатаПоступления;
+  if (!dateValue) return true;
+  const stamp = Date.parse(String(dateValue));
+  if (!Number.isFinite(stamp)) return true;
+  const diffMs = Date.now() - stamp;
+  if (diffMs < 0) return true;
+  const maxMs = months * 30.5 * 24 * 60 * 60 * 1000;
+  return diffMs <= maxMs;
+}
+
+function hasRepeat(map) {
+  for (const count of map.values()) {
+    if (count >= 2) return true;
+  }
+  return false;
 }

@@ -480,6 +480,124 @@ test("risk scoring is deterministic for the same input", async () => {
   const two = riskModule.calculateCompanyRiskScore(payload);
   assert.deepEqual(one, two);
 });
+
+test("single defendant case with zero claim amount has only low litigation penalty", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}-def0`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, Налоги: { СумНедоим: 0 }, ДатаРег: "2015-01-01" },
+    legalData: [{ role: "defendant", amount: 0, date: new Date().toISOString() }],
+    fsspData: [],
+    bankruptcyData: [],
+    fedresursData: []
+  });
+
+  const defendantLow = result.factors.find((f) => f.code === "DEFENDANT_CASES_24M_LOW");
+  assert.ok(defendantLow);
+  assert.ok(defendantLow.points >= -3);
+  assert.equal(result.factors.some((f) => f.code === "DEFENDANT_CASES_24M_HIGH"), false);
+});
+
+test("ambiguous role does not apply defendant penalties", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}-amb`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2012-01-01" },
+    legalData: [{ role: "third party", subject: "спор", amount: 500000 }],
+    fsspData: [],
+    bankruptcyData: [],
+    fedresursData: []
+  });
+  assert.equal(result.factors.some((f) => f.code.startsWith("DEFENDANT_CASES_24M")), false);
+});
+
+test("3+ confirmed defendant cases triggers medium or high litigation penalty", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}-def3`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2013-01-01" },
+    legalData: [
+      { role: "defendant", amount: 1000000, date: new Date().toISOString() },
+      { role: "Ответчик", amount: 1200000, date: new Date().toISOString() },
+      { role: "respondent", amount: 900000, date: new Date().toISOString() }
+    ],
+    fsspData: [],
+    bankruptcyData: [],
+    fedresursData: []
+  });
+  assert.ok(result.factors.some((f) => f.code === "DEFENDANT_CASES_24M_MEDIUM" || f.code === "DEFENDANT_CASES_24M_HIGH"));
+});
+
+test("6+ confirmed defendant cases with debt pressure pushes to prepay_only or stronger", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}-def6`);
+  const cases = Array.from({ length: 6 }, () => ({ role: "defendant", amount: 1500000, date: new Date().toISOString() }));
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, Налоги: { СумНедоим: 250000 }, ДатаРег: "2010-01-01" },
+    legalData: cases,
+    fsspData: [{ id: 1 }],
+    bankruptcyData: [],
+    fedresursData: []
+  });
+  assert.ok(["prepay_only", "reject_or_legal_review"].includes(result.decision));
+});
+
+test("repeated defendant pattern adds extra pattern factor", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}-ptrn`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2011-01-01" },
+    legalData: [
+      { role: "defendant", amount: 300000, Истец: "ООО Истец", date: new Date().toISOString() },
+      { role: "Ответчик", amount: 250000, Истец: "ООО Истец", date: new Date().toISOString() },
+      { role: "respondent", amount: 200000, Истец: "ООО Истец", date: new Date().toISOString() }
+    ],
+    fsspData: [],
+    bankruptcyData: [],
+    fedresursData: []
+  });
+  assert.ok(result.factors.some((f) => f.code === "DEFENDANT_CASES_24M_PATTERN"));
+});
+
+test("legal load is not double-counted with defendant block", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}-nodouble`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2010-01-01" },
+    legalData: Array.from({ length: 8 }, (_, i) => ({ role: "defendant", amount: 100000 + i, date: new Date().toISOString() })),
+    fsspData: [],
+    bankruptcyData: [],
+    fedresursData: []
+  });
+  assert.equal(result.factors.some((f) => f.code === "LEGAL_LOAD_HIGH"), false);
+  assert.ok(result.factors.some((f) => f.code === "DEFENDANT_CASES_24M_HIGH"));
+});
+
+test("missing finance for very young company is not over-penalized", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}-young`);
+  const date = new Date();
+  date.setMonth(date.getMonth() - 6);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: date.toISOString().slice(0, 10), Контакты: { Тел: ["+7"] } },
+    legalData: [],
+    fsspData: [],
+    bankruptcyData: [],
+    fedresursData: []
+  });
+  assert.equal(result.factors.some((f) => f.code === "FINANCE_GAP"), false);
+  assert.ok(["low", "medium"].includes(result.level));
+});
+
+test("telegram formatter remains compact and valid", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}-fmt`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2010-01-01", Налоги: { СумНедоим: 0 } },
+    legalData: [],
+    fsspData: [],
+    bankruptcyData: [],
+    fedresursData: []
+  });
+  const text = riskModule.formatRiskResultForTelegram(result);
+  assert.match(text, /Риск: <b>/);
+  assert.match(text, /Почему:/);
+  assert.match(text, /Плюсы:/);
+  assert.match(text, /Что делать:/);
+  assert.ok(text.length < 2000);
+});
 test("co:debt aggregates company taxes with enforcements", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
