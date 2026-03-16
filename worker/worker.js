@@ -11,6 +11,7 @@ const CACHE_TTL_COMPANY_SECONDS = 12 * 60 * 60;
 const CACHE_TTL_DADATA_PARTY_SECONDS = 12 * 60 * 60;
 const CACHE_TTL_AFFILIATED_SECONDS = 24 * 60 * 60;
 const CACHE_TTL_EMAIL_SECONDS = 6 * 60 * 60;
+const HISTORY_MAX_ITEMS = 10;
 const SECTION_DIVIDER = "──────────────────";
 
 const COMPANY_SECTION_TITLES = {
@@ -110,9 +111,28 @@ async function handleTelegramUpdate(request, env) {
     return jsonResponse({ ok: true });
   }
 
+  if (text === "📁 История" || text === "/history") {
+    const view = await buildLookupHistoryView(env, chatId);
+    await sendHtmlMessage(env, chatId, view);
+    return jsonResponse({ ok: true });
+  }
+
+  if (text === "💬 Поддержка") {
+    const view = buildHelpView();
+    await sendHtmlMessage(env, chatId, view);
+    return jsonResponse({ ok: true });
+  }
+
+  if (text === "🔎 Новый поиск") {
+    const view = buildMainMenuView();
+    await sendHtmlMessage(env, chatId, view);
+    return jsonResponse({ ok: true });
+  }
+
   try {
     const view = await buildViewForUserText(env, text);
     await sendHtmlMessage(env, chatId, view);
+    await persistViewHistory(env, chatId, view);
   } catch (error) {
     if (error instanceof CheckoNotFoundError) {
       await sendMessage(env, { chat_id: chatId, text: COMPANY_NOT_FOUND_MESSAGE });
@@ -167,6 +187,7 @@ async function handleCallbackQuery(callbackQuery, env) {
     const view = await buildViewForCallback(env, data);
     if (!view) return;
     await editMessage(env, chatId, messageId, view.text, view.reply_markup);
+    await persistViewHistory(env, chatId, view);
   } catch (error) {
     if (error instanceof CheckoNotFoundError) {
       await editMessage(env, chatId, messageId, COMPANY_NOT_FOUND_MESSAGE, { inline_keyboard: [[kb("🏠 В меню", "menu")]] });
@@ -181,8 +202,8 @@ async function handleCallbackQuery(callbackQuery, env) {
 }
 
 async function buildViewForCallback(env, data) {
-  if (data === "menu") return buildMainMenuView();
-  if (data === "help") return buildHelpView();
+  if (data === "menu") return { ...buildMainMenuView(), reply_markup: undefined };
+  if (data === "help") return { ...buildHelpView(), reply_markup: undefined };
   if (data === "search:inn") return buildSearchInnView();
   if (data === "search:name") return buildSearchNameView();
   if (data === "search:bic") return buildSearchBicView();
@@ -223,11 +244,13 @@ function buildMainMenuView() {
       "👋 <b>Проверка контрагента</b>",
       SECTION_DIVIDER,
       "",
-      "Отправьте ИНН одним сообщением.",
+      "Готовим сводку, анализируем риски и связи перед сделкой.",
       "",
-      "10 цифр — компания",
-      "12 цифр — ИП или физлицо"
-    ].join("\n")
+      "👇 Отправьте ИНН в чат",
+      "• 10 цифр — компания",
+      "• 12 цифр — ИП или физлицо"
+    ].join("\n"),
+    reply_markup: buildGlobalReplyKeyboard()
   };
 }
 
@@ -249,7 +272,56 @@ function buildHelpView() {
       "🔗 Связи — аффилированные лица",
       "🧾 Налоги — данные ФНС",
       "👥 Учредители · 🏬 Филиалы · 🔖 ОКВЭД"
-    ].join("\n")
+    ].join("\n"),
+    reply_markup: buildGlobalReplyKeyboard()
+  };
+}
+
+
+async function buildLookupHistoryView(env, chatId) {
+  const history = await readLookupHistory(env, chatId);
+  if (history.state === "unavailable") {
+    return {
+      text: [
+        "📁 <b>История</b>",
+        SECTION_DIVIDER,
+        "",
+        "История временно недоступна.",
+        "Для сохранения истории подключите KV и повторите позже."
+      ].join("\n"),
+      reply_markup: buildGlobalReplyKeyboard()
+    };
+  }
+
+  const items = history.items;
+  if (items.length === 0) {
+    return {
+      text: [
+        "📁 <b>История</b>",
+        SECTION_DIVIDER,
+        "",
+        "Пока нет сохранённых проверок.",
+        "Отправьте ИНН/ОГРН, и он появится в истории."
+      ].join("\n"),
+      reply_markup: buildGlobalReplyKeyboard()
+    };
+  }
+
+  const buttons = items.slice(0, HISTORY_MAX_ITEMS).map((item) => {
+    const callback = item.type === "entrepreneur" ? `select:entrepreneur:${item.id}` : `select:company:${item.id}`;
+    const label = `${item.type === "entrepreneur" ? "👔" : "🏢"} ${truncate(item.title || item.id, 24)} · ${item.id}`;
+    return [kb(label, callback)];
+  });
+
+  return {
+    text: [
+      "📁 <b>История</b>",
+      SECTION_DIVIDER,
+      "",
+      `Последние проверки: <b>${items.length}</b>`,
+      "Выберите запись, чтобы открыть карточку."
+    ].join("\n"),
+    reply_markup: { inline_keyboard: buttons }
   };
 }
 
@@ -439,51 +511,45 @@ async function buildCompanyMainView(env, id) {
   const decisionSignal = getDadataDecisionSignal(dadataParty);
   const subtitle = getDadataSubtitle(dadataParty);
   const founders = ensureArray(dadataParty.founders);
-  const founderPreview = founders
-    .slice(0, 2)
-    .map((item) => item?.name || "")
-    .filter(Boolean);
-  const phones = formatContactList(dadataParty.phones, 2);
-  const emails = formatContactList(dadataParty.emails, 2);
+  const riskSignal = dadataParty.state?.status === "ACTIVE"
+    ? "🟢 Критичных статусов не выявлено"
+    : "🟡 Нужна ручная проверка статуса";
+  const linksSignal = founders.length === 0
+    ? "🟢 Явных связей в карточке не видно"
+    : founders.length <= 2
+      ? "🟡 Есть базовые связи через учредителей"
+      : "🟠 Структура владения требует проверки";
+  const financeSignal = dadataParty.finance?.income
+    ? "🟢 Финансовая активность подтверждается"
+    : "🟡 Нет финансового контура в DaData";
 
   const lines = [
-    `🏢 <b>${escapeHtml(title)}</b>`,
+    `🏢 <b>${escapeHtml(title)}</b> (ИНН: <code>${escapeHtml(String(dadataParty.inn || id))}</code>)`,
     SECTION_DIVIDER,
     "",
-    `🎯 <b>${escapeHtml(decisionSignal)}</b>`,
-    subtitle ? `🧭 ${escapeHtml(subtitle)}` : null,
-    dadataParty.name?.full_with_opf && dadataParty.name?.full_with_opf !== title ? `<i>${escapeHtml(dadataParty.name.full_with_opf)}</i>` : null,
+    `📋 Статус: ${escapeHtml(formatCompanyStatusLabel(dadataParty.state?.status))}`,
+    subtitle ? `📍 ${escapeHtml(subtitle)}` : null,
     "",
-    "🪪 <b>Ключевые реквизиты</b>",
-    `ИНН  <code>${escapeHtml(String(dadataParty.inn || id))}</code>`,
-    `ОГРН  <code>${escapeHtml(String(dadataParty.ogrn || "—"))}</code>`,
-    dadataParty.kpp ? `КПП  <code>${escapeHtml(String(dadataParty.kpp))}</code>` : null,
-    `Регистрация  ${escapeHtml(formatDateFromMsOrIso(dadataParty.state?.registration_date))}`,
+    "<b>ВЫВОД:</b>",
+    `• ${escapeHtml(decisionSignal)}`,
     "",
-    "🧩 <b>Профиль</b>",
-    dadataParty.okved ? `ОКВЭД  ${escapeHtml(String(dadataParty.okved))}` : null,
-    dadataParty.opf?.full ? `Форма  ${escapeHtml(String(dadataParty.opf.full))}` : null,
-    dadataParty.branch_count !== undefined ? `Филиалы  ${escapeHtml(String(dadataParty.branch_count))}` : null,
-    dadataParty.employee_count !== undefined ? `Сотрудники  ${escapeHtml(String(dadataParty.employee_count))}` : null,
+    "Ключевые сигналы:",
+    `• Риски: ${escapeHtml(riskSignal)}`,
+    `• Связи: ${escapeHtml(linksSignal)}`,
+    `• Финансовый контур: ${escapeHtml(financeSignal)}`,
     "",
-    "💹 <b>Финансовый контур</b>",
-    dadataParty.finance?.income ? `Доход  ${escapeHtml(formatMoney(dadataParty.finance.income))}` : null,
-    dadataParty.finance?.expense ? `Расход  ${escapeHtml(formatMoney(dadataParty.finance.expense))}` : null,
+    "Ключевые реквизиты:",
+    `• ОГРН: <code>${escapeHtml(String(dadataParty.ogrn || "—"))}</code>`,
+    dadataParty.kpp ? `• КПП: <code>${escapeHtml(String(dadataParty.kpp))}</code>` : null,
     "",
-    "👤 <b>Управление</b>",
-    dadataParty.management?.name ? `Руководитель  ${escapeHtml(String(dadataParty.management.name))}` : null,
-    dadataParty.management?.post ? `Должность  ${escapeHtml(String(dadataParty.management.post))}` : null,
-    founderPreview.length > 0 ? `Учредители  ${escapeHtml(founderPreview.join("; "))}` : null,
-    founders.length > 2 ? `Ещё учредителей: ${escapeHtml(String(founders.length - 2))}` : null,
-    "",
-    "📍 <b>Контакты и адрес</b>",
-    dadataParty.address?.value ? `${escapeHtml(String(dadataParty.address.value))}` : null,
-    phones ? `📞 ${escapeHtml(phones)}` : null,
-    emails ? `✉️ ${escapeHtml(emails)}` : null,
-    dadataParty.invalid ? "⚠️ Адрес требует проверки" : null
+    "Выберите раздел для детализации"
   ].filter(Boolean);
 
-  return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(id, env) };
+  return {
+    text: lines.join("\n"),
+    reply_markup: buildCompanyKeyboard(id, env),
+    historyEntry: { id: String(dadataParty.inn || dadataParty.ogrn || id), type: "company", title }
+  };
 }
 
 async function buildCompanySectionView(env, section, id) {
@@ -531,7 +597,7 @@ async function buildRiskView(env, id) {
   });
 
   const text = formatRiskResultForTelegram(riskResult);
-  return { text, reply_markup: compactSectionKeyboard(id) };
+  return { text, reply_markup: compactSectionKeyboard(id, "risk") };
 }
 
 async function buildFinancesView(env, id) {
@@ -558,6 +624,7 @@ ${SECTION_DIVIDER}
   }
 
   const lines = startSection("📈 <b>Финансы</b>");
+  lines.push("", "<b>ВЫВОД:</b>", "• Отчётность найдена, можно оценивать динамику.", "", "Сводка по годам:");
   for (const year of years) {
     const item = rows[year] || {};
     lines.push(`\n📆 <b>${year}</b>`);
@@ -569,7 +636,7 @@ ${SECTION_DIVIDER}
   const pdfUrl = payload["bo.nalog.ru"]?.Отчет;
   if (pdfUrl) lines.push(`\nОтчётность: ${escapeHtml(String(pdfUrl))}`);
 
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "fin") };
 }
 
 async function buildArbitrationView(env, id) {
@@ -590,7 +657,8 @@ async function buildArbitrationView(env, id) {
   if (items.length === 0) return { text: `⚖️ <b>Арбитраж</b>
 ${SECTION_DIVIDER}
 
-Арбитражные дела не найдены`, reply_markup: compactSectionKeyboard(id) };
+Судебная нагрузка не выявлена.
+Контрагент не вовлечён в заметные споры.`, reply_markup: compactSectionKeyboard(id, "risk") };
 
   const lines = [...startSection("⚖️ <b>Арбитражные дела</b>"), `\nВсего: <b>${items.length}</b>`];
   items.slice(0, 10).forEach((it) => {
@@ -598,7 +666,7 @@ ${SECTION_DIVIDER}
     lines.push(`  🏛 ${escapeHtml(it.Суд || "—")}`);
     lines.push(`  👤 ${escapeHtml(it.Роль || "—")}  ·  💰 ${formatMoney(it.СуммаТреб || it.Сумма)}`);
   });
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "risk") };
 }
 
 async function buildDebtsView(env, id) {
@@ -644,7 +712,7 @@ async function buildDebtsView(env, id) {
   lines.push("📋 <b>Исполнительные производства</b>");
   if (items.length === 0) {
     lines.push("• Не найдены");
-    return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
+    return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "risk") };
   }
 
   lines.push(`• Всего найдено: <b>${items.length}</b>`);
@@ -653,7 +721,7 @@ async function buildDebtsView(env, id) {
     lines.push(`  💳 Сумма: ${formatMoney(it.СумДолг || it.СуммаДолга || it.Сумма)}`);
     lines.push(`  📄 ${escapeHtml(it.ПредмИсп || it.Предмет || "Предмет не указан")}`);
   });
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "risk") };
 }
 
 async function buildContractsView(env, id) {
@@ -677,7 +745,7 @@ async function buildContractsView(env, id) {
   if (items.length === 0) return { text: `📋 <b>Контракты</b>
 ${SECTION_DIVIDER}
 
-Контракты не найдены`, reply_markup: compactSectionKeyboard(id) };
+Контракты не найдены`, reply_markup: compactSectionKeyboard(id, "main") };
 
   const lines = [...startSection("📋 <b>Госконтракты</b>"), `\nПолучено записей: <b>${items.length}</b>`];
   if (failedCount > 0) {
@@ -690,7 +758,7 @@ ${SECTION_DIVIDER}
     lines.push(`  📄 ${escapeHtml(String(it.Предмет || "Предмет не указан"))}`);
     lines.push(`  💰 Сумма: ${formatMoney(it.Цена || it.СуммаКонтракта)}`);
   });
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "main") };
 }
 
 async function buildHistoryView(env, id) {
@@ -711,7 +779,7 @@ async function buildHistoryView(env, id) {
   if (items.length === 0) return { text: `🗓 <b>История</b>
 ${SECTION_DIVIDER}
 
-История изменений не найдена`, reply_markup: compactSectionKeyboard(id) };
+История изменений не найдена`, reply_markup: compactSectionKeyboard(id, "risk") };
 
   const lines = startSection("🗓 <b>Ключевые изменения</b>");
   lines.push("", `🎯 Показано событий: <b>${items.length}</b>`);
@@ -725,7 +793,7 @@ ${SECTION_DIVIDER}
     .slice(0, 10)
     .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
   timeline.forEach((it) => lines.push(`• <b>${formatDate(it.date)}</b> — ${escapeHtml(it.summary)}`));
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "risk") };
 }
 
 async function buildConnectionsView(env, id) {
@@ -739,7 +807,7 @@ async function buildConnectionsView(env, id) {
         "Связи недоступны: DaData не настроен.",
         "Добавьте ключи DaData, чтобы открыть экран аффилированности."
       ].join("\n"),
-      reply_markup: compactSectionKeyboard(id)
+      reply_markup: compactSectionKeyboard(id, "lnk")
     };
   }
   if (affiliated.state === "unavailable") {
@@ -751,7 +819,7 @@ async function buildConnectionsView(env, id) {
         "Сервис аффилированности временно недоступен.",
         "Попробуйте позже."
       ].join("\n"),
-      reply_markup: compactSectionKeyboard(id)
+      reply_markup: compactSectionKeyboard(id, "lnk")
     };
   }
 
@@ -769,14 +837,14 @@ async function buildConnectionsView(env, id) {
 
   if (total === 0) {
     lines.push("", "Аффилированные компании не найдены");
-    return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
+    return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk") };
   }
 
   lines.push(...buildAffiliatedGroupLines("Через руководителя", affiliated.managers, AFFILIATED_LIMIT));
   lines.push(...buildAffiliatedGroupLines("Через учредителя", affiliated.founders, AFFILIATED_LIMIT));
   lines.push("", `Итог: ${escapeHtml(getAffiliatedNetworkLabel(total))}`);
 
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk") };
 }
 
 async function buildFoundersView(env, id) {
@@ -797,14 +865,14 @@ async function buildFoundersView(env, id) {
   if (founders.length === 0) return { text: `👥 <b>Учредители</b>
 ${SECTION_DIVIDER}
 
-Учредители не найдены`, reply_markup: compactSectionKeyboard(id) };
+Учредители не найдены`, reply_markup: compactSectionKeyboard(id, "lnk") };
 
   const lines = startSection("👥 <b>Учредители</b>");
   founders.forEach((f, idx) => {
     lines.push(`\n${idx + 1}.  <b>${escapeHtml(f.ФИО || f.Наим || "—")}</b>`);
     lines.push(`   Доля  ${f.Доля?.Процент || f.Доля?.Проц || f.ДоляПроц || "—"}%  ·  ${formatFounderAmount(f.Доля?.Сумма, f.ДоляСумма)}`);
   });
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk") };
 }
 
 async function buildBranchesView(env, id) {
@@ -825,11 +893,11 @@ async function buildBranchesView(env, id) {
   if (branches.length === 0) return { text: `🏬 <b>Филиалы</b>
 ${SECTION_DIVIDER}
 
-Филиалы не найдены`, reply_markup: compactSectionKeyboard(id) };
+Филиалы не найдены`, reply_markup: compactSectionKeyboard(id, "lnk") };
 
   const lines = [...startSection("🏬 <b>Филиалы</b>"), `\nВсего: <b>${branches.length}</b>`];
   branches.slice(0, 20).forEach((b, idx) => lines.push(`\n${idx + 1}.  КПП ${escapeHtml(b.КПП || "—")}\n   ${escapeHtml(b.Адрес || b.АдресРФ || "—")}`));
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk") };
 }
 
 async function buildOkvedView(env, id) {
@@ -854,13 +922,14 @@ async function buildOkvedView(env, id) {
   if (additional.length === 0) lines.push("\nДополнительные: нет данных");
   else {
     lines.push("\n<b>Дополнительные</b>");
-    additional.slice(0, 20).forEach((o) => lines.push(`› ${escapeHtml(formatOkved(o))}`));
+    additional.slice(0, 8).forEach((o) => lines.push(`› ${escapeHtml(formatOkved(o))}`));
+    if (additional.length > 8) lines.push(`… ещё ${additional.length - 8}`);
   }
   if (!primary && additional.length === 0) return { text: `🔖 <b>ОКВЭД</b>
 ${SECTION_DIVIDER}
 
-Данные по ОКВЭД не найдены`, reply_markup: compactSectionKeyboard(id) };
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
+Данные по ОКВЭД не найдены`, reply_markup: compactSectionKeyboard(id, "fin") };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "fin") };
 }
 
 async function buildTaxesView(env, id) {
@@ -881,7 +950,7 @@ async function buildTaxesView(env, id) {
   if (!taxes || typeof taxes !== "object") return { text: `🧾 <b>Налоги</b>
 ${SECTION_DIVIDER}
 
-Налоговые данные не найдены`, reply_markup: compactSectionKeyboard(id) };
+Налоговые данные не найдены`, reply_markup: compactSectionKeyboard(id, "risk") };
 
   const lines = [
     ...startSection("🧾 <b>Налоги</b>"),
@@ -894,7 +963,7 @@ ${SECTION_DIVIDER}
     lines.push("");
     Object.keys(taxes.ПоГодам).sort().reverse().forEach((year) => lines.push(`📆 ${year}  ${formatMoney(taxes.ПоГодам[year])}`));
   }
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id) };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "risk") };
 }
 
 async function buildEntrepreneurView(env, id) {
@@ -989,19 +1058,12 @@ function buildCompanyKeyboard(id, env = {}) {
   const rows = [];
   if (isCheckoConfigured(env)) {
     rows.push(
-      [kb("🔎 Риски", `co:risk:${id}`), kb("📈 Финансы", `co:fin:${id}`)],
-      [kb("⚖️ Арбитраж", `co:arb:${id}`), kb("💳 Долги", `co:debt:${id}`)],
-      [kb("📋 Контракты", `co:ctr:${id}`), kb("🗓 История", `co:his:${id}`)]
+      [kb("⚖️ Риски", `co:risk:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
+      [kb("📊 Финансы", `co:fin:${id}`)],
+      [kb("📋 Контракты", `co:ctr:${id}`)]
     );
-  }
-
-  rows.push([kb("🔗 Связи", `co:lnk:${id}`)]);
-
-  if (isCheckoConfigured(env)) {
-    rows.push(
-      [kb("🧾 Налоги", `co:tax:${id}`)],
-      [kb("👥 Учредители", `co:own:${id}`), kb("🏬 Филиалы", `co:fil:${id}`), kb("🔖 ОКВЭД", `co:okv:${id}`)]
-    );
+  } else {
+    rows.push([kb("🔗 Связи", `co:lnk:${id}`)]);
   }
 
   rows.push([kb("🏢 Карточка", `co:main:${id}`), kb("🏠 Меню", "menu")]);
@@ -1028,18 +1090,90 @@ function buildCheckoTemporaryUnavailableView(title, id) {
 ${SECTION_DIVIDER}
 
 Раздел временно недоступен.
-Сервис Checko недоступен. Попробуйте позже.`,
+⚠️ Источник временно недоступен.
+Сервис Checko недоступен.
+
+Что делать:
+• попробуйте через 1–2 минуты
+• откройте текущую карточку снова
+• перейдите в другой раздел`,
     reply_markup: compactSectionKeyboard(id)
   };
 }
 
-function compactSectionKeyboard(id) {
+function compactSectionKeyboard(id, section = "main") {
+  if (section === "risk") {
+    return {
+      inline_keyboard: [
+        [kb("🏛 Арбитраж", `co:arb:${id}`), kb("🏦 Долги и налоги", `co:debt:${id}`)],
+        [kb("🗓 История", `co:his:${id}`)],
+        [kb("🔙 В карточку", `co:main:${id}`)]
+      ]
+    };
+  }
+  if (section === "lnk") {
+    return {
+      inline_keyboard: [
+        [kb("👥 Учредители", `co:own:${id}`), kb("🏢 Филиалы", `co:fil:${id}`)],
+        [kb("🔙 В карточку", `co:main:${id}`)]
+      ]
+    };
+  }
+  if (section === "fin") {
+    return {
+      inline_keyboard: [
+        [kb("🏷 ОКВЭД", `co:okv:${id}`)],
+        [kb("🔙 В карточку", `co:main:${id}`)]
+      ]
+    };
+  }
   return {
     inline_keyboard: [
-      [kb("🔎 Риски", `co:risk:${id}`), kb("📈 Финансы", `co:fin:${id}`)],
-      [kb("🏢 Карточка", `co:main:${id}`), kb("🏠 Меню", "menu")]
+      [kb("⚖️ Риски", `co:risk:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
+      [kb("📊 Финансы", `co:fin:${id}`)],
+      [kb("📋 Контракты", `co:ctr:${id}`)],
+      [kb("🔙 В карточку", `co:main:${id}`)]
     ]
   };
+}
+
+function buildGlobalReplyKeyboard() {
+  return {
+    keyboard: [[{ text: "🔎 Новый поиск" }], [{ text: "📁 История" }, { text: "💬 Поддержка" }]],
+    resize_keyboard: true,
+    is_persistent: true
+  };
+}
+
+async function persistViewHistory(env, chatId, view) {
+  if (!view?.historyEntry) return;
+  await appendLookupHistory(env, chatId, view.historyEntry);
+}
+
+function getHistoryCacheKey(chatId) {
+  return `history:chat:${chatId}`;
+}
+
+async function readLookupHistory(env, chatId) {
+  if (!env.COMPANY_CACHE || !chatId) return { state: "unavailable", items: [] };
+  try {
+    const data = await env.COMPANY_CACHE.get(getHistoryCacheKey(chatId), "json");
+    return { state: "ok", items: ensureArray(data) };
+  } catch {
+    return { state: "unavailable", items: [] };
+  }
+}
+
+async function appendLookupHistory(env, chatId, entry) {
+  if (!env.COMPANY_CACHE || !chatId || !entry?.id) return;
+  try {
+    const current = await env.COMPANY_CACHE.get(getHistoryCacheKey(chatId), "json");
+    const rows = ensureArray(current).filter((item) => String(item.id) !== String(entry.id));
+    rows.unshift({ ...entry, id: String(entry.id), timestamp: new Date().toISOString() });
+    await env.COMPANY_CACHE.put(getHistoryCacheKey(chatId), JSON.stringify(rows.slice(0, HISTORY_MAX_ITEMS)));
+  } catch {
+    // optional KV: history should degrade silently
+  }
 }
 
 async function buildEntrepreneurSectionView(env, section, id) {
@@ -1128,6 +1262,13 @@ function getDadataSubtitle(partyData) {
   const parts = [status ? `Статус: ${status}` : "", actualityDate !== "—" ? `Актуальность: ${actualityDate}` : ""]
     .filter(Boolean);
   return parts.join(" · ");
+}
+
+function formatCompanyStatusLabel(status) {
+  const normalized = String(status || "").trim().toUpperCase();
+  if (normalized === "ACTIVE") return "🟢 Действующее";
+  if (!normalized) return "🟡 Нужна проверка статуса";
+  return `🟡 ${normalized}`;
 }
 
 function firstExistingTaxValue(taxes, keys) {
