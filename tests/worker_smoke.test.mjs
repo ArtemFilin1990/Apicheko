@@ -145,7 +145,7 @@ test("10-digit INN opens main card from DaData only", async () => {
   assert.match(body.text, /ООО Тест/);
   assert.match(body.text, /Дата регистрации/);
   assert.match(body.text, /Руководитель/);
-  assert.match(body.text, /Финансы/);
+  assert.match(body.text, /Вывод/);
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/company")));
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/finances")));
   const callbacks = body.reply_markup.inline_keyboard.flat().map((b) => b.callback_data);
@@ -153,7 +153,8 @@ test("10-digit INN opens main card from DaData only", async () => {
   assert.ok(callbacks.includes("co:arb:7707083893"));
   assert.ok(callbacks.includes("co:debt:7707083893"));
   assert.ok(callbacks.includes("co:lnk:7707083893"));
-  assert.ok(callbacks.includes("co:own:7707083893"));
+  assert.ok(callbacks.includes("co:fin:7707083893"));
+  assert.ok(callbacks.includes("co:succ:7707083893"));
 });
 
 test("10-digit INN hides Checko buttons when CHECKO_API_KEY is missing", async () => {
@@ -184,11 +185,46 @@ test("10-digit INN hides Checko buttons when CHECKO_API_KEY is missing", async (
   const body = JSON.parse(send.options.body);
   const callbacks = body.reply_markup.inline_keyboard.flat().map((b) => b.callback_data);
 
-  assert.ok(callbacks.includes("co:main:7707083893"));
   assert.ok(callbacks.includes("co:lnk:7707083893"));
   assert.ok(!callbacks.includes("co:risk:7707083893"));
   assert.ok(!callbacks.includes("co:tax:7707083893"));
-  assert.ok(!callbacks.includes("co:own:7707083893"));
+  assert.ok(!callbacks.includes("co:fin:7707083893"));
+});
+
+test("co:main keeps old callback contract and renders pager row first", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({
+        suggestions: [{
+          data: {
+            inn: "7707083893",
+            name: { short_with_opf: "ООО Тест" },
+            state: { status: "ACTIVE", registration_date: 1262304000000 },
+            management: { name: "Иванов И.И." },
+            address: { value: "Россия, 125009, г Москва, ул Тверская, д 1" },
+            capital: { value: 10000 },
+            employee_count: 7,
+            okved: "62.01"
+          }
+        }]
+      });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-main-page", data: "co:main:7707083893", message: { message_id: 15, chat: { id: 7 } } } }),
+    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Вывод/);
+  assert.match(body.reply_markup.inline_keyboard[0][0].text, /1\/3/);
 });
 
 test("12-digit INN forces user choice", async () => {
@@ -210,6 +246,7 @@ test("co:fin uses /finances and shows empty-state without service error", async 
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.pathname.endsWith("/company")) return jsonResponse({ meta: { status: "ok" }, data: {} });
     if (u.pathname.endsWith("/finances")) return jsonResponse({ meta: { status: "ok" }, data: {} });
     throw new Error(`Unexpected URL ${u}`);
   };
@@ -223,6 +260,7 @@ test("co:fin uses /finances and shows empty-state without service error", async 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /отч[её]тность не найдена/i);
+  assert.ok(calls.some((c) => c.url.includes("/finances")));
 });
 
 test("co:fin renders bo.nalog.ru report links without object dump", async () => {
@@ -231,6 +269,7 @@ test("co:fin renders bo.nalog.ru report links without object dump", async () => 
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.pathname.endsWith("/company")) return jsonResponse({ meta: { status: "ok" }, data: {} });
     if (u.pathname.endsWith("/finances")) {
       return jsonResponse({
         meta: { status: "ok" },
@@ -248,8 +287,8 @@ test("co:fin renders bo.nalog.ru report links without object dump", async () => 
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Отчётность ФНС:/);
-  assert.match(body.text, /2023: https:\/\/bo\.nalog\.ru\/2023\.pdf/);
+  assert.match(body.text, /Источник отчётности: <b>есть ссылки ФНС<\/b>/);
+  assert.match(body.text, /2023: выручка/);
   assert.doesNotMatch(body.text, /\[object Object\]/);
 });
 
@@ -272,7 +311,7 @@ test("Checko non-JSON response shows section unavailable for co:risk", async () 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Раздел временно недоступен/);
-  assert.match(body.text, /Сервис Checko недоступен/);
+  assert.match(body.text, /Источник данных сейчас не отвечает/);
   assert.doesNotMatch(body.text, /^⚠️ Ошибка сервиса Checko$/);
 });
 
@@ -295,7 +334,7 @@ test("Checko payload without meta.status shows section unavailable for co:risk",
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Раздел временно недоступен/);
-  assert.match(body.text, /Сервис Checko недоступен/);
+  assert.match(body.text, /Источник данных сейчас не отвечает/);
   assert.doesNotMatch(body.text, /^⚠️ Ошибка сервиса Checko$/);
 });
 
@@ -385,10 +424,12 @@ test("co:risk renders deterministic score and reasons for inactive company", asy
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Высокий риск/);
-  assert.match(body.text, /Score: <b>\d+\/100<\/b>/);
-  assert.match(body.text, /Решение: <b>reject_or_legal_review<\/b>/);
-  assert.match(body.text, /Компания недействующая/);
+  assert.match(body.text, /Есть критический стоп-фактор/);
+  assert.match(body.text, /Есть критический стоп-фактор/);
+  assert.match(body.text, /Арбитраж:/);
+  assert.match(body.text, /Суды в роли ответчика:/);
+  assert.match(body.text, /Новую сделку без отдельной правовой оценки рассматривать нельзя/);
+  assert.match(body.text, /Что это значит/);
   assert.match(body.text, /Что это значит/);
 });
 
@@ -430,10 +471,11 @@ test("co:risk shows low or medium profile for normal company", async () => {
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Явных критичных рисков немного|Есть сигналы, которые стоит проверить/);
-  assert.match(body.text, /Решение: <b>(approve_standard|approve_caution)<\/b>/);
-  assert.match(body.text, /Что важно/);
-  assert.match(body.text, /Минусы:/);
+  assert.match(body.text, /Критичных факторов не обнаружено|Есть отдельные сигналы, которые стоит учесть/);
+  assert.match(body.text, /Арбитраж:/);
+  assert.match(body.text, /Сводка/);
+  assert.match(body.text, /Суды в роли ответчика:/);
+  assert.match(body.text, /Что это значит/);
   assert.match(body.text, /Что это значит/);
 });
 
@@ -457,7 +499,8 @@ test("co:risk handles partial data without crash", async () => {
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Неизвестно:/);
-  assert.match(body.text, /Score: <b>\d+\/100<\/b>/);
+  assert.match(body.text, /Арбитраж:/);
+  assert.match(body.text, /Данных для уверенного вывода не хватает/);
 });
 
 
@@ -485,6 +528,174 @@ test("risk scoring is deterministic for the same input", async () => {
   const two = riskModule.calculateCompanyRiskScore(payload);
   assert.deepEqual(one, two);
 });
+
+test("risk scoring rejects inactive company with bankruptcy", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: {
+      Статус: { Наим: "Не действует" },
+      Налоги: { СумНедоим: 0 }
+    },
+    bankruptcyData: [{ id: 1 }],
+    fedresursData: []
+  });
+
+  assert.equal(result.decision, "reject_or_legal_review");
+  assert.equal(result.level, "critical");
+});
+
+test("risk scoring keeps normal company at low or medium risk", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: {
+      Статус: { Наим: "Действующее" },
+      ДатаРег: "2012-01-01",
+      Налоги: { СумНедоим: 0 },
+      Контакты: { Тел: ["+7 495 123-45-67"], Емэйл: ["info@test.ru"] }
+    },
+    financesData: { "2023": { 2110: 7000000, 2400: 900000 } },
+    legalData: [],
+    fsspData: [],
+    contractsData: [{ id: 1 }],
+    historyData: [],
+    bankruptcyData: [],
+    fedresursData: [],
+    dadataParty: { employee_count: 20, invalid: false, phones: [{ value: "+7 495 123-45-67" }] }
+  });
+
+  assert.match(result.level, /^(low|medium)$/);
+  assert.match(result.decision, /^(approve_standard|approve_caution)$/);
+});
+
+test("single defendant case with zero claim stays low-penalty", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2016-01-01" },
+    legalData: [{ Дата: "2025-06-01", Роль: "Ответчик", СуммаИска: 0, Истец: "ООО Истец" }]
+  });
+
+  assert.ok(!result.factors.some((factor) => factor.code === "DEFENDANT_CASES_24M_MEDIUM" || factor.code === "DEFENDANT_CASES_24M_HIGH"));
+  assert.ok(!result.factors.some((factor) => factor.code === "DEFENDANT_CASES_24M_LOW"));
+});
+
+test("ambiguous role does not trigger strong defendant penalty", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2018-01-01" },
+    legalData: [{ Дата: "2025-05-01", Описание: "Стороны спора не указаны", СуммаИска: 450000 }]
+  });
+
+  assert.ok(!result.factors.some((factor) => factor.code.startsWith("DEFENDANT_CASES_24M")));
+});
+
+test("three confirmed defendant cases create material litigation pressure", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2015-01-01" },
+    legalData: [
+      { Дата: "2025-01-10", Роль: "Ответчик", СуммаИска: 250000, Истец: "ООО Истец 1", Предмет: "Долг" },
+      { Дата: "2025-02-14", Роль: "Ответчик", СуммаИска: 150000, Истец: "ООО Истец 2", Предмет: "Поставка" },
+      { Дата: "2025-03-20", Роль: "Ответчик", СуммаИска: 120000, Истец: "ООО Истец 3", Предмет: "Услуги" }
+    ]
+  });
+
+  assert.ok(result.factors.some((factor) => factor.code === "DEFENDANT_CASES_24M_MEDIUM" || factor.code === "DEFENDANT_CASES_24M_HIGH"));
+});
+
+test("confirmed defendant pattern plus debt pressure escalates decision", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: {
+      Статус: { Наим: "Действующее" },
+      ДатаРег: "2014-01-01",
+      Налоги: { СумНедоим: 250000 }
+    },
+    fsspData: [{ id: 1 }],
+    legalData: [
+      { Дата: "2025-01-10", Роль: "Ответчик", СуммаИска: 250000, Истец: "ООО Истец 1", Предмет: "Долг" },
+      { Дата: "2025-02-14", Роль: "Ответчик", СуммаИска: 350000, Истец: "ООО Истец 2", Предмет: "Долг" },
+      { Дата: "2025-03-20", Роль: "Ответчик", СуммаИска: 420000, Истец: "ООО Истец 3", Предмет: "Долг" },
+      { Дата: "2025-04-20", Роль: "Ответчик", СуммаИска: 520000, Истец: "ООО Истец 4", Предмет: "Долг" },
+      { Дата: "2025-05-20", Роль: "Ответчик", СуммаИска: 120000, Истец: "ООО Истец 5", Предмет: "Долг" },
+      { Дата: "2025-06-20", Роль: "Ответчик", СуммаИска: 110000, Истец: "ООО Истец 6", Предмет: "Долг" }
+    ]
+  });
+
+  assert.match(result.decision, /^(prepay_only|reject_or_legal_review)$/);
+  assert.ok(result.factors.some((factor) => factor.code === "CMP_DEFENDANT_DEBT_PRESSURE"));
+});
+
+test("repeated defendant pattern adds extra penalty", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2013-01-01" },
+    legalData: [
+      { Дата: "2025-01-10", Роль: "Ответчик", СуммаИска: 250000, Истец: "ООО Истец", Предмет: "Долг" },
+      { Дата: "2025-02-14", Роль: "Ответчик", СуммаИска: 150000, Истец: "ООО Истец", Предмет: "Долг" },
+      { Дата: "2025-03-20", Роль: "Ответчик", СуммаИска: 120000, Истец: "ООО Истец", Предмет: "Долг" }
+    ]
+  });
+
+  assert.ok(result.factors.some((factor) => factor.code === "DEFENDANT_CASES_24M_PATTERN"));
+});
+
+test("general legal load is not double-counted when defendant pressure exists", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2011-01-01" },
+    legalData: [
+      { Дата: "2025-01-10", Роль: "Ответчик", СуммаИска: 250000, Истец: "ООО Истец 1", Предмет: "Долг" },
+      { Дата: "2025-02-14", Роль: "Ответчик", СуммаИска: 350000, Истец: "ООО Истец 2", Предмет: "Поставка" },
+      { Дата: "2025-03-20", Роль: "Ответчик", СуммаИска: 420000, Истец: "ООО Истец 3", Предмет: "Услуги" },
+      { Дата: "2025-04-20", Роль: "Истец", СуммаИска: 120000, Истец: "Компания", Предмет: "Взыскание" },
+      { Дата: "2025-05-20", Роль: "Истец", СуммаИска: 80000, Истец: "Компания", Предмет: "Взыскание" }
+    ]
+  });
+
+  assert.ok(result.factors.some((factor) => factor.code === "DEFENDANT_CASES_24M_MEDIUM" || factor.code === "DEFENDANT_CASES_24M_HIGH"));
+  assert.ok(!result.factors.some((factor) => factor.code === "LEGAL_LOAD_GENERAL"));
+});
+
+test("missing finance for young company does not create false high risk", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: {
+      Статус: { Наим: "Действующее" },
+      ДатаРег: "2025-01-01",
+      Налоги: { СумНедоим: 0 },
+      Контакты: { Тел: ["+7 495 123-45-67"] }
+    },
+    legalData: [],
+    fsspData: [],
+    dadataParty: { invalid: false, phones: [{ value: "+7 495 123-45-67" }] }
+  });
+
+  assert.notEqual(result.level, "high");
+  assert.notEqual(result.level, "critical");
+  assert.ok(!result.factors.some((factor) => factor.code === "FINANCE_GAP"));
+});
+
+test("telegram formatter remains compact and valid", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: {
+      Статус: { Наим: "Действующее" },
+      ДатаРег: "2010-01-01",
+      Налоги: { СумНедоим: 120000 },
+      Контакты: { Тел: ["+7 495 123-45-67"] }
+    },
+    financesData: { "2023": { 2110: 4000000, 2400: 500000 } },
+    legalData: [{ Дата: "2025-02-01", Роль: "Ответчик", СуммаИска: 350000, Истец: "ООО Истец" }]
+  });
+
+  const text = riskModule.formatRiskResultForTelegram(result);
+  assert.match(text, /Риск: <b>/);
+  assert.match(text, /Score: <b>\d+\/100<\/b>/);
+  assert.match(text, /Решение: <b>/);
+  assert.match(text, /Почему:/);
+  assert.match(text, /Что делать:/);
+  assert.match(text, /Итог:/);
+});
 test("co:debt aggregates company taxes with enforcements", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
@@ -507,7 +718,7 @@ test("co:debt aggregates company taxes with enforcements", async () => {
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Недоимка: 5\s000 ₽/);
+  assert.match(body.text, /Недоимка: <b>5[\s ]000 ₽<\/b>/);
   assert.match(body.text, /ФССП: <b>1<\/b>/);
 });
 
@@ -527,7 +738,7 @@ test("co:own shows missing Checko config message without generic crash", async (
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Источник не настроен/);
+  assert.match(body.text, /Источник данных не настроен/);
   assert.match(body.text, /Раздел временно недоступен/);
 });
 
@@ -547,7 +758,7 @@ test("co:tax shows missing Checko config message without generic crash", async (
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Источник не настроен/);
+  assert.match(body.text, /Источник данных не настроен/);
   assert.match(body.text, /Раздел временно недоступен/);
 });
 
@@ -571,7 +782,7 @@ test("co:debt shows section-level temporary unavailable message on Checko failur
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Раздел временно недоступен/);
-  assert.match(body.text, /Сервис Checko недоступен/);
+  assert.match(body.text, /Источник данных сейчас не отвечает/);
   assert.doesNotMatch(body.text, /^⚠️ Ошибка сервиса Checko$/);
 });
 
@@ -687,7 +898,7 @@ test("email lookup opens company card by INN via DaData", async () => {
   const send = calls.find((c) => c.url.includes("/sendMessage"));
   const body = JSON.parse(send.options.body);
   assert.match(body.text, /ООО Email Тест/);
-  assert.match(body.text, /Ключевые сигналы/);
+  assert.match(body.text, /Вывод/);
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/company")));
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/finances")));
   assert.ok(calls.some((c) => c.url.includes("/findByEmail/company")));
@@ -721,13 +932,27 @@ test("co:lnk renders DaData affiliated companies", async () => {
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
       const payload = JSON.parse(options.body);
       assert.equal(payload.query, "7707083893");
+      return jsonResponse({
+        suggestions: [{
+          data: {
+            inn: "7707083893",
+            managers: [{ inn: "500100000001" }],
+            founders: [{ inn: "500100000002" }]
+          }
+        }]
+      });
+    }
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
+      const payload = JSON.parse(options.body);
       if (Array.isArray(payload.scope) && payload.scope.includes("MANAGERS")) {
+        assert.equal(payload.query, "500100000001");
         return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Альфа" }, state: { status: "ACTIVE" }, address: { data: { city: "Казань" } } } }] });
       }
       if (Array.isArray(payload.scope) && payload.scope.includes("FOUNDERS")) {
+        assert.equal(payload.query, "500100000002");
         return jsonResponse({ suggestions: [{ data: { inn: "2222222222", name: { short_with_opf: "ООО Бета" }, state: { status: "ACTIVE" }, okved: "62.01" } }] });
       }
       return jsonResponse({ suggestions: [] });
@@ -752,6 +977,7 @@ test("co:lnk renders DaData affiliated companies", async () => {
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/company")));
   const affiliatedCalls = calls.filter((c) => c.url.includes("/findAffiliated/party"));
   assert.equal(affiliatedCalls.length, 2);
+  assert.equal(calls.filter((c) => c.url.includes("/findById/party")).length, 1);
 });
 
 test("co:lnk keeps cross-channel affiliation visible in both groups", async () => {
@@ -760,12 +986,25 @@ test("co:lnk keeps cross-channel affiliation visible in both groups", async () =
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({
+        suggestions: [{
+          data: {
+            inn: "7707083893",
+            managers: [{ inn: "500100000001" }],
+            founders: [{ inn: "500100000002" }]
+          }
+        }]
+      });
+    }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
       const payload = JSON.parse(options.body);
       if (Array.isArray(payload.scope) && payload.scope.includes("MANAGERS")) {
+        assert.equal(payload.query, "500100000001");
         return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Перекрёст" }, state: { status: "ACTIVE" } } }] });
       }
       if (Array.isArray(payload.scope) && payload.scope.includes("FOUNDERS")) {
+        assert.equal(payload.query, "500100000002");
         return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Перекрёст" }, state: { status: "ACTIVE" } } }] });
       }
       return jsonResponse({ suggestions: [] });
@@ -792,6 +1031,17 @@ test("co:lnk renders no-affiliations complete screen", async () => {
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({
+        suggestions: [{
+          data: {
+            inn: "7707083893",
+            managers: [{ inn: "500100000001" }],
+            founders: [{ inn: "500100000002" }]
+          }
+        }]
+      });
+    }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
       return jsonResponse({ suggestions: [] });
     }
@@ -805,8 +1055,8 @@ test("co:lnk renders no-affiliations complete screen", async () => {
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Аффилированные компании не найдены/);
-  assert.match(body.text, /Аффилированность не обнаружена/);
+  assert.match(body.text, /плотной сети связанных компаний не видно/);
+  assert.match(body.text, /плотной сети связанных компаний не видно/);
 });
 
 test("co:lnk renders service-state when DaData affiliated is unavailable", async () => {
@@ -815,6 +1065,16 @@ test("co:lnk renders service-state when DaData affiliated is unavailable", async
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({
+        suggestions: [{
+          data: {
+            inn: "7707083893",
+            managers: [{ inn: "500100000001" }]
+          }
+        }]
+      });
+    }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
       return new Response("upstream failed", { status: 502 });
     }
@@ -829,6 +1089,37 @@ test("co:lnk renders service-state when DaData affiliated is unavailable", async
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /временно недоступен/);
+});
+
+test("co:lnk skips affiliations lookup when party lacks manager and founder INNs", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({
+        suggestions: [{
+          data: {
+            inn: "7707083893",
+            managers: [{ name: "Без ИНН" }],
+            founders: [{ name: "Тоже без ИНН" }]
+          }
+        }]
+      });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-lnk-no-inn", data: "co:lnk:7707083893", message: { message_id: 9, chat: { id: 3 } } } }),
+    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /плотной сети связанных компаний не видно/);
+  assert.equal(calls.filter((c) => c.url.includes("/findAffiliated/party")).length, 0);
 });
 
 test("DaData outage renders graceful service-state in main card", async () => {
@@ -931,7 +1222,7 @@ test("co:fin shows missing-config state without generic crash when CHECKO_API_KE
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Источник не настроен/);
+  assert.match(body.text, /Источник данных не настроен/);
   assert.match(body.text, /Раздел временно недоступен/);
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru")));
 });
@@ -954,7 +1245,7 @@ test("co:fin shows section unavailable on Checko service failure", async () => {
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Раздел временно недоступен/);
-  assert.match(body.text, /Сервис Checko недоступен/);
+  assert.match(body.text, /Источник данных сейчас не отвечает/);
   assert.doesNotMatch(body.text, /^⚠️ Ошибка сервиса Checko$/);
 });
 
@@ -974,7 +1265,7 @@ test("co:arb shows missing-config state without generic crash when CHECKO_API_KE
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Источник не настроен/);
+  assert.match(body.text, /Источник данных не настроен/);
   assert.match(body.text, /Раздел временно недоступен/);
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru")));
 });
@@ -995,7 +1286,7 @@ test("co:his shows missing-config state without generic crash when CHECKO_API_KE
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Источник не настроен/);
+  assert.match(body.text, /Источник данных не настроен/);
   assert.match(body.text, /Раздел временно недоступен/);
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru")));
 });
@@ -1120,5 +1411,41 @@ test("co:okv renders compact additional codes with overflow marker", async () =>
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Основной/);
   assert.match(body.text, /62\.01/);
-  assert.match(body.text, /… ещё 1/);
+  assert.match(body.text, /Стр\. 1\/2/);
+});
+
+test("pager callback opens second page for co:okv", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      return jsonResponse({
+        meta: { status: "ok" },
+        data: {
+          ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" },
+          ОКВЭДДоп: [
+            { Код: "62.02", Наим: "Консультирование" },
+            { Код: "62.03", Наим: "Управление оборудованием" },
+            { Код: "62.09", Наим: "Прочая IT" },
+            { Код: "63.11", Наим: "Обработка данных" },
+            { Код: "63.12", Наим: "Порталы" },
+            { Код: "63.99", Наим: "Инфосервисы" }
+          ]
+        }
+      });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-okv-page", data: "co:okv:7707083893:p:2", message: { message_id: 72, chat: { id: 2 } } } }),
+    makeEnv()
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /63\.99/);
+  assert.match(body.text, /Стр\. 2\/2/);
 });

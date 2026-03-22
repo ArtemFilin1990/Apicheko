@@ -13,6 +13,7 @@ const CACHE_TTL_AFFILIATED_SECONDS = 24 * 60 * 60;
 const CACHE_TTL_EMAIL_SECONDS = 6 * 60 * 60;
 const HISTORY_MAX_ITEMS = 10;
 const SECTION_DIVIDER = "──────────────────";
+const PAGE_SIZE = 5;
 
 const COMPANY_SECTION_TITLES = {
   main: "🏢 Карточка",
@@ -23,6 +24,7 @@ const COMPANY_SECTION_TITLES = {
   ctr: "📋 Контракты",
   his: "🗓 История",
   lnk: "🔗 Связи",
+  succ: "🏢 Правопреемник",
   tax: "🧾 Налоги",
   own: "👥 Учредители",
   fil: "🏬 Филиалы",
@@ -38,6 +40,7 @@ const COMPANY_SECTION_BUILDERS = {
   ctr: buildContractsView,
   his: buildHistoryView,
   lnk: buildConnectionsView,
+  succ: buildSuccessorView,
   tax: buildTaxesView,
   own: buildFoundersView,
   fil: buildBranchesView,
@@ -224,9 +227,9 @@ async function buildViewForCallback(env, data) {
   }
 
   if (data.startsWith("co:")) {
-    const [, section, id] = data.split(":", 3);
-    if (!COMPANY_SECTION_TITLES[section] || !id) return null;
-    return buildCompanySectionView(env, section, id);
+    const parsed = parseCompanySectionCallback(data);
+    if (!parsed || !COMPANY_SECTION_TITLES[parsed.section] || !parsed.id) return null;
+    return buildCompanySectionView(env, parsed.section, parsed.id, parsed.page);
   }
 
   return null;
@@ -458,7 +461,7 @@ async function buildSearchResultsView(env, query) {
   };
 }
 
-async function buildCompanyMainView(env, id) {
+async function buildCompanyMainView(env, id, page = 1) {
   if (!isDadataConfigured(env)) {
     return {
       text: [
@@ -505,68 +508,71 @@ async function buildCompanyMainView(env, id) {
   }
 
   const title = dadataParty.name?.short_with_opf || dadataParty.name?.full_with_opf || "Компания";
-  const decisionSignal = getDadataDecisionSignal(dadataParty);
-  const founders = ensureArray(dadataParty.founders);
-  const riskSignal = dadataParty.state?.status === "ACTIVE"
-    ? "🟢 Критичных статусов не выявлено"
-    : "🟡 Нужна ручная проверка статуса";
-  const linksSignal = founders.length === 0
-    ? "🟢 Явных связей в карточке не видно"
-    : founders.length <= 2
-      ? "🟡 Есть базовые связи через учредителей"
-      : "🟠 Структура владения требует проверки";
-  const financeSignal = dadataParty.finance?.income
-    ? "🟢 Финансовая активность подтверждается"
-    : "🟡 Нет финансового контура в DaData";
-  const statusLine = `${escapeHtml(formatCompanyStatusLabel(dadataParty.state?.status))} <b>Статус:</b> ${escapeHtml(getReadableCompanyStatus(dadataParty.state?.status))}`;
+  const statusCode = dadataParty.state?.status;
+  const statusLine = `${statusIcon(statusCode)} <b>Статус:</b> ${escapeHtml(statusLabel(statusCode))}`;
   const registrationDate = formatDateFromMsOrIso(dadataParty.state?.registration_date);
   const directorName = firstNonEmpty([
     dadataParty.management?.name,
     dadataParty.managers?.[0]?.name,
     "нет данных"
   ]);
-  const addressShort = firstNonEmpty([
-    dadataParty.address?.data?.city ? `${dadataParty.address.data.city}, ${dadataParty.address.data.street_with_type || dadataParty.address.data.street || ""}`.replace(/,\s*$/, "") : "",
+  const addressShort = truncateAddress(firstNonEmpty([
     dadataParty.address?.value,
+    dadataParty.address?.unrestricted_value,
     "нет данных"
-  ]);
+  ]));
   const capital = parseNullableNumber(dadataParty.capital?.value);
   const employees = parseNullableNumber(dadataParty.employee_count);
   const primaryOkved = hasText(dadataParty.okved) ? dadataParty.okved : "нет данных";
-
+  const successorName = getSuccessorNameFromDadata(dadataParty);
+  const pages = [
+    [
+      statusLine,
+      registrationDate !== "—" ? `📅 <b>Дата регистрации:</b> ${escapeHtml(registrationDate)}` : null,
+      `👤 <b>Руководитель:</b> ${escapeHtml(directorName)}`,
+      `🪪 <b>ИНН:</b> <code>${escapeHtml(String(dadataParty.inn || id))}</code>`,
+      `📍 <b>Адрес:</b> ${escapeHtml(addressShort)}`,
+      "",
+      "<b>Вывод</b>",
+      escapeHtml(buildStatusVerdict(dadataParty))
+    ].filter(Boolean),
+    [
+      "<b>Ключевые факты</b>",
+      capital !== null ? `• Уставный капитал: <b>${escapeHtml(formatMoney(capital))}</b>` : "• Уставный капитал: <b>нет данных</b>",
+      employees !== null ? `• Штат: <b>${escapeHtml(String(employees))} сотрудников</b>` : "• Штат: <b>нет данных</b>",
+      `• Основной ОКВЭД: <b>${escapeHtml(String(primaryOkved))}</b>`,
+      `• Правопреемник: <b>${escapeHtml(successorName)}</b>`
+    ],
+    [
+      "<b>Что проверить дальше</b>",
+      "• риски и долги перед сделкой",
+      "• судебную нагрузку компании",
+      "• сеть связанных организаций",
+      "• историю изменений и контрактов"
+    ]
+  ];
+  const paged = {
+    page: Math.min(Math.max(1, page), pages.length),
+    totalPages: pages.length,
+    items: [pages[Math.min(Math.max(1, page), pages.length) - 1]]
+  };
   const lines = [
-    `🏢 <b>${escapeHtml(title)}</b> (ИНН: ${escapeHtml(String(dadataParty.inn || id))})`,
+    `🏢 <b>${escapeHtml(title)}</b>`,
     SECTION_DIVIDER,
     "",
-    statusLine,
-    registrationDate !== "—" ? `📅 <b>Дата регистрации:</b> ${escapeHtml(registrationDate)}` : null,
-    `👤 <b>Руководитель:</b> ${escapeHtml(directorName)}`,
-    `📍 <b>Адрес:</b> ${escapeHtml(addressShort)}`,
-    "",
-    "<b>Вывод</b>",
-    escapeHtml(decisionSignal),
-    "",
-    "<b>Ключевые факты</b>",
-    capital !== null ? `• Уставный капитал: <b>${escapeHtml(formatMoney(capital))}</b>` : null,
-    employees !== null ? `• Штат: <b>${escapeHtml(String(employees))} сотрудников</b>` : null,
-    `• Основной ОКВЭД: <b>${escapeHtml(String(primaryOkved))}</b>`,
-    "",
-    "<b>Ключевые сигналы</b>",
-    `• Риски: ${escapeHtml(riskSignal)}`,
-    `• Связи: ${escapeHtml(linksSignal)}`,
-    `• Финансы: ${escapeHtml(financeSignal)}`
-  ].filter(Boolean);
+    ...paged.items[0]
+  ];
 
   return {
     text: lines.join("\n"),
-    reply_markup: buildCompanyKeyboard(id, env),
+    reply_markup: buildCompanyKeyboard(id, env, { page: paged.page, totalPages: paged.totalPages }),
     historyEntry: { id: String(dadataParty.inn || dadataParty.ogrn || id), type: "company", title }
   };
 }
 
-async function buildCompanySectionView(env, section, id) {
+async function buildCompanySectionView(env, section, id, page = 1) {
   const builder = COMPANY_SECTION_BUILDERS[section];
-  return builder ? builder(env, id) : null;
+  return builder ? builder(env, id, page) : null;
 }
 
 async function buildRiskView(env, id) {
@@ -608,11 +614,16 @@ async function buildRiskView(env, id) {
     dadataParty
   });
 
-  const text = buildRiskDashboardText(riskResult, data);
+  const text = buildRiskDashboardText(riskResult, {
+    companyData: data,
+    legalCases: takeRecords(legal),
+    taxes: data.Налоги || {},
+    fsspCount: takeRecords(fssp).length
+  });
   return { text, reply_markup: compactSectionKeyboard(id, "risk") };
 }
 
-async function buildFinancesView(env, id) {
+async function buildFinancesView(env, id, page = 1) {
   if (!isCheckoConfigured(env)) {
     return buildCheckoMissingConfigView("📈 <b>Финансы</b>", id);
   }
@@ -629,34 +640,47 @@ async function buildFinancesView(env, id) {
   const rows = payload.data || {};
   const years = getYearsSorted(rows).slice(0, 4);
   if (years.length === 0) {
-    return { text: `📊 <b>Финансы</b>
-${SECTION_DIVIDER}
-
-Раздел доступен, но отчётность не найдена.
-Финансовые данные не переданы источником за последние годы.`, reply_markup: buildCompanyKeyboard(id, env) };
+    return {
+      text: [
+        "📊 <b>Финансы</b>",
+        SECTION_DIVIDER,
+        "",
+        "Отчётность не найдена.",
+        "Источник не передал финансовые данные за последние годы."
+      ].join("\n"),
+      reply_markup: compactSectionKeyboard(id, "fin")
+    };
   }
 
-  const lines = startSection("📊 <b>Финансы</b>");
-  lines.push("", "<b>Вывод</b>", "Есть признаки живой финансовой активности: отчётность доступна по последним годам.", "", "<b>Сводка по годам</b>");
-  for (const year of years) {
+  const companyPayload = await safeSectionData(env, "company", identifierParams(id));
+  const companyData = companyPayload.data || {};
+  const dadataParty = await safeFindPartyByInnOrOgrn(env, String(companyData.ИНН || companyData.ОГРН || id));
+  const reportLines = years.map((year) => {
     const item = rows[year] || {};
-    lines.push(`\n📆 <b>${year}</b>`);
-    lines.push(`💰 Выручка: ${formatMoney(item[2110])}`);
-    lines.push(`📊 Чистая прибыль: ${formatMoney(item[2400])}`);
-    lines.push(`📦 Активы: ${formatMoney(item[1600])}`);
-    lines.push(`🏦 Капитал: ${formatMoney(item[1300])}`);
-  }
-  const reportLinks = normalizeFinanceReportLinks(payload["bo.nalog.ru"]?.Отчет);
-  if (reportLinks.length > 0) {
-    lines.push("\nОтчётность ФНС:");
-    reportLinks.forEach((link) => lines.push(`• ${escapeHtml(link.label)}: ${escapeHtml(link.url)}`));
-  }
-  lines.push("", "<b>Короткий вывод</b>", escapeHtml(summarizeFinanceSignals(rows)));
+    return `• ${year}: выручка ${escapeHtml(formatMoney(item[2110]))}, прибыль ${escapeHtml(formatMoney(item[2400]))}`;
+  });
+  const pagedReports = paginateItems(reportLines, page);
+  const financeSourceState = normalizeFinanceReportLinks(payload["bo.nalog.ru"]?.Отчет).length > 0 ? "есть ссылки ФНС" : "данные Checko";
+  const lines = [
+    "📊 <b>Финансы</b>",
+    SECTION_DIVIDER,
+    "",
+    escapeHtml(summarizeFinanceBluf(rows)),
+    "",
+    `• Штат: <b>${escapeHtml(formatOptionalNumber(dadataParty?.employee_count || companyData.ЧислРаб || companyData.СЧР))}</b>`,
+    `• Средняя зарплата: <b>${escapeHtml(formatOptionalMoney(companyData.СредЗП || companyData.СредняяЗП))}</b>`,
+    `• Спецрежим: <b>${escapeHtml(firstNonEmpty([companyData.НалРежим?.Наим, companyData.НалогРежим?.Наим, "нет данных"]))}</b>`,
+    `• МСП: <b>${escapeHtml(firstNonEmpty([companyData.РМСП?.Кат, "нет данных"]))}</b>`,
+    `• Источник отчётности: <b>${escapeHtml(financeSourceState)}</b>`,
+    "",
+    `<b>Отчётность</b> (Стр. ${pagedReports.page}/${pagedReports.totalPages})`,
+    ...pagedReports.items,
+  ];
 
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "fin") };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "fin", pagedReports.page, pagedReports.totalPages) };
 }
 
-async function buildArbitrationView(env, id) {
+async function buildArbitrationView(env, id, page = 1) {
   if (!isCheckoConfigured(env)) {
     return buildCheckoMissingConfigView("⚖️ <b>Арбитраж</b>", id);
   }
@@ -671,36 +695,52 @@ async function buildArbitrationView(env, id) {
     throw error;
   }
   const items = takeRecords(payload);
-  if (items.length === 0) return { text: `🏛 <b>Арбитраж</b>
-${SECTION_DIVIDER}
-
-Судебные споры не обнаружены.
-Это позитивный сигнал: заметной арбитражной нагрузки по источнику нет.`, reply_markup: compactSectionKeyboard(id, "risk") };
+  if (items.length === 0) return {
+    text: [
+      "🏛 <b>Суды</b>",
+      SECTION_DIVIDER,
+      "",
+      "Судебные дела не найдены.",
+      "",
+      "• Найдено дел: <b>0</b>",
+      "• За 24 месяца: <b>0</b>",
+      "• В роли ответчика: <b>0</b>",
+      "• Последнее дело: <b>—</b>",
+      "• Сумма требований: <b>0 ₽</b>",
+      "",
+      "<b>Что это значит</b>",
+      "По текущим данным заметной судебной нагрузки не видно."
+    ].join("\n"),
+    reply_markup: compactSectionKeyboard(id, "arb")
+  };
 
   const defendantCount = items.filter((it) => /ответчик/i.test(String(it.Роль || ""))).length;
+  const recentCount = items.filter((it) => isWithinLastMonths(it.Дата, 24)).length;
   const lastCase = items[0];
   const claimAmount = items.reduce((sum, it) => sum + toNum(it.СуммаТреб || it.Сумма), 0);
+  const caseLines = items.map((it) => `• ${escapeHtml(it.НомерДела || it.Номер || "б/н")} — ${escapeHtml(formatDate(it.Дата))} · ${escapeHtml(it.Роль || "роль не указана")}`);
+  const pagedCases = paginateItems(caseLines, page);
   const lines = [
-    ...startSection("🏛 <b>Суды</b>"),
+    "🏛 <b>Суды</b>",
+    SECTION_DIVIDER,
     "",
-    items.length >= 5 ? "Судебная нагрузка заметная — стоит проверить причины и исходы дел." : "Судебные дела есть, но объём пока умеренный.",
-    "",
+    escapeHtml(buildCourtsBluf(items.length, defendantCount, claimAmount)),
     `• Найдено дел: <b>${items.length}</b>`,
+    `• За 24 месяца: <b>${recentCount}</b>`,
     `• В роли ответчика: <b>${defendantCount}</b>`,
-    `• Последнее дело: ${escapeHtml(lastCase?.НомерДела || lastCase?.Номер || "нет данных")}`,
-    `• Сумма требований: ${escapeHtml(formatMoney(claimAmount))}`,
+    `• Последнее дело: <b>${escapeHtml(lastCase?.НомерДела || lastCase?.Номер || "нет данных")}</b>`,
+    `• Сумма требований: <b>${escapeHtml(formatMoney(claimAmount))}</b>`,
     "",
-    "<b>Последние дела</b>"
+    `<b>Список дел</b> (Стр. ${pagedCases.page}/${pagedCases.totalPages})`,
+    ...pagedCases.items,
+    "",
+    "<b>Что это значит</b>",
+    escapeHtml(buildCourtsMeaning(defendantCount, claimAmount))
   ];
-  items.slice(0, 5).forEach((it) => {
-    lines.push(`\n› ${escapeHtml(it.НомерДела || it.Номер || "б/н")}  ${formatDate(it.Дата)}`);
-    lines.push(`  🏛 ${escapeHtml(it.Суд || "—")}`);
-    lines.push(`  👤 ${escapeHtml(it.Роль || "—")}  ·  💰 ${formatMoney(it.СуммаТреб || it.Сумма)}`);
-  });
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "risk") };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "arb", pagedCases.page, pagedCases.totalPages) };
 }
 
-async function buildDebtsView(env, id) {
+async function buildDebtsView(env, id, page = 1) {
   if (!isCheckoConfigured(env)) {
     return buildCheckoMissingConfigView("💳 <b>Долги</b>", id);
   }
@@ -722,41 +762,29 @@ async function buildDebtsView(env, id) {
 
   const taxDebt = toNum(firstExistingTaxValue(taxes, ["СумНедоим"]));
   const taxPenalties = toNum(firstExistingTaxValue(taxes, ["СумПениШтр", "СумШтр"]));
-  const debtCharges = toNum(firstExistingTaxValue(taxes, ["СумДоначисл", "СумДолг"]));
-  const hasCriticalSignals = items.length > 0 || taxDebt > 0 || taxPenalties > 0 || debtCharges > 0;
-
-  const lines = [...startSection("🏦 <b>Долги</b>"), ""];
-  lines.push(hasCriticalSignals ? "Есть долговые сигналы — их стоит проверить до сделки." : "Критичной долговой нагрузки по доступным данным не видно.");
-  lines.push("");
-  lines.push(`• ФССП: <b>${items.length}</b>`);
-  lines.push("");
-  if (taxes && typeof taxes === "object") {
-    lines.push("🧾 <b>Налоговый summary</b>");
-    lines.push(`• Недоимка: ${formatTaxMoneyState(taxes, ["СумНедоим"])}`);
-    lines.push(`• Пени и штрафы: ${formatTaxMoneyState(taxes, ["СумПениШтр", "СумШтр"])}`);
-    lines.push(`• Доначисления / долг: ${formatTaxMoneyState(taxes, ["СумДоначисл", "СумДолг"])}`);
-  } else {
-    lines.push("🧾 <b>Налоговые риски</b>");
-    lines.push("• Нет данных от ФНС");
+  const debtLoad = getDebtLoadLabel(items.length, taxDebt, taxPenalties);
+  const nextStep = getDebtNextStep(debtLoad);
+  const enforcementLines = items.map((it) => `• ${escapeHtml(it.ИспПрНомер || it.НомерИП || it.Номер || "—")} — ${escapeHtml(formatMoney(it.СумДолг || it.СуммаДолга || it.Сумма))}`);
+  const pagedEnforcements = paginateItems(enforcementLines, page);
+  const lines = [
+    "🏦 <b>Долги</b>",
+    SECTION_DIVIDER,
+    "",
+    escapeHtml(buildDebtBluf(items.length, taxDebt, taxPenalties)),
+    "",
+    `• ФССП: <b>${items.length}</b>`,
+    `• Недоимка: <b>${escapeHtml(formatTaxMoneyState(taxes, ["СумНедоим"]))}</b>`,
+    `• Пени и штрафы: <b>${escapeHtml(formatTaxMoneyState(taxes, ["СумПениШтр", "СумШтр"]))}</b>`,
+    `• Долговая нагрузка: <b>${escapeHtml(debtLoad)}</b>`,
+    `• Что делать: <b>${escapeHtml(nextStep)}</b>`
+  ];
+  if (pagedEnforcements.totalPages > 1 || pagedEnforcements.items.length > 0) {
+    lines.push("", `<b>ФССП</b> (Стр. ${pagedEnforcements.page}/${pagedEnforcements.totalPages})`, ...pagedEnforcements.items);
   }
-
-  lines.push("");
-  lines.push("📋 <b>ФССП summary</b>");
-  if (items.length === 0) {
-    lines.push("• Не найдены");
-    return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "risk") };
-  }
-
-  lines.push(`• Всего найдено: <b>${items.length}</b>`);
-  items.slice(0, 10).forEach((it) => {
-    lines.push(`\n› ${escapeHtml(it.ИспПрНомер || it.НомерИП || it.Номер || "—")}  ${formatDate(it.ИспПрДата || it.ДатаНачала || it.Дата)}`);
-    lines.push(`  💳 Сумма: ${formatMoney(it.СумДолг || it.СуммаДолга || it.Сумма)}`);
-    lines.push(`  📄 ${escapeHtml(it.ПредмИсп || it.Предмет || "Предмет не указан")}`);
-  });
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "risk") };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "debt", pagedEnforcements.page, pagedEnforcements.totalPages) };
 }
 
-async function buildContractsView(env, id) {
+async function buildContractsView(env, id, page = 1) {
   const baseParams = { ...identifierParams(id), role: "supplier", sort: "-date", limit: 10 };
   const settled = await Promise.allSettled([
     checkoRequest(env, "contracts", { ...baseParams, law: 44 }),
@@ -774,26 +802,48 @@ async function buildContractsView(env, id) {
     .flatMap((entry) => takeRecords(entry.value))
     .sort((a, b) => String(b.Дата || b.ДатаЗакл || "").localeCompare(String(a.Дата || a.ДатаЗакл || "")));
 
-  if (items.length === 0) return { text: `📋 <b>Контракты</b>
-${SECTION_DIVIDER}
+  if (items.length === 0) return {
+    text: [
+      "📋 <b>Контракты</b>",
+      SECTION_DIVIDER,
+      "",
+      "Контракты не найдены.",
+      "",
+      "• Найдено контрактов: <b>0</b>",
+      "• Последняя активность: <b>—</b>",
+      "• Крупнейший контракт: <b>—</b>",
+      "• Заказчики: <b>нет данных</b>",
+      "• Что это значит: <b>госконтракты не зафиксированы</b>"
+    ].join("\n"),
+    reply_markup: compactSectionKeyboard(id, "ctr")
+  };
 
-Контракты не найдены`, reply_markup: compactSectionKeyboard(id, "main") };
-
-  const lines = [...startSection("📋 <b>Госконтракты</b>"), `\nПолучено записей: <b>${items.length}</b>`];
-  if (failedCount > 0) {
-    lines.push(`⚠️ ${failedCount} из 3 источников временно недоступны`);
-  }
-  items.slice(0, 10).forEach((it) => {
-    const contractNumber = firstNonEmpty([it.НомерКонтракта, it.Номер, it.Ид, it.Идентификатор, it.НомерРеестра]);
-    lines.push(`\n› № ${escapeHtml(contractNumber || "б/н")}`);
-    lines.push(`  📆 Дата: ${formatDate(it.Дата || it.ДатаЗакл)}`);
-    lines.push(`  📄 ${escapeHtml(String(it.Предмет || "Предмет не указан"))}`);
-    lines.push(`  💰 Сумма: ${formatMoney(it.Цена || it.СуммаКонтракта)}`);
+  const largest = items.reduce((best, current) => toNum(current.Цена || current.СуммаКонтракта) > toNum(best?.Цена || best?.СуммаКонтракта) ? current : best, items[0]);
+  const topCustomers = [...new Set(items.map((it) => firstNonEmpty([it.Заказчик, it.НаимЗаказчика])).filter(Boolean))].slice(0, 3).join(", ") || "нет данных";
+  const contractLines = items.map((it) => {
+    const contractNumber = firstNonEmpty([it.НомерКонтракта, it.Номер, it.Ид, it.Идентификатор, it.НомерРеестра]) || "б/н";
+    return `• № ${escapeHtml(contractNumber)} — ${escapeHtml(formatMoney(it.Цена || it.СуммаКонтракта))}`;
   });
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "main") };
+  const pagedContracts = paginateItems(contractLines, page);
+  const lines = [
+    "📋 <b>Контракты</b>",
+    SECTION_DIVIDER,
+    "",
+    escapeHtml(buildContractsBluf(items.length, failedCount)),
+    "",
+    `• Найдено контрактов: <b>${items.length}</b>`,
+    `• Последняя активность: <b>${escapeHtml(formatDate(items[0]?.Дата || items[0]?.ДатаЗакл))}</b>`,
+    `• Крупнейший контракт: <b>${escapeHtml(formatMoney(largest?.Цена || largest?.СуммаКонтракта))}</b>`,
+    `• Заказчики: <b>${escapeHtml(topCustomers)}</b>`,
+    `• Что это значит: <b>${escapeHtml(getContractsMeaning(items.length))}</b>`,
+    "",
+    `<b>Список</b> (Стр. ${pagedContracts.page}/${pagedContracts.totalPages})`,
+    ...pagedContracts.items
+  ];
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "ctr", pagedContracts.page, pagedContracts.totalPages) };
 }
 
-async function buildHistoryView(env, id) {
+async function buildHistoryView(env, id, page = 1) {
   if (!isCheckoConfigured(env)) {
     return buildCheckoMissingConfigView("🗓 <b>История</b>", id);
   }
@@ -808,14 +858,19 @@ async function buildHistoryView(env, id) {
     throw error;
   }
   const items = ensureArray(payload.data).slice(0, 15);
-  if (items.length === 0) return { text: `🗓 <b>История</b>
-${SECTION_DIVIDER}
+  if (items.length === 0) return {
+    text: [
+      "🗓 <b>История</b>",
+      SECTION_DIVIDER,
+      "",
+      "Существенных изменений не обнаружено.",
+      "",
+      "<b>Что это значит</b>",
+      "По данным источника заметных событий в истории не видно."
+    ].join("\n"),
+    reply_markup: compactSectionKeyboard(id, "his")
+  };
 
-Существенных изменений не обнаружено.
-Это позитивный empty-state: резких событий по данным источника не видно.`, reply_markup: compactSectionKeyboard(id, "risk") };
-
-  const lines = startSection("🗓 <b>Ключевые изменения</b>");
-  lines.push("", `🎯 Показано событий: <b>${items.length}</b>`);
   const timeline = items
     .map((it) => ({
       date: it.Дата || it.date,
@@ -825,11 +880,20 @@ ${SECTION_DIVIDER}
     .sort((a, b) => b.importance - a.importance)
     .slice(0, 10)
     .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
-  timeline.forEach((it) => lines.push(`• <b>${formatDate(it.date)}</b> — ${escapeHtml(it.summary)}`));
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "risk") };
+  const timelineLines = timeline.map((it) => `• <b>${formatDate(it.date)}</b> — ${escapeHtml(it.summary)}`);
+  const pagedTimeline = paginateItems(timelineLines, page);
+  const lines = [
+    "🗓 <b>История</b>",
+    SECTION_DIVIDER,
+    "",
+    escapeHtml(buildHistoryBluf(timeline)),
+    "",
+    ...pagedTimeline.items
+  ];
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "his", pagedTimeline.page, pagedTimeline.totalPages) };
 }
 
-async function buildConnectionsView(env, id) {
+async function buildConnectionsView(env, id, page = 1) {
   const affiliated = await collectAffiliatedCompanies(env, String(id));
   if (affiliated.state === "missing_config") {
     return {
@@ -859,28 +923,82 @@ async function buildConnectionsView(env, id) {
   const managersCount = affiliated.managers.length;
   const foundersCount = affiliated.founders.length;
   const total = affiliated.total;
-  const lines = startSection("🔗 <b>Связи</b>");
-
-  lines.push("", `🎯 <b>${escapeHtml(getAffiliatedDecisionSignal(total, managersCount, foundersCount))}</b>`);
-  lines.push(`Сеть: ${escapeHtml(getAffiliatedNetworkLabel(total))}`);
-  lines.push("", "🧭 <b>Сводка</b>");
-  lines.push(`Через руководителя: <b>${managersCount}</b>`);
-  lines.push(`Через учредителя: <b>${foundersCount}</b>`);
-  lines.push(`Общий объём сети: <b>${total}</b>`);
+  const listItems = [
+    ...affiliated.managers.map((item) => `• ${escapeHtml(item.name)} — через руководителя`),
+    ...affiliated.founders.map((item) => `• ${escapeHtml(item.name)} — через учредителя`)
+  ];
+  const pagedLinks = paginateItems(listItems, page);
+  const lines = [
+    "🔗 <b>Связи</b>",
+    SECTION_DIVIDER,
+    "",
+    `${getAffiliatedStatusEmoji(total)} <b>${escapeHtml(getAffiliatedDecisionSignal(total, managersCount, foundersCount))}</b>`,
+    "",
+    "<b>Сводка</b>",
+    `• Через руководителя: <b>${managersCount}</b>`,
+    `• Через учредителя: <b>${foundersCount}</b>`,
+    `• Общий объём сети: <b>${total}</b>`
+  ];
 
   if (total === 0) {
-    lines.push("", "Аффилированные компании не найдены");
+    lines.push("", "<b>Что это значит</b>", "По данным DaData плотной сети связанных компаний не видно.");
     return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk") };
   }
 
-  lines.push(...buildAffiliatedGroupLines("Через руководителя", affiliated.managers, AFFILIATED_LIMIT));
-  lines.push(...buildAffiliatedGroupLines("Через учредителя", affiliated.founders, AFFILIATED_LIMIT));
-  lines.push("", `Итог: ${escapeHtml(getAffiliatedNetworkLabel(total))}`);
-
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk") };
+  lines.push("", `<b>Список</b> (Стр. ${pagedLinks.page}/${pagedLinks.totalPages})`, ...pagedLinks.items, "", "<b>Что это значит</b>", escapeHtml(getAffiliatedNetworkLabel(total)));
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk", pagedLinks.page, pagedLinks.totalPages) };
 }
 
-async function buildFoundersView(env, id) {
+async function buildSuccessorView(env, id) {
+  if (!isCheckoConfigured(env)) {
+    return buildCheckoMissingConfigView("🏢 <b>Правопреемник</b>", id);
+  }
+
+  let payload;
+  try {
+    payload = await checkoRequest(env, "company", identifierParams(id));
+  } catch (error) {
+    if (error instanceof CheckoServiceError) {
+      return buildCheckoTemporaryUnavailableView("🏢 <b>Правопреемник</b>", id);
+    }
+    throw error;
+  }
+
+  const successor = getSuccessorEntity(payload.data || {});
+  if (!successor) {
+    return {
+      text: [
+        "🏢 <b>Правопреемник</b>",
+        SECTION_DIVIDER,
+        "",
+        "Информация о правопреемнике не найдена."
+      ].join("\n"),
+      reply_markup: compactSectionKeyboard(id, "succ")
+    };
+  }
+
+  const successorId = String(successor.ИНН || successor.inn || "").trim();
+  const lines = [
+    "🏢 <b>Правопреемник</b>",
+    SECTION_DIVIDER,
+    "",
+    `<b>${escapeHtml(firstNonEmpty([successor.Наим, successor.НаимСокр, successor.name, "Без названия"]))}</b>`,
+    "",
+    `• Статус: <b>${escapeHtml(firstNonEmpty([successor.Статус?.Наим, successor.status, "нет данных"]))}</b>`,
+    `• ИНН: <code>${escapeHtml(successorId || "нет данных")}</code>`,
+    `• Руководитель: <b>${escapeHtml(firstNonEmpty([successor.Руковод?.[0]?.ФИО, successor.Руководитель, successor.director, "нет данных"]))}</b>`,
+    "• Связь: <b>правопреемник ликвидированной компании</b>",
+    "• Что проверить: <b>долги, суды, действующий статус</b>"
+  ];
+
+  const keyboard = compactSectionKeyboard(id, "succ");
+  if (successorId) {
+    keyboard.inline_keyboard.unshift([kb("Открыть компанию", `select:company:${successorId}`)]);
+  }
+  return { text: lines.join("\n"), reply_markup: keyboard };
+}
+
+async function buildFoundersView(env, id, page = 1) {
   if (!isCheckoConfigured(env)) {
     return buildCheckoMissingConfigView("👥 <b>Учредители</b>", id);
   }
@@ -902,15 +1020,13 @@ ${SECTION_DIVIDER}
 Это не всегда негативный фактор: часть структур не раскрывает состав в источнике.
 Можно вернуться в карточку и проверить связи или реквизиты.`, reply_markup: compactSectionKeyboard(id, "lnk") };
 
-  const lines = startSection("👥 <b>Учредители</b>");
-  founders.forEach((f, idx) => {
-    lines.push(`\n${idx + 1}.  <b>${escapeHtml(f.ФИО || f.Наим || "—")}</b>`);
-    lines.push(`   Доля  ${f.Доля?.Процент || f.Доля?.Проц || f.ДоляПроц || "—"}%  ·  ${formatFounderAmount(f.Доля?.Сумма, f.ДоляСумма)}`);
-  });
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk") };
+  const founderLines = founders.map((f) => `• ${escapeHtml(f.ФИО || f.Наим || "—")} — ${escapeHtml(String(f.Доля?.Процент || f.Доля?.Проц || f.ДоляПроц || "—"))}%`);
+  const pagedFounders = paginateItems(founderLines, page);
+  const lines = ["👥 <b>Учредители</b>", SECTION_DIVIDER, "", ...pagedFounders.items];
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "own", pagedFounders.page, pagedFounders.totalPages) };
 }
 
-async function buildBranchesView(env, id) {
+async function buildBranchesView(env, id, page = 1) {
   if (!isCheckoConfigured(env)) {
     return buildCheckoMissingConfigView("🏬 <b>Филиалы</b>", id);
   }
@@ -931,12 +1047,13 @@ ${SECTION_DIVIDER}
 Филиальная сеть не обнаружена или источник не передал данные.
 Это нормальная ситуация для компаний без обособленных подразделений.`, reply_markup: compactSectionKeyboard(id, "lnk") };
 
-  const lines = [...startSection("🏬 <b>Филиалы</b>"), `\nВсего: <b>${branches.length}</b>`];
-  branches.slice(0, 20).forEach((b, idx) => lines.push(`\n${idx + 1}.  КПП ${escapeHtml(b.КПП || "—")}\n   ${escapeHtml(b.Адрес || b.АдресРФ || "—")}`));
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk") };
+  const branchLines = branches.map((b) => `• КПП ${escapeHtml(b.КПП || "—")} — ${escapeHtml(truncate(String(b.Адрес || b.АдресРФ || "—"), 48))}`);
+  const pagedBranches = paginateItems(branchLines, page);
+  const lines = ["🏬 <b>Филиалы</b>", SECTION_DIVIDER, "", `Всего: <b>${branches.length}</b>`, ...pagedBranches.items];
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "fil", pagedBranches.page, pagedBranches.totalPages) };
 }
 
-async function buildOkvedView(env, id) {
+async function buildOkvedView(env, id, page = 1) {
   if (!isCheckoConfigured(env)) {
     return buildCheckoMissingConfigView("🔖 <b>ОКВЭД</b>", id);
   }
@@ -953,22 +1070,24 @@ async function buildOkvedView(env, id) {
   const data = payload.data || {};
   const primary = data.ОКВЭД;
   const additional = ensureArray(data.ОКВЭДДоп || data.ДопОКВЭД);
-  const lines = startSection("🔖 <b>ОКВЭД</b>");
-  lines.push(`\n<b>Основной</b>  ${escapeHtml(formatOkved(primary))}`);
-  if (additional.length === 0) lines.push("\nДополнительные: нет данных");
-  else {
-    lines.push("\n<b>Дополнительные</b>");
-    additional.slice(0, 8).forEach((o) => lines.push(`› ${escapeHtml(formatOkved(o))}`));
-    if (additional.length > 8) lines.push(`… ещё ${additional.length - 8}`);
-  }
+  const additionalLines = additional.map((o) => `• ${escapeHtml(formatOkved(o))}`);
+  const pagedOkved = paginateItems(additionalLines, page);
+  const lines = [
+    "🔖 <b>ОКВЭД</b>",
+    SECTION_DIVIDER,
+    "",
+    `<b>Основной</b> ${escapeHtml(formatOkved(primary))}`,
+  ];
+  if (additional.length === 0) lines.push("Дополнительные: нет данных");
+  else lines.push("", `<b>Дополнительные</b> (Стр. ${pagedOkved.page}/${pagedOkved.totalPages})`, ...pagedOkved.items);
   if (!primary && additional.length === 0) return { text: `🔖 <b>ОКВЭД</b>
 ${SECTION_DIVIDER}
 
-Данные по ОКВЭД не найдены`, reply_markup: compactSectionKeyboard(id, "lnk") };
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk") };
+Данные по ОКВЭД не найдены`, reply_markup: compactSectionKeyboard(id, "okv") };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "okv", pagedOkved.page, pagedOkved.totalPages) };
 }
 
-async function buildTaxesView(env, id) {
+async function buildTaxesView(env, id, page = 1) {
   if (!isCheckoConfigured(env)) {
     return buildCheckoMissingConfigView("🧾 <b>Налоги</b>", id);
   }
@@ -988,18 +1107,20 @@ ${SECTION_DIVIDER}
 
 Налоговые данные не найдены`, reply_markup: compactSectionKeyboard(id, "risk") };
 
+  const yearlyLines = Object.keys(taxes.ПоГодам || {}).sort().reverse().map((year) => `• ${year}: ${formatMoney(taxes.ПоГодам[year])}`);
+  const pagedYears = paginateItems(yearlyLines, page);
   const lines = [
-    ...startSection("🧾 <b>Налоги</b>"),
+    "🧾 <b>Налоги</b>",
+    SECTION_DIVIDER,
     "",
     `Итого уплачено: ${formatTaxMoneyState(taxes, ["СумУпл", "СумНалогов"])}`,
     `Недоимка: ${formatTaxMoneyState(taxes, ["СумНедоим"])}`,
     `Пени и штрафы: ${formatTaxMoneyState(taxes, ["СумПениШтр", "СумШтр"])}`
   ];
   if (taxes.ПоГодам && typeof taxes.ПоГодам === "object") {
-    lines.push("");
-    Object.keys(taxes.ПоГодам).sort().reverse().forEach((year) => lines.push(`📆 ${year}  ${formatMoney(taxes.ПоГодам[year])}`));
+    lines.push("", `<b>По годам</b> (Стр. ${pagedYears.page}/${pagedYears.totalPages})`, ...pagedYears.items);
   }
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "risk") };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "tax", pagedYears.page, pagedYears.totalPages) };
 }
 
 async function buildEntrepreneurView(env, id) {
@@ -1090,23 +1211,20 @@ async function sendHtmlMessage(env, chatId, view) {
   });
 }
 
-function buildCompanyKeyboard(id, env = {}) {
+function buildCompanyKeyboard(id, env = {}, opts = {}) {
   const rows = [];
   if (isCheckoConfigured(env)) {
     rows.push(
       [kb("⚖️ Риски", `co:risk:${id}`), kb("🏛 Суды", `co:arb:${id}`)],
       [kb("🏦 Долги", `co:debt:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
-      [kb("👥 Учредители", `co:own:${id}`), kb("📊 Финансы", `co:fin:${id}`)]
+      [kb("📊 Финансы", `co:fin:${id}`), kb("📋 Контракты", `co:ctr:${id}`)],
+      [kb("🏢 Правопреемник", `co:succ:${id}`), kb("🗓 История", `co:his:${id}`)]
     );
   } else {
     rows.push([kb("🔗 Связи", `co:lnk:${id}`)]);
   }
-
-  rows.push([kb("🏢 Карточка", `co:main:${id}`), kb("🏠 Меню", "menu")]);
-
-  return {
-    inline_keyboard: rows
-  };
+  rows.push([kb("🏠 Меню", "menu")]);
+  return withPagerRow(rows, "main", id, opts.page, opts.totalPages);
 }
 
 function buildCheckoMissingConfigView(title, id) {
@@ -1115,10 +1233,12 @@ function buildCheckoMissingConfigView(title, id) {
 ${SECTION_DIVIDER}
 
 Раздел временно недоступен.
-Источник не настроен.
-Добавьте CHECKO_API_KEY и повторите позже.
+Источник данных не настроен.
 
-Можно вернуться в карточку и открыть другой раздел.`,
+Что можно сделать:
+• добавить CHECKO_API_KEY
+• вернуться в карточку
+• открыть другой раздел`,
     reply_markup: compactSectionKeyboard(id)
   };
 }
@@ -1129,51 +1249,83 @@ function buildCheckoTemporaryUnavailableView(title, id) {
 ${SECTION_DIVIDER}
 
 Раздел временно недоступен.
-⚠️ Источник временно недоступен.
-Сервис Checko недоступен.
+Источник данных сейчас не отвечает.
 
 Что делать:
-• попробуйте через 1–2 минуты
-• откройте текущую карточку снова
+• попробуйте позже
+• вернуться в карточку
 • перейдите в другой раздел`,
     reply_markup: compactSectionKeyboard(id)
   };
 }
 
-function compactSectionKeyboard(id, section = "main") {
+function compactSectionKeyboard(id, section = "main", page = 1, totalPages = 1) {
+  let rows;
   if (section === "risk") {
-    return {
-      inline_keyboard: [
-        [kb("🏛 Арбитраж", `co:arb:${id}`), kb("🏦 Долги и налоги", `co:debt:${id}`)],
-        [kb("🗓 История", `co:his:${id}`)],
-        [kb("🔙 В карточку", `co:main:${id}`)]
-      ]
-    };
+    rows = [
+      [kb("🏛 Суды", `co:arb:${id}`), kb("🏦 Долги", `co:debt:${id}`)],
+      [kb("🗓 История", `co:his:${id}`), kb("🏢 Правопреемник", `co:succ:${id}`)],
+      [kb("🔙 В карточку", `co:main:${id}`)]
+    ];
+    return withPagerRow(rows, section, id, page, totalPages);
+  }
+  if (section === "arb") {
+    rows = [
+      [kb("⚖️ Риски", `co:risk:${id}`), kb("🏦 Долги", `co:debt:${id}`)],
+      [kb("🔙 В карточку", `co:main:${id}`)]
+    ];
+    return withPagerRow(rows, section, id, page, totalPages);
+  }
+  if (section === "debt") {
+    rows = [
+      [kb("⚖️ Риски", `co:risk:${id}`), kb("🏛 Суды", `co:arb:${id}`)],
+      [kb("🔙 В карточку", `co:main:${id}`)]
+    ];
+    return withPagerRow(rows, section, id, page, totalPages);
   }
   if (section === "lnk") {
-    return {
-      inline_keyboard: [
-        [kb("👥 Учредители", `co:own:${id}`), kb("🏢 Филиалы", `co:fil:${id}`)],
-        [kb("🏷 ОКВЭД", `co:okv:${id}`)],
-        [kb("🔙 В карточку", `co:main:${id}`)]
-      ]
-    };
+    rows = [
+      [kb("🏢 Правопреемник", `co:succ:${id}`)],
+      [kb("🔙 В карточку", `co:main:${id}`)]
+    ];
+    return withPagerRow(rows, section, id, page, totalPages);
   }
   if (section === "fin") {
-    return {
-      inline_keyboard: [
-        [kb("🔙 В карточку", `co:main:${id}`)]
-      ]
-    };
+    rows = [
+      [kb("🏦 Долги", `co:debt:${id}`), kb("📋 Контракты", `co:ctr:${id}`)],
+      [kb("🔙 В карточку", `co:main:${id}`)]
+    ];
+    return withPagerRow(rows, section, id, page, totalPages);
   }
-  return {
-    inline_keyboard: [
+  if (section === "ctr") {
+    rows = [
+      [kb("📊 Финансы", `co:fin:${id}`)],
+      [kb("🔙 В карточку", `co:main:${id}`)]
+    ];
+    return withPagerRow(rows, section, id, page, totalPages);
+  }
+  if (section === "his") {
+    rows = [
+      [kb("⚖️ Риски", `co:risk:${id}`)],
+      [kb("🔙 В карточку", `co:main:${id}`)]
+    ];
+    return withPagerRow(rows, section, id, page, totalPages);
+  }
+  if (section === "succ") {
+    rows = [
+      [kb("⚖️ Риски", `co:risk:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
+      [kb("🔙 В карточку", `co:main:${id}`)]
+    ];
+    return { inline_keyboard: rows };
+  }
+  rows = [
       [kb("⚖️ Риски", `co:risk:${id}`), kb("🏛 Суды", `co:arb:${id}`)],
       [kb("🏦 Долги", `co:debt:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
-      [kb("👥 Учредители", `co:own:${id}`), kb("📊 Финансы", `co:fin:${id}`)],
-      [kb("🏢 Карточка", `co:main:${id}`), kb("🏠 Меню", "menu")]
-    ]
-  };
+      [kb("📊 Финансы", `co:fin:${id}`), kb("📋 Контракты", `co:ctr:${id}`)],
+      [kb("🏢 Правопреемник", `co:succ:${id}`), kb("🗓 История", `co:his:${id}`)],
+      [kb("🔙 В карточку", `co:main:${id}`), kb("🏠 Меню", "menu")]
+    ];
+  return withPagerRow(rows, section, id, page, totalPages);
 }
 
 function buildGlobalReplyKeyboard() {
@@ -1295,6 +1447,67 @@ function getDadataDecisionSignal(partyData) {
   return "Проверьте актуальность статуса";
 }
 
+function statusIcon(status) {
+  const normalized = String(status || "").trim().toUpperCase();
+  if (normalized === "ACTIVE") return "🟢";
+  if (normalized === "LIQUIDATING") return "🟠";
+  if (normalized.includes("BANKRUPT") || normalized === "LIQUIDATED") return "🔴";
+  return "🟡";
+}
+
+function statusLabel(status) {
+  const normalized = String(status || "").trim().toUpperCase();
+  if (normalized === "ACTIVE") return "действующая организация";
+  if (normalized === "LIQUIDATING") return "организация в процессе ликвидации";
+  if (normalized === "LIQUIDATED") return "организация ликвидирована";
+  if (normalized.includes("BANKRUPT")) return "организация в банкротстве";
+  if (!normalized) return "статус требует уточнения";
+  return normalized.toLowerCase();
+}
+
+function buildStatusVerdict(dadataParty) {
+  const status = String(dadataParty?.state?.status || "").trim().toUpperCase();
+  if (status === "LIQUIDATED" || dadataParty?.state?.liquidation_date) {
+    return "Компания ликвидирована. Рассматривать как действующего контрагента нельзя.";
+  }
+  if (status === "LIQUIDATING") {
+    return "Компания в процессе ликвидации. Новые обязательства рискованны.";
+  }
+  if (status.includes("BANKRUPT")) {
+    return "Компания в банкротстве. Работа возможна только через арбитражного управляющего.";
+  }
+  if (status === "ACTIVE") {
+    return "Компания действующая. Проверьте риски и долги перед сделкой.";
+  }
+  return "Статус требует уточнения. Рекомендуется ручная проверка.";
+}
+
+function truncateAddress(address) {
+  const cleaned = String(address || "")
+    .replace(/^\d{6},?\s*/u, "")
+    .replace(/^Россия,?\s*/iu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned ? truncate(cleaned, 60) : "нет данных";
+}
+
+function getSuccessorNameFromDadata(partyData) {
+  return firstNonEmpty([
+    partyData?.successor?.name,
+    partyData?.правопреемник?.name,
+    "—"
+  ]);
+}
+
+function getSuccessorEntity(data) {
+  return firstTruthy([
+    ensureArray(data?.Правопреемник)[0],
+    ensureArray(data?.Правопреемники)[0],
+    data?.Правопреемник,
+    data?.Правопреемники
+  ]);
+}
+
 function getDadataSubtitle(partyData) {
   const status = String(partyData?.state?.status || "").trim();
   const actualityDate = formatDateFromMsOrIso(partyData?.state?.actuality_date);
@@ -1317,40 +1530,176 @@ function getReadableCompanyStatus(status) {
   return normalized.toLowerCase();
 }
 
-function buildRiskDashboardText(result, companyData = {}) {
-  const levelMap = {
-    low: { emoji: "🟢", bluf: "Явных критичных рисков немного" },
-    medium: { emoji: "🟡", bluf: "Есть сигналы, которые стоит проверить перед сделкой" },
-    high: { emoji: "🟠", bluf: "Риск-профиль повышенный" },
-    critical: { emoji: "🔴", bluf: "Нужна жёсткая ручная проверка до сделки" }
-  };
-  const current = levelMap[result.level] || levelMap.medium;
-  const statusText = String(companyData?.Статус?.Наим || "").toLowerCase();
-  const isLiquidated = /ликвид|не\s*действ|прекращ/.test(statusText);
-  const negatives = result.negatives || [];
-  const unknowns = result.unknowns || [];
-  const summaryLine = (items, emptyText) => items.length > 0 ? items.slice(0, 2).join(", ") : emptyText;
+function buildRiskDashboardText(result, context = {}) {
+  const decisionMeta = getRiskDecisionMeta(result.decision);
+  const unknowns = ensureArray(result.unknowns);
+  const legalCases = ensureArray(context.legalCases);
+  const taxes = context.taxes || {};
+  const arbitrationSummary = legalCases.length === 0 ? "критичных сигналов не видно" : legalCases.length >= 5 ? "нагрузка заметная" : "есть отдельные дела";
+  const defendantSummary = legalCases.filter((item) => /ответчик/i.test(String(item.Роль || ""))).length || "нет явных сигналов";
+  const debtSummary = buildRiskDebtSummary(ensureArray(result.negatives));
+  const taxSummary = buildRiskTaxSummary(ensureArray(result.negatives));
+  const meaningText = unknowns.length >= 3 ? `${decisionMeta.meaning} Данных для уверенного вывода не хватает, поэтому решение лучше считать осторожным.` : decisionMeta.meaning;
 
-  return [
+  const lines = [
     "⚖️ <b>Риски</b>",
     SECTION_DIVIDER,
     "",
-    `${current.emoji} <b>${escapeHtml(isLiquidated ? "Высокий риск" : current.bluf)}</b>`,
+    `${decisionMeta.emoji} <b>${escapeHtml(decisionMeta.bluf)}</b>`,
     "",
-    "<b>Что важно</b>",
-    `• ${escapeHtml(isLiquidated ? "компания ликвидирована или прекратила деятельность" : summaryLine(negatives.slice(0, 1), "критичных стоп-сигналов немного"))}`,
-    `• ${escapeHtml(summaryLine(negatives.filter((item) => /налог|долг|фссп|пени/i.test(item)), "долги и ФССП не выглядят критично"))}`,
-    `• ${escapeHtml(summaryLine(negatives.filter((item) => /суд|арбитраж|ответчик/i.test(item)), "архивные суды требуют проверки только при наличии споров"))}`,
-    `• ${escapeHtml(isLiquidated ? "нужно проверить архивные обязательства и связанные структуры" : "проверьте разделы долгов, судов и связей перед сделкой")}`,
+    "<b>Сводка</b>",
+    `• Арбитраж: ${escapeHtml(arbitrationSummary)}`,
+    `• Долги / ФССП: ${escapeHtml(debtSummary)}`,
+    `• Налоги: ${escapeHtml(taxSummary || formatTaxMoneyState(taxes, ["СумНедоим"]))}`,
+    `• Суды в роли ответчика: ${escapeHtml(String(defendantSummary))}`,
     "",
     "<b>Что это значит</b>",
-    escapeHtml(isLiquidated ? "Для новой сделки компанию нужно рассматривать как недействующую. Проверку стоит продолжать по связанным компаниям и прошлым обязательствам." : result.recommendation),
-    "",
-    `Score: <b>${result.score}/100</b>`,
-    `Решение: <b>${escapeHtml(String(result.decision || "manual_review"))}</b>`,
-    negatives.length > 0 ? `Минусы: ${escapeHtml(negatives.slice(0, 4).join(", "))}` : "Минусы: явные негативные факторы не доминируют",
-    unknowns.length > 0 ? `Неизвестно: ${escapeHtml(unknowns.slice(0, 3).join(", "))}` : "Неизвестно: критичных пробелов в данных немного"
-  ].join("\n");
+    escapeHtml(meaningText)
+  ];
+
+  if (unknowns.length > 0) {
+    lines.push("", "Неизвестно:");
+    for (const item of unknowns.slice(0, 3)) lines.push(`• ${escapeHtml(item)}`);
+  }
+
+  return lines.join("\n");
+}
+
+function getRiskDecisionMeta(decision) {
+  if (decision === "approve_standard") {
+    return {
+      emoji: "🟢",
+      bluf: "Критичных факторов не обнаружено",
+      label: "стандартные условия",
+      meaning: "Компания выглядит устойчиво. Существенных блокеров по текущим данным не видно.",
+      recommendation: "Можно работать на стандартных условиях."
+    };
+  }
+  if (decision === "approve_caution") {
+    return {
+      emoji: "🟡",
+      bluf: "Есть отдельные сигналы, которые стоит учесть",
+      label: "работать с осторожностью",
+      meaning: "Риск не выглядит критичным, но условия сделки лучше сделать аккуратнее.",
+      recommendation: "Сократите отсрочку, проверьте документы и лимит."
+    };
+  }
+  if (decision === "manual_review") {
+    return {
+      emoji: "🟠",
+      bluf: "Нужна ручная проверка",
+      label: "ручная проверка перед сделкой",
+      meaning: "Есть сочетание факторов, которое требует отдельного анализа до согласования условий.",
+      recommendation: "Проверьте юрблок, долги, роль в судах и структуру связей."
+    };
+  }
+  if (decision === "prepay_only") {
+    return {
+      emoji: "🔴",
+      bluf: "Риск высокий",
+      label: "только предоплата",
+      meaning: "Для отсрочки платежа профиль компании выглядит слишком рискованным.",
+      recommendation: "Работать только по полной или поэтапной предоплате."
+    };
+  }
+  return {
+    emoji: "⛔",
+    bluf: "Есть критический стоп-фактор",
+    label: "отказ / обязательная правовая проверка",
+    meaning: "Новую сделку без отдельной правовой оценки рассматривать нельзя.",
+    recommendation: "Остановить сделку или перевести в юридический разбор."
+  };
+}
+
+function buildRiskCourtSummary(negatives) {
+  if (negatives.some((item) => /ответчик|судебный паттерн|судам: компания регулярно выступает ответчиком/i.test(item))) {
+    return "есть существенные сигналы";
+  }
+  if (negatives.some((item) => /судебный фон/i.test(item))) {
+    return "есть общий судебный фон";
+  }
+  return "критичных сигналов не видно";
+}
+
+function buildRiskDebtSummary(negatives) {
+  if (negatives.some((item) => /фссп|исполнительные производства|долговая нагрузка/i.test(item))) {
+    return "есть давление";
+  }
+  return "критичного давления не видно";
+}
+
+function buildRiskTaxSummary(negatives) {
+  if (negatives.some((item) => /налог|недоим|пени|штраф/i.test(item))) {
+    return "есть налоговые сигналы";
+  }
+  return "существенных сигналов не видно";
+}
+
+function buildCourtsBluf(total, defendantCount, claimAmount) {
+  if (defendantCount >= 3 || claimAmount >= 1000000) return "Судебная нагрузка заметная — стоит проверить причины и исходы дел.";
+  if (total > 0) return "Судебные дела есть, но объём пока умеренный.";
+  return "Судебные дела не найдены.";
+}
+
+function buildCourtsMeaning(defendantCount, claimAmount) {
+  if (defendantCount >= 3 || claimAmount >= 1000000) return "Перед сделкой стоит проверить исходы дел, роль компании и сумму требований.";
+  if (defendantCount > 0) return "Есть дела с участием компании — проверьте свежие споры и текущий статус.";
+  return "По текущим данным критичной судебной нагрузки не видно.";
+}
+
+function buildDebtBluf(fsspCount, taxDebt, taxPenalties) {
+  if (fsspCount > 0 || taxDebt > 0 || taxPenalties > 0) return "Есть долговые сигналы — их стоит проверить до сделки.";
+  return "Критичной долговой нагрузки по доступным данным не видно.";
+}
+
+function getDebtLoadLabel(fsspCount, taxDebt, taxPenalties) {
+  if (fsspCount >= 3 || taxDebt >= 100000) return "высокая";
+  if (fsspCount > 0 || taxDebt > 0 || taxPenalties > 0) return "умеренная";
+  return "отсутствует";
+}
+
+function getDebtNextStep(load) {
+  if (load === "высокая") return "проверить долги и условия оплаты";
+  if (load === "умеренная") return "проверить свежесть и предмет требований";
+  return "можно переходить к другим разделам";
+}
+
+function buildContractsBluf(count, failedCount) {
+  if (failedCount > 0) return "Часть источников временно недоступна, но контрактная активность видна.";
+  if (count >= 5) return "Контрактная активность заметна — полезно проверить крупных заказчиков.";
+  return "Контрактная активность ограниченная.";
+}
+
+function getContractsMeaning(count) {
+  if (count >= 5) return "есть заметная история работы по контрактам";
+  if (count > 0) return "есть отдельные контрактные записи";
+  return "контрактная активность не видна";
+}
+
+function buildHistoryBluf(items) {
+  if (!items.length) return "Существенных изменений не обнаружено.";
+  const top = items[0];
+  return `Последнее заметное событие: ${formatDate(top.date)} — ${top.summary}`;
+}
+
+function summarizeFinanceBluf(rows) {
+  const summary = summarizeFinanceSignals(rows);
+  if (summary === "нет данных") return "Финансовая активность требует ручной проверки.";
+  return `Есть признаки живой финансовой активности: ${summary}.`;
+}
+
+function isWithinLastMonths(dateValue, months) {
+  if (!dateValue) return false;
+  const timestamp = new Date(dateValue).getTime();
+  if (!Number.isFinite(timestamp)) return false;
+  const diffMonths = months * 30 * 24 * 60 * 60 * 1000;
+  return Date.now() - timestamp <= diffMonths;
+}
+
+function getAffiliatedStatusEmoji(total) {
+  if (total === 0) return "🟢";
+  if (total <= 3) return "🟡";
+  return "🟠";
 }
 
 function firstExistingTaxValue(taxes, keys) {
@@ -1402,6 +1751,13 @@ function firstNonEmpty(values) {
     if (hasText(value)) return String(value);
   }
   return "";
+}
+
+function firstTruthy(values) {
+  for (const value of values) {
+    if (value) return value;
+  }
+  return null;
 }
 
 function hasText(value) {
@@ -1575,12 +1931,24 @@ async function findAffiliatedByInn(env, inn, scope) {
 async function collectAffiliatedCompanies(env, sourceInn) {
   if (!isDadataConfigured(env) || !sourceInn) return { managers: [], founders: [], total: 0, state: "missing_config" };
 
+  let party;
+  try {
+    party = await findPartyByInnOrOgrn(env, sourceInn);
+  } catch (error) {
+    if (error instanceof DadataServiceError) {
+      return { managers: [], founders: [], total: 0, state: "unavailable" };
+    }
+    throw error;
+  }
+
+  const managerInns = extractAffiliationSourceInns(party?.managers || party?.management);
+  const founderInns = extractAffiliationSourceInns(party?.founders);
   const scopeConfigs = [
-    { scope: ["MANAGERS"], group: "managers" },
-    { scope: ["FOUNDERS"], group: "founders" }
+    { scope: ["MANAGERS"], group: "managers", inns: managerInns },
+    { scope: ["FOUNDERS"], group: "founders", inns: founderInns }
   ];
   const results = await Promise.allSettled(
-    scopeConfigs.map(({ scope }) => findAffiliatedByInn(env, sourceInn, scope))
+    scopeConfigs.map(({ scope, inns }) => findAffiliatedForPersons(env, inns, scope))
   );
 
   const sourceInnNormalized = String(sourceInn || "").trim();
@@ -1590,9 +1958,11 @@ async function collectAffiliatedCompanies(env, sourceInn) {
   const managers = [];
   const founders = [];
   let unavailableCount = 0;
+  let attemptedCount = 0;
 
   for (let i = 0; i < scopeConfigs.length; i++) {
     const result = results[i];
+    if (scopeConfigs[i].inns.length > 0) attemptedCount += 1;
     if (result.status === "rejected") {
       if (result.reason instanceof DadataServiceError) {
         unavailableCount += 1;
@@ -1623,11 +1993,38 @@ async function collectAffiliatedCompanies(env, sourceInn) {
     }
   }
 
-  if (unavailableCount === scopeConfigs.length) {
+  if (unavailableCount > 0 && managers.length === 0 && founders.length === 0 && attemptedCount > 0) {
     return { managers: [], founders: [], total: 0, state: "unavailable" };
   }
 
   return { managers, founders, total: seenTotal.size, state: "ok" };
+}
+
+async function findAffiliatedForPersons(env, inns, scope) {
+  const ids = [...new Set(ensureArray(inns).map((item) => String(item || "").trim()).filter(Boolean))];
+  if (ids.length === 0) return [];
+
+  const settled = await Promise.allSettled(ids.map((inn) => findAffiliatedByInn(env, inn, scope)));
+  const items = [];
+
+  for (const result of settled) {
+    if (result.status === "rejected") {
+      if (result.reason instanceof DadataServiceError) {
+        throw result.reason;
+      }
+      throw result.reason;
+    }
+    items.push(...result.value);
+  }
+
+  return items;
+}
+
+function extractAffiliationSourceInns(value) {
+  return ensureArray(value)
+    .flatMap((item) => [item?.inn, item?.data?.inn, item?.share?.inn])
+    .map((inn) => String(inn || "").trim())
+    .filter((inn) => /^\d{10,12}$/.test(inn));
 }
 
 function buildAffiliatedGroupLines(title, items, limit) {
@@ -1883,6 +2280,51 @@ function buildRiskLevel({ taxDebt = 0, legalCount = 0, fsspCount = 0 }) {
   if (score >= 8) return { icon: "🔴", label: "Высокий" };
   if (score >= 2) return { icon: "🟡", label: "Средний" };
   return { icon: "🟢", label: "Низкий" };
+}
+
+function parseCompanySectionCallback(data) {
+  const match = String(data || "").match(/^co:([^:]+):([^:]+)(?::p:(\d+))?$/);
+  if (!match) return null;
+  return {
+    section: match[1],
+    id: match[2],
+    page: parsePageFromCallback(match[3])
+  };
+}
+
+function parsePageFromCallback(value) {
+  const page = Number.parseInt(String(value || "1"), 10);
+  return Number.isFinite(page) && page > 0 ? page : 1;
+}
+
+function paginateItems(items, page, pageSize = PAGE_SIZE) {
+  const normalizedItems = Array.isArray(items) ? items : [];
+  const totalPages = Math.max(1, Math.ceil(normalizedItems.length / pageSize));
+  const safePage = Math.min(Math.max(1, page || 1), totalPages);
+  const start = (safePage - 1) * pageSize;
+  return {
+    items: normalizedItems.slice(start, start + pageSize),
+    page: safePage,
+    totalPages,
+    hasPrev: safePage > 1,
+    hasNext: safePage < totalPages
+  };
+}
+
+function buildPagerRow(section, id, page, totalPages) {
+  if (!totalPages || totalPages <= 1) return null;
+  const row = [];
+  if (page > 1) row.push(kb("⬅️", `co:${section}:${id}:p:${page - 1}`));
+  row.push(kb(`${page}/${totalPages}`, `co:${section}:${id}:p:${page}`));
+  if (page < totalPages) row.push(kb("➡️", `co:${section}:${id}:p:${page + 1}`));
+  return row;
+}
+
+function withPagerRow(rows, section, id, page = 1, totalPages = 1) {
+  const pagerRow = buildPagerRow(section, id, page, totalPages);
+  return {
+    inline_keyboard: pagerRow ? [pagerRow, ...rows] : rows
+  };
 }
 
 function startSection(title) {
