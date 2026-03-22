@@ -906,7 +906,10 @@ async function buildConnectionsView(env, id, page = 1) {
         "🔗 <b>Связи</b>",
         SECTION_DIVIDER,
         "",
-
+        "Источник временно недоступен.",
+        "Не удалось получить связи компании из DaData.",
+        "",
+        "Попробуйте позже или вернитесь в карточку."
       ].join("\n"),
       reply_markup: compactSectionKeyboard(id, "lnk")
     };
@@ -915,7 +918,93 @@ async function buildConnectionsView(env, id, page = 1) {
   const managersCount = affiliated.managers.length;
   const foundersCount = affiliated.founders.length;
   const total = affiliated.total;
+  if (total === 0) {
+    return {
+      text: [
+        "🔗 <b>Связи</b>",
+        SECTION_DIVIDER,
+        "",
+        "🟢 <b>Связи не найдены.</b>",
+        "",
+        "Компания, вероятно, самостоятельная:",
+        "общих руководителей или учредителей по данным DaData не видно."
+      ].join("\n"),
+      reply_markup: compactSectionKeyboard(id, "lnk")
+    };
+  }
 
+  const pagedItems = paginateItems(
+    affiliated.deduped.map((item) => `• ${escapeHtml(formatAffiliatedListItem(item))}`),
+    page
+  );
+  const lines = [
+    "🔗 <b>Связи</b>",
+    SECTION_DIVIDER,
+    "",
+    `${escapeHtml(buildLinksEmoji(total))} <b>${escapeHtml(buildLinksBluf(total, managersCount, foundersCount))}</b>`,
+    "",
+    "<b>Сводка</b>",
+    `• Через руководителя: <b>${managersCount}</b>${formatAffiliatedSummaryNames(affiliated.managers)}`,
+    `• Через учредителя: <b>${foundersCount}</b>${formatAffiliatedSummaryNames(affiliated.founders)}`,
+    `• Общий объём сети: <b>${total}</b> (без дублей)${formatAffiliatedSummaryNames(affiliated.deduped)}`,
+    "",
+    `<b>Список компаний</b> (Стр. ${pagedItems.page}/${pagedItems.totalPages})`,
+    ...pagedItems.items,
+    "",
+    "<b>Что это значит</b>",
+    escapeHtml(buildLinksMeaning(total, managersCount, foundersCount))
+  ];
+
+  return {
+    text: lines.join("\n"),
+    reply_markup: compactSectionKeyboard(id, "lnk", pagedItems.page, pagedItems.totalPages)
+  };
+}
+
+async function buildSuccessorView(env, id, page = 1) {
+  if (!isCheckoConfigured(env)) {
+    return buildCheckoMissingConfigView("🏢 <b>Правопреемник</b>", id);
+  }
+
+  let payload;
+  try {
+    payload = await checkoRequest(env, "company", identifierParams(id));
+  } catch (error) {
+    if (error instanceof CheckoServiceError) {
+      return buildCheckoTemporaryUnavailableView("🏢 <b>Правопреемник</b>", id);
+    }
+    throw error;
+  }
+
+  const successor = getSuccessorEntity(payload.data || {});
+  if (!successor) {
+    return {
+      text: [
+        "🏢 <b>Правопреемник</b>",
+        SECTION_DIVIDER,
+        "",
+        "Правопреемник не найден.",
+        "",
+        "В источнике нет данных о компании-правопреемнике.",
+        "Можно вернуться в карточку."
+      ].join("\n"),
+      reply_markup: compactSectionKeyboard(id, "succ")
+    };
+  }
+
+  const successorId = String(successor.ИНН || successor.inn || "").trim();
+  const lines = [
+    "🏢 <b>Правопреемник</b>",
+    SECTION_DIVIDER,
+    "",
+    `<b>${escapeHtml(firstNonEmpty([successor.Наим, successor.name?.short_with_opf, successor.name?.full_with_opf, "Правопреемник"]))}</b>`,
+    "",
+    `• Статус: ${escapeHtml(firstNonEmpty([successor.Статус?.Наим, statusLabel(successor.state?.status), "нет данных"]))}`,
+    `• ИНН: ${escapeHtml(successorId || "нет данных")}`,
+    `• Руководитель: ${escapeHtml(firstNonEmpty([successor.Руковод?.[0]?.ФИО, successor.management?.name, "нет данных"]))}`,
+    "• Связь: правопреемник ликвидированной компании",
+    "• Что проверить: долги, суды, действующий статус"
+  ];
 
   const keyboard = compactSectionKeyboard(id, "succ");
   if (successorId) {
@@ -1456,16 +1545,34 @@ function getReadableCompanyStatus(status) {
   return normalized.toLowerCase();
 }
 
-
-
+function buildRiskDashboardText(riskResult, context = {}) {
+  const decisionMeta = getRiskDecisionMeta(riskResult?.decision);
+  const unknowns = ensureArray(riskResult?.unknowns);
+  const topFactors = ensureArray(riskResult?.topFactors);
+  const bluf = unknowns.length >= 3 && !["reject_or_legal_review", "prepay_only"].includes(riskResult?.decision) ? "Данных для уверенного вывода не хватает" : decisionMeta.bluf;
   const lines = [
     "⚖️ <b>Риски</b>",
     SECTION_DIVIDER,
     "",
-    `${decisionMeta.emoji} <b>${escapeHtml(decisionMeta.bluf)}</b>`,
+    `${decisionMeta.emoji} <b>${escapeHtml(bluf)}</b>`,
     "",
     "<b>Сводка</b>",
-
+    `• Уровень риска: <b>${escapeHtml(levelToRussian(riskResult?.level || "medium"))}</b>`,
+    `• Балл: <b>${escapeHtml(String(riskResult?.score ?? "—"))}/100</b>`,
+    `• Суды: <b>${escapeHtml(buildRiskCourtSummary(ensureArray(riskResult?.negatives)))}</b>`,
+    `• Долги: <b>${escapeHtml(buildRiskDebtSummary(ensureArray(riskResult?.negatives)))}</b>`,
+    `• Налоги: <b>${escapeHtml(buildRiskTaxSummary(ensureArray(riskResult?.negatives)))}</b>`,
+    "",
+    "<b>Почему</b>",
+    ...(topFactors.length > 0 ? topFactors.map((item) => `• ${escapeHtml(item.title)}`) : ["• Данных для уверенного вывода не хватает"]),
+    "",
+    "<b>Что это значит</b>",
+    escapeHtml(decisionMeta.meaning),
+    "",
+    "<b>Что делать</b>",
+    escapeHtml(decisionMeta.recommendation),
+    "",
+    `<b>Итог</b> ${escapeHtml(riskResult?.summary || "Данных для уверенного вывода не хватает")}`
   ];
 
   if (unknowns.length > 0) {
@@ -1544,7 +1651,7 @@ function buildRiskTaxSummary(negatives) {
     return "есть налоговые сигналы";
   }
   return "существенных сигналов не видно";
-
+}
 
 function firstExistingTaxValue(taxes, keys) {
   if (!taxes || typeof taxes !== "object") return null;
@@ -1775,23 +1882,35 @@ async function findAffiliatedByInn(env, inn, scope) {
 async function collectAffiliatedCompanies(env, sourceInn) {
   if (!isDadataConfigured(env) || !sourceInn) return { managers: [], founders: [], deduped: [], total: 0, state: "missing_config" };
 
-  let party;
+  let party = null;
+  let degradedByParty = false;
   try {
     party = await findPartyByInnOrOgrn(env, sourceInn);
   } catch (error) {
     if (error instanceof DadataServiceError) {
-      return { managers: [], founders: [], deduped: [], total: 0, state: "unavailable" };
+      degradedByParty = true;
+    } else {
+      throw error;
     }
-    throw error;
   }
 
-
+  let managerInns = extractAffiliationSourceInns([party?.management, ...(party?.managers || [])]);
+  let founderInns = extractAffiliationSourceInns(party?.founders || []);
+  if ((managerInns.length === 0 && founderInns.length === 0) && degradedByParty) {
+    managerInns = [String(sourceInn)];
+    founderInns = [String(sourceInn)];
+  }
   const scopeConfigs = [
     { scope: ["MANAGERS"], group: "managers", inns: managerInns },
     { scope: ["FOUNDERS"], group: "founders", inns: founderInns }
   ];
-  const results = await Promise.allSettled(
 
+  const results = await Promise.allSettled(
+    scopeConfigs.map(async ({ inns, scope }) => {
+      if (inns.length === 0) return [];
+      const batches = await Promise.all(inns.map((inn) => findAffiliatedByInn(env, inn, scope)));
+      return batches.flat();
+    })
   );
 
   const sourceInnNormalized = String(sourceInn || "").trim();
@@ -1799,17 +1918,25 @@ async function collectAffiliatedCompanies(env, sourceInn) {
   const seenFounders = new Set([sourceInnNormalized]);
   const managers = [];
   const founders = [];
-
+  const dedupedMap = new Map();
+  let attemptedCount = 0;
+  let unavailableGroups = 0;
 
   for (let i = 0; i < scopeConfigs.length; i++) {
+    const { group, inns } = scopeConfigs[i];
     const result = results[i];
-    if (scopeConfigs[i].inns.length > 0) attemptedCount += 1;
+    if (inns.length > 0) attemptedCount += 1;
     if (result.status === "rejected") {
       if (result.reason instanceof DadataServiceError) {
         unavailableGroups += 1;
         continue;
       }
       throw result.reason;
+    }
+
+    for (const item of result.value) {
+      const normalized = normalizeAffiliatedCompany(item);
+      if (!normalized || normalized.inn === sourceInnNormalized) continue;
 
       if (group === "managers") {
         if (!seenManagers.has(normalized.inn)) {
@@ -1831,9 +1958,39 @@ async function collectAffiliatedCompanies(env, sourceInn) {
       }
     }
   }
+
+  if (attemptedCount > 0 && unavailableGroups === attemptedCount) {
+    return { managers: [], founders: [], deduped: [], total: 0, state: "unavailable" };
   }
 
-  return items;
+  if (degradedByParty) {
+    if (managers.length > 0 && founders.length === 0) {
+      founders.push(...managers);
+      for (const item of managers) {
+        const existing = dedupedMap.get(item.inn);
+        if (existing) existing.relations.add("founders");
+      }
+    } else if (founders.length > 0 && managers.length === 0) {
+      managers.push(...founders);
+      for (const item of founders) {
+        const existing = dedupedMap.get(item.inn);
+        if (existing) existing.relations.add("managers");
+      }
+    }
+  }
+
+  const deduped = Array.from(dedupedMap.values()).map((item) => ({
+    ...item,
+    relations: Array.from(item.relations).sort()
+  }));
+
+  return {
+    managers,
+    founders,
+    deduped,
+    total: deduped.length,
+    state: "ok"
+  };
 }
 
 function extractAffiliationSourceInns(value) {
@@ -1860,6 +2017,32 @@ function getReadableAffiliatedStatus(status) {
   if (normalized === "LIQUIDATING") return "ликвидация";
   if (normalized === "LIQUIDATED") return "ликвидирована";
   return normalized ? normalized.toLowerCase() : "нет данных";
+}
+
+function formatAffiliatedListItem(item) {
+  return `${item.name} (${item.inn}) — ${item.status} — ${item.okved}`;
+}
+
+function buildLinksEmoji(total) {
+  if (total === 0) return "🟢";
+  if (total <= 5) return "🟡";
+  return "🟠";
+}
+
+function buildLinksBluf(total, managersCount, foundersCount) {
+  if (total === 0) return "Связи не найдены.";
+  if (managersCount > 0 && foundersCount > 0) return "У компании есть сеть связанных организаций.";
+  if (managersCount > 0) return "Связи видны через руководителя.";
+  if (foundersCount > 0) return "Связи видны через учредителя.";
+  return "Связи требуют дополнительной проверки.";
+}
+
+function buildLinksMeaning(total, managersCount, foundersCount) {
+  if (total === 0) return "По данным DaData компания выглядит самостоятельной.";
+  if (managersCount > 0 && foundersCount > 0) return "Есть пересечения по руководителям и учредителям: сеть нужно проверить на долговую и судебную нагрузку.";
+  if (managersCount > 0) return "Связи через руководителя могут показывать управленческий контур группы.";
+  if (foundersCount > 0) return "Связи через учредителя помогают увидеть общую структуру владения.";
+  return "Связи стоит проверить вручную.";
 }
 
 function formatAffiliatedSummaryNames(items) {
@@ -1940,6 +2123,77 @@ function normalizeEmailSuggestion(payload) {
   };
 }
 
+function summarizeFinanceBluf(rows) {
+  const years = getYearsSorted(rows);
+  if (!years.length) return "Финансовые данные за последние годы не найдены.";
+  const latest = rows[years[0]] || {};
+  const revenue = latest[2110];
+  const profit = latest[2400];
+  if (revenue !== undefined || profit !== undefined) {
+    return `Последний доступный год: ${years[0]}, выручка ${formatMoney(revenue)}, прибыль ${formatMoney(profit)}.`;
+  }
+  return `Последний доступный год: ${years[0]}.`;
+}
+
+function buildCourtsBluf(total, defendantCount, claimAmount) {
+  if (!total) return "Существенной судебной нагрузки не видно.";
+  if (defendantCount >= 3 || claimAmount >= 1000000) return "Судебная нагрузка заметная: нужен контроль рисков.";
+  if (defendantCount > 0) return "Есть судебные дела, где компанию стоит проверить внимательнее.";
+  return "Судебные дела есть, но критичной нагрузки не видно.";
+}
+
+function buildCourtsMeaning(defendantCount, claimAmount) {
+  if (defendantCount >= 3 || claimAmount >= 1000000) return "Перед сделкой проверьте активные споры, суммы требований и роль компании в делах.";
+  if (defendantCount > 0) return "Компания участвует в судах как ответчик: лучше уточнить статус споров.";
+  return "По текущим данным судебный фон выглядит управляемым.";
+}
+
+function buildDebtBluf(fsspCount, taxDebt, taxPenalties) {
+  const totalTax = Number(taxDebt || 0) + Number(taxPenalties || 0);
+  if (fsspCount === 0 && totalTax === 0) return "Критичных долговых сигналов не видно.";
+  if (fsspCount > 0 && totalTax > 0) return "Есть и налоговые долги, и исполнительные производства.";
+  if (fsspCount > 0) return "Есть исполнительные производства: проверьте основания и суммы.";
+  return "Есть налоговая задолженность: лучше уточнить её актуальность перед сделкой.";
+}
+
+function getDebtLoadLabel(fsspCount, taxDebt, taxPenalties) {
+  const totalTax = Number(taxDebt || 0) + Number(taxPenalties || 0);
+  if (fsspCount >= 3 || totalTax >= 1000000) return "высокая";
+  if (fsspCount > 0 || totalTax > 0) return "умеренная";
+  return "низкая";
+}
+
+function getDebtNextStep(load) {
+  if (load === "высокая") return "запросить пояснения и ограничить отсрочку";
+  if (load === "умеренная") return "сверить долги перед сделкой";
+  return "достаточно плановой проверки";
+}
+
+function buildContractsBluf(total, failedCount) {
+  if (!total) return "Госконтракты не найдены.";
+  if (failedCount > 0) return "Часть источников не ответила, но контракты в данных есть.";
+  return "У компании есть подтверждённые госконтракты.";
+}
+
+function getContractsMeaning(total) {
+  if (!total) return "госконтракты не зафиксированы";
+  if (total >= 5) return "есть заметный опыт работы по контрактам";
+  return "контрактная активность подтверждена";
+}
+
+function buildHistoryBluf(timeline) {
+  if (!timeline.length) return "Заметных событий в истории не видно.";
+  return `Показаны ${timeline.length} наиболее важных события из истории компании.`;
+}
+
+function levelToRussian(level) {
+  if (level === "critical") return "критический";
+  if (level === "high") return "высокий";
+  if (level === "medium") return "средний";
+  if (level === "low") return "низкий";
+  return "не определён";
+}
+
 function normalizeFinanceReportLinks(reportPayload) {
   if (!reportPayload) return [];
   if (typeof reportPayload === "string") {
@@ -1983,17 +2237,23 @@ async function dadataPost(env, endpoint, payload) {
   }
 
   const baseUrl = (env.DADATA_API_URL || DEFAULT_DADATA_API_URL).replace(/\/$/, "");
-  const response = await fetch(`${baseUrl}/${endpoint}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Token ${env.DADATA_API_KEY}`,
-      "X-Secret": env.DADATA_SECRET_KEY
-    },
-    body: JSON.stringify(payload)
-  });
+  let response;
+  let raw;
+  try {
+    response = await fetch(`${baseUrl}/${endpoint}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Token ${env.DADATA_API_KEY}`,
+        "X-Secret": env.DADATA_SECRET_KEY
+      },
+      body: JSON.stringify(payload)
+    });
+    raw = await response.text();
+  } catch (error) {
+    throw new DadataServiceError(`DaData request failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
-  const raw = await response.text();
   const snippet = buildSnippet(raw);
   if (response.status !== 200) {
     throw new DadataServiceError(`DaData HTTP ${response.status}; snippet=${snippet}`);
