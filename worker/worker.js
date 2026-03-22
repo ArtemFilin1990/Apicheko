@@ -506,7 +506,6 @@ async function buildCompanyMainView(env, id) {
 
   const title = dadataParty.name?.short_with_opf || dadataParty.name?.full_with_opf || "Компания";
   const decisionSignal = getDadataDecisionSignal(dadataParty);
-  const subtitle = getDadataSubtitle(dadataParty);
   const founders = ensureArray(dadataParty.founders);
   const riskSignal = dadataParty.state?.status === "ACTIVE"
     ? "🟢 Критичных статусов не выявлено"
@@ -519,27 +518,43 @@ async function buildCompanyMainView(env, id) {
   const financeSignal = dadataParty.finance?.income
     ? "🟢 Финансовая активность подтверждается"
     : "🟡 Нет финансового контура в DaData";
+  const statusLine = `${escapeHtml(formatCompanyStatusLabel(dadataParty.state?.status))} <b>Статус:</b> ${escapeHtml(getReadableCompanyStatus(dadataParty.state?.status))}`;
+  const registrationDate = formatDateFromMsOrIso(dadataParty.state?.registration_date);
+  const directorName = firstNonEmpty([
+    dadataParty.management?.name,
+    dadataParty.managers?.[0]?.name,
+    "нет данных"
+  ]);
+  const addressShort = firstNonEmpty([
+    dadataParty.address?.data?.city ? `${dadataParty.address.data.city}, ${dadataParty.address.data.street_with_type || dadataParty.address.data.street || ""}`.replace(/,\s*$/, "") : "",
+    dadataParty.address?.value,
+    "нет данных"
+  ]);
+  const capital = parseNullableNumber(dadataParty.capital?.value);
+  const employees = parseNullableNumber(dadataParty.employee_count);
+  const primaryOkved = hasText(dadataParty.okved) ? dadataParty.okved : "нет данных";
 
   const lines = [
-    `🏢 <b>${escapeHtml(title)}</b> (ИНН: <code>${escapeHtml(String(dadataParty.inn || id))}</code>)`,
+    `🏢 <b>${escapeHtml(title)}</b> (ИНН: ${escapeHtml(String(dadataParty.inn || id))})`,
     SECTION_DIVIDER,
     "",
-    `📋 Статус: ${escapeHtml(formatCompanyStatusLabel(dadataParty.state?.status))}`,
-    subtitle ? `📍 ${escapeHtml(subtitle)}` : null,
+    statusLine,
+    registrationDate !== "—" ? `📅 <b>Дата регистрации:</b> ${escapeHtml(registrationDate)}` : null,
+    `👤 <b>Руководитель:</b> ${escapeHtml(directorName)}`,
+    `📍 <b>Адрес:</b> ${escapeHtml(addressShort)}`,
     "",
-    "<b>ВЫВОД:</b>",
-    `• ${escapeHtml(decisionSignal)}`,
+    "<b>Вывод</b>",
+    escapeHtml(decisionSignal),
     "",
-    "Ключевые сигналы:",
+    "<b>Ключевые факты</b>",
+    capital !== null ? `• Уставный капитал: <b>${escapeHtml(formatMoney(capital))}</b>` : null,
+    employees !== null ? `• Штат: <b>${escapeHtml(String(employees))} сотрудников</b>` : null,
+    `• Основной ОКВЭД: <b>${escapeHtml(String(primaryOkved))}</b>`,
+    "",
+    "<b>Ключевые сигналы</b>",
     `• Риски: ${escapeHtml(riskSignal)}`,
     `• Связи: ${escapeHtml(linksSignal)}`,
-    `• Финансовый контур: ${escapeHtml(financeSignal)}`,
-    "",
-    "Ключевые реквизиты:",
-    `• ОГРН: <code>${escapeHtml(String(dadataParty.ogrn || "—"))}</code>`,
-    dadataParty.kpp ? `• КПП: <code>${escapeHtml(String(dadataParty.kpp))}</code>` : null,
-    "",
-    "Выберите раздел для детализации"
+    `• Финансы: ${escapeHtml(financeSignal)}`
   ].filter(Boolean);
 
   return {
@@ -571,13 +586,13 @@ async function buildRiskView(env, id) {
   const data = company.data || {};
   const baseParams = identifierParams(id);
   const [finances, legal, fssp, contracts, history, bankruptcy, fedresurs, dadataParty] = await Promise.all([
-    safeSectionData(env, "financ", baseParams),
+    safeSectionData(env, "finances", baseParams),
     safeSectionData(env, "legal-cases", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "enforcements", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "contracts", { ...baseParams, law: 44, role: "supplier", sort: "-date", limit: 10 }),
-    safeSectionData(env, "timeline", { ...baseParams, sort: "-date", limit: 10 }),
+    safeSectionData(env, "history", { ...baseParams, sort: "-date", limit: 10 }),
     safeSectionData(env, "bankruptcy-messages", { ...baseParams, limit: 5 }),
-    safeSectionData(env, "fedresu", { ...baseParams, limit: 5 }),
+    safeSectionData(env, "fedresurs", { ...baseParams, limit: 5 }),
     safeFindPartyByInnOrOgrn(env, String(data.ИНН || data.ОГРН || id))
   ]);
 
@@ -593,7 +608,7 @@ async function buildRiskView(env, id) {
     dadataParty
   });
 
-  const text = formatRiskResultForTelegram(riskResult);
+  const text = buildRiskDashboardText(riskResult, data);
   return { text, reply_markup: compactSectionKeyboard(id, "risk") };
 }
 
@@ -604,7 +619,7 @@ async function buildFinancesView(env, id) {
 
   let payload;
   try {
-    payload = await checkoRequest(env, "financ", identifierParams(id));
+    payload = await checkoRequest(env, "finances", identifierParams(id));
   } catch (error) {
     if (error instanceof CheckoServiceError) {
       return buildCheckoTemporaryUnavailableView("📈 <b>Финансы</b>", id);
@@ -614,14 +629,15 @@ async function buildFinancesView(env, id) {
   const rows = payload.data || {};
   const years = getYearsSorted(rows).slice(0, 4);
   if (years.length === 0) {
-    return { text: `📈 <b>Финансы</b>
+    return { text: `📊 <b>Финансы</b>
 ${SECTION_DIVIDER}
 
-📊 Финансовая отчётность не найдена`, reply_markup: buildCompanyKeyboard(id, env) };
+Раздел доступен, но отчётность не найдена.
+Финансовые данные не переданы источником за последние годы.`, reply_markup: buildCompanyKeyboard(id, env) };
   }
 
-  const lines = startSection("📈 <b>Финансы</b>");
-  lines.push("", "<b>ВЫВОД:</b>", "• Отчётность найдена, можно оценивать динамику.", "", "Сводка по годам:");
+  const lines = startSection("📊 <b>Финансы</b>");
+  lines.push("", "<b>Вывод</b>", "Есть признаки живой финансовой активности: отчётность доступна по последним годам.", "", "<b>Сводка по годам</b>");
   for (const year of years) {
     const item = rows[year] || {};
     lines.push(`\n📆 <b>${year}</b>`);
@@ -635,6 +651,7 @@ ${SECTION_DIVIDER}
     lines.push("\nОтчётность ФНС:");
     reportLinks.forEach((link) => lines.push(`• ${escapeHtml(link.label)}: ${escapeHtml(link.url)}`));
   }
+  lines.push("", "<b>Короткий вывод</b>", escapeHtml(summarizeFinanceSignals(rows)));
 
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "fin") };
 }
@@ -654,14 +671,28 @@ async function buildArbitrationView(env, id) {
     throw error;
   }
   const items = takeRecords(payload);
-  if (items.length === 0) return { text: `⚖️ <b>Арбитраж</b>
+  if (items.length === 0) return { text: `🏛 <b>Арбитраж</b>
 ${SECTION_DIVIDER}
 
-Судебная нагрузка не выявлена.
-Контрагент не вовлечён в заметные споры.`, reply_markup: compactSectionKeyboard(id, "risk") };
+Судебные споры не обнаружены.
+Это позитивный сигнал: заметной арбитражной нагрузки по источнику нет.`, reply_markup: compactSectionKeyboard(id, "risk") };
 
-  const lines = [...startSection("⚖️ <b>Арбитражные дела</b>"), `\nВсего: <b>${items.length}</b>`];
-  items.slice(0, 10).forEach((it) => {
+  const defendantCount = items.filter((it) => /ответчик/i.test(String(it.Роль || ""))).length;
+  const lastCase = items[0];
+  const claimAmount = items.reduce((sum, it) => sum + toNum(it.СуммаТреб || it.Сумма), 0);
+  const lines = [
+    ...startSection("🏛 <b>Суды</b>"),
+    "",
+    items.length >= 5 ? "Судебная нагрузка заметная — стоит проверить причины и исходы дел." : "Судебные дела есть, но объём пока умеренный.",
+    "",
+    `• Найдено дел: <b>${items.length}</b>`,
+    `• В роли ответчика: <b>${defendantCount}</b>`,
+    `• Последнее дело: ${escapeHtml(lastCase?.НомерДела || lastCase?.Номер || "нет данных")}`,
+    `• Сумма требований: ${escapeHtml(formatMoney(claimAmount))}`,
+    "",
+    "<b>Последние дела</b>"
+  ];
+  items.slice(0, 5).forEach((it) => {
     lines.push(`\n› ${escapeHtml(it.НомерДела || it.Номер || "б/н")}  ${formatDate(it.Дата)}`);
     lines.push(`  🏛 ${escapeHtml(it.Суд || "—")}`);
     lines.push(`  👤 ${escapeHtml(it.Роль || "—")}  ·  💰 ${formatMoney(it.СуммаТреб || it.Сумма)}`);
@@ -694,12 +725,13 @@ async function buildDebtsView(env, id) {
   const debtCharges = toNum(firstExistingTaxValue(taxes, ["СумДоначисл", "СумДолг"]));
   const hasCriticalSignals = items.length > 0 || taxDebt > 0 || taxPenalties > 0 || debtCharges > 0;
 
-  const lines = [...startSection("💳 <b>Долги и взыскания</b>"), ""];
-  lines.push(`🎯 <b>${hasCriticalSignals ? "Есть сигналы долговой нагрузки" : "Критичных долговых сигналов не найдено"}</b>`);
-  lines.push(`📌 Исполнительных производств: <b>${items.length}</b>`);
+  const lines = [...startSection("🏦 <b>Долги</b>"), ""];
+  lines.push(hasCriticalSignals ? "Есть долговые сигналы — их стоит проверить до сделки." : "Критичной долговой нагрузки по доступным данным не видно.");
+  lines.push("");
+  lines.push(`• ФССП: <b>${items.length}</b>`);
   lines.push("");
   if (taxes && typeof taxes === "object") {
-    lines.push("🧾 <b>Налоговые риски</b>");
+    lines.push("🧾 <b>Налоговый summary</b>");
     lines.push(`• Недоимка: ${formatTaxMoneyState(taxes, ["СумНедоим"])}`);
     lines.push(`• Пени и штрафы: ${formatTaxMoneyState(taxes, ["СумПениШтр", "СумШтр"])}`);
     lines.push(`• Доначисления / долг: ${formatTaxMoneyState(taxes, ["СумДоначисл", "СумДолг"])}`);
@@ -709,7 +741,7 @@ async function buildDebtsView(env, id) {
   }
 
   lines.push("");
-  lines.push("📋 <b>Исполнительные производства</b>");
+  lines.push("📋 <b>ФССП summary</b>");
   if (items.length === 0) {
     lines.push("• Не найдены");
     return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "risk") };
@@ -768,7 +800,7 @@ async function buildHistoryView(env, id) {
 
   let payload;
   try {
-    payload = await checkoRequest(env, "timeline", { ...identifierParams(id), limit: 15 });
+    payload = await checkoRequest(env, "history", { ...identifierParams(id), limit: 15 });
   } catch (error) {
     if (error instanceof CheckoServiceError) {
       return buildCheckoTemporaryUnavailableView("🗓 <b>История</b>", id);
@@ -779,8 +811,8 @@ async function buildHistoryView(env, id) {
   if (items.length === 0) return { text: `🗓 <b>История</b>
 ${SECTION_DIVIDER}
 
-История изменений не найдена.
-Существенных событий за период не зафиксировано.`, reply_markup: compactSectionKeyboard(id, "risk") };
+Существенных изменений не обнаружено.
+Это позитивный empty-state: резких событий по данным источника не видно.`, reply_markup: compactSectionKeyboard(id, "risk") };
 
   const lines = startSection("🗓 <b>Ключевые изменения</b>");
   lines.push("", `🎯 Показано событий: <b>${items.length}</b>`);
@@ -867,7 +899,8 @@ async function buildFoundersView(env, id) {
 ${SECTION_DIVIDER}
 
 Учредители не найдены.
-Структура владения по данным источника не раскрыта.`, reply_markup: compactSectionKeyboard(id, "lnk") };
+Это не всегда негативный фактор: часть структур не раскрывает состав в источнике.
+Можно вернуться в карточку и проверить связи или реквизиты.`, reply_markup: compactSectionKeyboard(id, "lnk") };
 
   const lines = startSection("👥 <b>Учредители</b>");
   founders.forEach((f, idx) => {
@@ -895,8 +928,8 @@ async function buildBranchesView(env, id) {
   if (branches.length === 0) return { text: `🏬 <b>Филиалы</b>
 ${SECTION_DIVIDER}
 
-Филиалы не найдены.
-Вероятно, компания работает без обособленных подразделений.`, reply_markup: compactSectionKeyboard(id, "lnk") };
+Филиальная сеть не обнаружена или источник не передал данные.
+Это нормальная ситуация для компаний без обособленных подразделений.`, reply_markup: compactSectionKeyboard(id, "lnk") };
 
   const lines = [...startSection("🏬 <b>Филиалы</b>"), `\nВсего: <b>${branches.length}</b>`];
   branches.slice(0, 20).forEach((b, idx) => lines.push(`\n${idx + 1}.  КПП ${escapeHtml(b.КПП || "—")}\n   ${escapeHtml(b.Адрес || b.АдресРФ || "—")}`));
@@ -1061,8 +1094,9 @@ function buildCompanyKeyboard(id, env = {}) {
   const rows = [];
   if (isCheckoConfigured(env)) {
     rows.push(
-      [kb("⚖️ Риски", `co:risk:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
-      [kb("📊 Финансы", `co:fin:${id}`), kb("📋 Контракты", `co:ctr:${id}`)]
+      [kb("⚖️ Риски", `co:risk:${id}`), kb("🏛 Суды", `co:arb:${id}`)],
+      [kb("🏦 Долги", `co:debt:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
+      [kb("👥 Учредители", `co:own:${id}`), kb("📊 Финансы", `co:fin:${id}`)]
     );
   } else {
     rows.push([kb("🔗 Связи", `co:lnk:${id}`)]);
@@ -1081,7 +1115,10 @@ function buildCheckoMissingConfigView(title, id) {
 ${SECTION_DIVIDER}
 
 Раздел временно недоступен.
-Checko не настроен. Обратитесь к администратору.`,
+Источник не настроен.
+Добавьте CHECKO_API_KEY и повторите позже.
+
+Можно вернуться в карточку и открыть другой раздел.`,
     reply_markup: compactSectionKeyboard(id)
   };
 }
@@ -1131,10 +1168,10 @@ function compactSectionKeyboard(id, section = "main") {
   }
   return {
     inline_keyboard: [
-      [kb("⚖️ Риски", `co:risk:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
-      [kb("📊 Финансы", `co:fin:${id}`)],
-      [kb("📋 Контракты", `co:ctr:${id}`)],
-      [kb("🔙 В карточку", `co:main:${id}`)]
+      [kb("⚖️ Риски", `co:risk:${id}`), kb("🏛 Суды", `co:arb:${id}`)],
+      [kb("🏦 Долги", `co:debt:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
+      [kb("👥 Учредители", `co:own:${id}`), kb("📊 Финансы", `co:fin:${id}`)],
+      [kb("🏢 Карточка", `co:main:${id}`), kb("🏠 Меню", "menu")]
     ]
   };
 }
@@ -1194,7 +1231,7 @@ async function buildEntrepreneurSectionView(env, section, id) {
   }
 
   if (section === "his") {
-    const payload = await checkoRequest(env, "timeline", { ...identifierParams(id), limit: 15 });
+    const payload = await checkoRequest(env, "history", { ...identifierParams(id), limit: 15 });
     const items = ensureArray(payload.data).slice(0, 15);
     const lines = ["🕓 <b>История ИП</b>", SECTION_DIVIDER];
     if (items.length === 0) lines.push("", "События не найдены");
@@ -1239,7 +1276,7 @@ async function detectCriticalRisk(env, id, companyData) {
   }
 
   const bankruptcy = await safeSectionData(env, "bankruptcy-messages", { ...identifierParams(id), limit: 1 });
-  const fedresurs = await safeSectionData(env, "fedresu", { ...identifierParams(id), limit: 1 });
+  const fedresurs = await safeSectionData(env, "fedresurs", { ...identifierParams(id), limit: 1 });
   if (takeRecords(bankruptcy).length > 0 || takeRecords(fedresurs).length > 0) {
     return "Есть сообщения о банкротстве / ЕФРСБ";
   }
@@ -1271,6 +1308,49 @@ function formatCompanyStatusLabel(status) {
   if (normalized === "ACTIVE") return "🟢 Действующее";
   if (!normalized) return "🟡 Нужна проверка статуса";
   return `🟡 ${normalized}`;
+}
+
+function getReadableCompanyStatus(status) {
+  const normalized = String(status || "").trim().toUpperCase();
+  if (normalized === "ACTIVE") return "действует";
+  if (!normalized) return "нужна проверка";
+  return normalized.toLowerCase();
+}
+
+function buildRiskDashboardText(result, companyData = {}) {
+  const levelMap = {
+    low: { emoji: "🟢", bluf: "Явных критичных рисков немного" },
+    medium: { emoji: "🟡", bluf: "Есть сигналы, которые стоит проверить перед сделкой" },
+    high: { emoji: "🟠", bluf: "Риск-профиль повышенный" },
+    critical: { emoji: "🔴", bluf: "Нужна жёсткая ручная проверка до сделки" }
+  };
+  const current = levelMap[result.level] || levelMap.medium;
+  const statusText = String(companyData?.Статус?.Наим || "").toLowerCase();
+  const isLiquidated = /ликвид|не\s*действ|прекращ/.test(statusText);
+  const negatives = result.negatives || [];
+  const unknowns = result.unknowns || [];
+  const summaryLine = (items, emptyText) => items.length > 0 ? items.slice(0, 2).join(", ") : emptyText;
+
+  return [
+    "⚖️ <b>Риски</b>",
+    SECTION_DIVIDER,
+    "",
+    `${current.emoji} <b>${escapeHtml(isLiquidated ? "Высокий риск" : current.bluf)}</b>`,
+    "",
+    "<b>Что важно</b>",
+    `• ${escapeHtml(isLiquidated ? "компания ликвидирована или прекратила деятельность" : summaryLine(negatives.slice(0, 1), "критичных стоп-сигналов немного"))}`,
+    `• ${escapeHtml(summaryLine(negatives.filter((item) => /налог|долг|фссп|пени/i.test(item)), "долги и ФССП не выглядят критично"))}`,
+    `• ${escapeHtml(summaryLine(negatives.filter((item) => /суд|арбитраж|ответчик/i.test(item)), "архивные суды требуют проверки только при наличии споров"))}`,
+    `• ${escapeHtml(isLiquidated ? "нужно проверить архивные обязательства и связанные структуры" : "проверьте разделы долгов, судов и связей перед сделкой")}`,
+    "",
+    "<b>Что это значит</b>",
+    escapeHtml(isLiquidated ? "Для новой сделки компанию нужно рассматривать как недействующую. Проверку стоит продолжать по связанным компаниям и прошлым обязательствам." : result.recommendation),
+    "",
+    `Score: <b>${result.score}/100</b>`,
+    `Решение: <b>${escapeHtml(String(result.decision || "manual_review"))}</b>`,
+    negatives.length > 0 ? `Минусы: ${escapeHtml(negatives.slice(0, 4).join(", "))}` : "Минусы: явные негативные факторы не доминируют",
+    unknowns.length > 0 ? `Неизвестно: ${escapeHtml(unknowns.slice(0, 3).join(", "))}` : "Неизвестно: критичных пробелов в данных немного"
+  ].join("\n");
 }
 
 function firstExistingTaxValue(taxes, keys) {
@@ -1845,6 +1925,12 @@ function formatMoney(value) {
 function toNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+function parseNullableNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 function valueAsText(value) {
