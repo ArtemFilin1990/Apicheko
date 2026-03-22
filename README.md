@@ -21,7 +21,7 @@ Production runtime: **Cloudflare Worker** (`worker/worker.js`).
 - Главный экран `/start` в формате «1 сообщение = 1 экран».
 - Поиск по ИНН/ОГРН/ОГРНИП, БИК, названию и корпоративному email (DaData).
 - Разрешение 12-значного ИНН через выбор: ИП или физлицо.
-- Главная карточка компании + 8 экранов разделов с мягким DaData enrichment в карточке и связях.
+- Главная карточка компании + контекстные экраны разделов с inline-навигацией и постраничным выводом длинных списков.
 - Навигация по `editMessageText`, обработка callback через `answerCallbackQuery`.
 - Строгое разделение сервисных ошибок и валидных пустых результатов.
 
@@ -53,12 +53,15 @@ co:debt:<id>
 co:ctr:<id>
 co:his:<id>
 co:lnk:<id>
+co:succ:<id>
 co:tax:<id>
+
+co:<section>:<id>:p:<page>   # для длинных экранов и списков
 ```
 
 ## Endpoint mapping
 
-- `co:main` → `/company`
+- `co:main` → DaData `findById/party`
 - `co:risk` → `/company`
 - `co:fin` → `/finances`
 - `co:arb` → `/legal-cases`
@@ -66,12 +69,8 @@ co:tax:<id>
 - `co:ctr` → `/contracts`
 - `co:his` → `/history`
 - `co:lnk` → DaData `findById/party` + `findAffiliated/party`
-- `co:tax` → `/company`
 
-Дополнительно:
-
-- `search:name` → `/search?by=name&obj=org&query=...`
-- `resolve12:entrepreneur` → `/entrepreneur`
+- `coneur` → `/entrepreneur`
 - `resolve12:person` → `/person`
 - `search:bic` → `/bank`
 
@@ -144,7 +143,7 @@ KV binding (optional):
 
 - Поиск по email использует `POST /findByEmail/company`.
 - Обогащение карточки `co:main` использует `POST /findById/party`.
-- Экран связей `co:lnk` сначала получает карточку через `POST /findById/party`, затем извлекает ИНН руководителей/учредителей и вызывает `POST /findAffiliated/party` по каждому найденному ИНН.
+
 - При отсутствии DaData ключей или временной ошибке DaData бот продолжает работать через Checko без падения.
 
 ## Risk scoring v2 (`co:risk`)
