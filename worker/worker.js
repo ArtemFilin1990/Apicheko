@@ -461,7 +461,7 @@ async function buildSearchResultsView(env, query) {
   };
 }
 
-async function buildCompanyMainView(env, id, page = 1) {
+async function buildCompanyMainView(env, id) {
   if (!isDadataConfigured(env)) {
     return {
       text: [
@@ -525,54 +525,44 @@ async function buildCompanyMainView(env, id, page = 1) {
   const employees = parseNullableNumber(dadataParty.employee_count);
   const primaryOkved = hasText(dadataParty.okved) ? dadataParty.okved : "нет данных";
   const successorName = getSuccessorNameFromDadata(dadataParty);
-  const pages = [
-    [
-      statusLine,
-      registrationDate !== "—" ? `📅 <b>Дата регистрации:</b> ${escapeHtml(registrationDate)}` : null,
-      `👤 <b>Руководитель:</b> ${escapeHtml(directorName)}`,
-      `🪪 <b>ИНН:</b> <code>${escapeHtml(String(dadataParty.inn || id))}</code>`,
-      `📍 <b>Адрес:</b> ${escapeHtml(addressShort)}`,
-      "",
-      "<b>Вывод</b>",
-      escapeHtml(buildStatusVerdict(dadataParty))
-    ].filter(Boolean),
-    [
-      "<b>Ключевые факты</b>",
-      capital !== null ? `• Уставный капитал: <b>${escapeHtml(formatMoney(capital))}</b>` : "• Уставный капитал: <b>нет данных</b>",
-      employees !== null ? `• Штат: <b>${escapeHtml(String(employees))} сотрудников</b>` : "• Штат: <b>нет данных</b>",
-      `• Основной ОКВЭД: <b>${escapeHtml(String(primaryOkved))}</b>`,
-      `• Правопреемник: <b>${escapeHtml(successorName)}</b>`
-    ],
-    [
-      "<b>Что проверить дальше</b>",
-      "• риски и долги перед сделкой",
-      "• судебную нагрузку компании",
-      "• сеть связанных организаций",
-      "• историю изменений и контрактов"
-    ]
-  ];
-  const paged = {
-    page: Math.min(Math.max(1, page), pages.length),
-    totalPages: pages.length,
-    items: [pages[Math.min(Math.max(1, page), pages.length) - 1]]
-  };
   const lines = [
     `🏢 <b>${escapeHtml(title)}</b>`,
     SECTION_DIVIDER,
     "",
-    ...paged.items[0]
-  ];
+    statusLine,
+    registrationDate !== "—" ? `📅 <b>Дата регистрации:</b> ${escapeHtml(registrationDate)}` : null,
+    `👤 <b>Руководитель:</b> ${escapeHtml(directorName)}`,
+    `🪪 <b>ИНН:</b> <code>${escapeHtml(String(dadataParty.inn || id))}</code>`,
+    `📍 <b>Адрес:</b> ${escapeHtml(addressShort)}`,
+    "",
+    "<b>Вывод</b>",
+    escapeHtml(buildStatusVerdict(dadataParty)),
+    "",
+    "<b>Ключевые факты</b>",
+    capital !== null ? `• Уставный капитал: <b>${escapeHtml(formatMoney(capital))}</b>` : "• Уставный капитал: <b>нет данных</b>",
+    employees !== null ? `• Штат: <b>${escapeHtml(String(employees))} сотрудников</b>` : "• Штат: <b>нет данных</b>",
+    `• Основной ОКВЭД: <b>${escapeHtml(String(primaryOkved))}</b>`,
+    `• Правопреемник: <b>${escapeHtml(successorName)}</b>`,
+    "",
+    "<b>Что проверить дальше</b>",
+    "• риски и долги перед сделкой",
+    "• судебную нагрузку компании",
+    "• сеть связанных организаций",
+    "• историю изменений и контрактов"
+  ].filter(Boolean);
 
   return {
     text: lines.join("\n"),
-    reply_markup: buildCompanyKeyboard(id, env, { page: paged.page, totalPages: paged.totalPages }),
+    reply_markup: buildCompanyKeyboard(id, env),
     historyEntry: { id: String(dadataParty.inn || dadataParty.ogrn || id), type: "company", title }
   };
 }
 
 async function buildCompanySectionView(env, section, id, page = 1) {
   const builder = COMPANY_SECTION_BUILDERS[section];
-  return builder ? builder(env, id, page) : null;
+  if (!builder) return null;
+  if (section === "main") return builder(env, id);
+  return builder(env, id, page);
 }
 
 async function buildRiskView(env, id) {

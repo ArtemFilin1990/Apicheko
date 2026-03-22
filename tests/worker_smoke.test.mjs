@@ -191,7 +191,7 @@ test("10-digit INN hides Checko buttons when CHECKO_API_KEY is missing", async (
   assert.ok(!callbacks.includes("co:fin:7707083893"));
 });
 
-test("co:main keeps old callback contract and renders pager row first", async () => {
+test("co:main keeps old callback contract and renders full card without pager", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const u = new URL(String(url));
@@ -224,7 +224,10 @@ test("co:main keeps old callback contract and renders pager row first", async ()
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Вывод/);
-  assert.match(body.reply_markup.inline_keyboard[0][0].text, /1\/3/);
+  assert.match(body.text, /Ключевые факты/);
+  assert.match(body.text, /Что проверить дальше/);
+  const callbacks = body.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
+  assert.ok(!callbacks.some((callback) => callback.includes(":p:")));
 });
 
 test("12-digit INN forces user choice", async () => {
