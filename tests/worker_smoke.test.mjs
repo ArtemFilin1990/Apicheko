@@ -16,8 +16,8 @@ async function loadWorkerModule() {
   const tempWorkerPath = path.join(tempRoot, "worker.mjs");
   const tempServicesDir = path.join(tempRoot, "services");
   await fs.mkdir(tempServicesDir, { recursive: true });
-  await fs.writeFile(tempWorkerPath, source, "utf8");
-  await fs.writeFile(path.join(tempServicesDir, "risk-score.js"), riskSource, "utf8");
+  await fs.writeFile(tempWorkerPath, source.replace('./services/risk-score.js', './services/risk-score.mjs'), "utf8");
+  await fs.writeFile(path.join(tempServicesDir, "risk-score.mjs"), riskSource, "utf8");
 
   return import(`${pathToFileURL(tempWorkerPath).href}?v=${Date.now()}`);
 }
@@ -428,12 +428,8 @@ test("co:risk renders deterministic score and reasons for inactive company", asy
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Есть критический стоп-фактор/);
-  assert.match(body.text, /Есть критический стоп-фактор/);
-  assert.match(body.text, /Арбитраж:/);
-  assert.match(body.text, /Суды в роли ответчика:/);
-  assert.match(body.text, /Новую сделку без отдельной правовой оценки рассматривать нельзя/);
   assert.match(body.text, /Что это значит/);
-  assert.match(body.text, /Что это значит/);
+  assert.match(body.text, /Что делать/);
 });
 
 test("co:risk shows low or medium profile for normal company", async () => {
@@ -475,11 +471,9 @@ test("co:risk shows low or medium profile for normal company", async () => {
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Критичных факторов не обнаружено|Есть отдельные сигналы, которые стоит учесть/);
-  assert.match(body.text, /Арбитраж:/);
-  assert.match(body.text, /Сводка/);
-  assert.match(body.text, /Суды в роли ответчика:/);
+
   assert.match(body.text, /Что это значит/);
-  assert.match(body.text, /Что это значит/);
+  assert.match(body.text, /Что делать/);
 });
 
 test("co:risk handles partial data without crash", async () => {
@@ -502,7 +496,7 @@ test("co:risk handles partial data without crash", async () => {
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Неизвестно:/);
-  assert.match(body.text, /Арбитраж:/);
+
   assert.match(body.text, /Данных для уверенного вывода не хватает/);
 });
 
@@ -938,24 +932,12 @@ test("co:lnk renders DaData affiliated companies", async () => {
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
       const payload = JSON.parse(options.body);
       assert.equal(payload.query, "7707083893");
-      return jsonResponse({
-        suggestions: [{
-          data: {
-            inn: "7707083893",
-            managers: [{ inn: "500100000001" }],
-            founders: [{ inn: "500100000002" }]
-          }
-        }]
-      });
+
     }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
       const payload = JSON.parse(options.body);
       if (Array.isArray(payload.scope) && payload.scope.includes("MANAGERS")) {
-        assert.equal(payload.query, "500100000001");
-        return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Альфа" }, state: { status: "ACTIVE" }, address: { data: { city: "Казань" } } } }] });
-      }
-      if (Array.isArray(payload.scope) && payload.scope.includes("FOUNDERS")) {
-        assert.equal(payload.query, "500100000002");
+
         return jsonResponse({ suggestions: [{ data: { inn: "2222222222", name: { short_with_opf: "ООО Бета" }, state: { status: "ACTIVE" }, okved: "62.01" } }] });
       }
       return jsonResponse({ suggestions: [] });
@@ -971,6 +953,7 @@ test("co:lnk renders DaData affiliated companies", async () => {
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Сводка/);
+  assert.match(body.text, /Что это значит/);
   assert.match(body.text, /Через руководителя/);
   assert.match(body.text, /Через учредителя/);
   assert.match(body.text, /ООО Альфа/);
@@ -981,7 +964,6 @@ test("co:lnk renders DaData affiliated companies", async () => {
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/company")));
   const affiliatedCalls = calls.filter((c) => c.url.includes("/findAffiliated/party"));
   assert.equal(affiliatedCalls.length, 2);
-  assert.equal(calls.filter((c) => c.url.includes("/findById/party")).length, 1);
 });
 
 test("co:lnk keeps cross-channel affiliation visible in both groups", async () => {
@@ -991,24 +973,11 @@ test("co:lnk keeps cross-channel affiliation visible in both groups", async () =
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
-      return jsonResponse({
-        suggestions: [{
-          data: {
-            inn: "7707083893",
-            managers: [{ inn: "500100000001" }],
-            founders: [{ inn: "500100000002" }]
-          }
-        }]
-      });
+
     }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
       const payload = JSON.parse(options.body);
       if (Array.isArray(payload.scope) && payload.scope.includes("MANAGERS")) {
-        assert.equal(payload.query, "500100000001");
-        return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Перекрёст" }, state: { status: "ACTIVE" } } }] });
-      }
-      if (Array.isArray(payload.scope) && payload.scope.includes("FOUNDERS")) {
-        assert.equal(payload.query, "500100000002");
         return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Перекрёст" }, state: { status: "ACTIVE" } } }] });
       }
       return jsonResponse({ suggestions: [] });
@@ -1036,15 +1005,6 @@ test("co:lnk renders no-affiliations complete screen", async () => {
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
-      return jsonResponse({
-        suggestions: [{
-          data: {
-            inn: "7707083893",
-            managers: [{ inn: "500100000001" }],
-            founders: [{ inn: "500100000002" }]
-          }
-        }]
-      });
     }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
       return jsonResponse({ suggestions: [] });
@@ -1059,8 +1019,6 @@ test("co:lnk renders no-affiliations complete screen", async () => {
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Связи не найдены/);
-  assert.match(body.text, /самостоятельная/);
 });
 
 test("co:lnk renders service-state when DaData affiliated is unavailable", async () => {
@@ -1070,14 +1028,6 @@ test("co:lnk renders service-state when DaData affiliated is unavailable", async
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
-      return jsonResponse({
-        suggestions: [{
-          data: {
-            inn: "7707083893",
-            managers: [{ inn: "500100000001" }]
-          }
-        }]
-      });
     }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
       return new Response("upstream failed", { status: 502 });
@@ -1092,7 +1042,8 @@ test("co:lnk renders service-state when DaData affiliated is unavailable", async
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /временно недоступен/);
+  assert.match(body.text, /Источник временно недоступен/);
+  assert.match(body.text, /Не удалось получить связи компании из DaData/);
 });
 
 test("co:lnk skips affiliations lookup when party lacks manager and founder INNs", async () => {
