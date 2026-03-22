@@ -857,7 +857,7 @@ test("co:lnk shows missing-config state without Checko dependency", async () => 
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /DaData не настроен/);
+  assert.match(body.text, /Источник данных не настроен/);
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru")));
 });
 
@@ -975,8 +975,9 @@ test("co:lnk renders DaData affiliated companies", async () => {
   assert.match(body.text, /Через учредителя/);
   assert.match(body.text, /ООО Альфа/);
   assert.match(body.text, /ООО Бета/);
-  assert.match(body.text, /через руководителя/);
-  assert.match(body.text, /через учредителя/);
+  assert.match(body.text, /Список компаний/);
+  assert.match(body.text, /1111111111/);
+  assert.match(body.text, /2222222222/);
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/company")));
   const affiliatedCalls = calls.filter((c) => c.url.includes("/findAffiliated/party"));
   assert.equal(affiliatedCalls.length, 2);
@@ -1025,7 +1026,7 @@ test("co:lnk keeps cross-channel affiliation visible in both groups", async () =
   assert.match(body.text, /Через руководителя: <b>1<\/b>/);
   assert.match(body.text, /Через учредителя: <b>1<\/b>/);
   assert.match(body.text, /Общий объём сети: <b>1<\/b>/);
-  assert.equal((body.text.match(/ООО Перекрёст/g) || []).length, 2);
+  assert.equal((body.text.match(/ООО Перекрёст/g) || []).length, 3);
 });
 
 test("co:lnk renders no-affiliations complete screen", async () => {
@@ -1058,8 +1059,8 @@ test("co:lnk renders no-affiliations complete screen", async () => {
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /плотной сети связанных компаний не видно/);
-  assert.match(body.text, /плотной сети связанных компаний не видно/);
+  assert.match(body.text, /Связи не найдены/);
+  assert.match(body.text, /самостоятельная/);
 });
 
 test("co:lnk renders service-state when DaData affiliated is unavailable", async () => {
@@ -1121,7 +1122,7 @@ test("co:lnk skips affiliations lookup when party lacks manager and founder INNs
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /плотной сети связанных компаний не видно/);
+  assert.match(body.text, /Связи не найдены/);
   assert.equal(calls.filter((c) => c.url.includes("/findAffiliated/party")).length, 0);
 });
 
@@ -1415,6 +1416,95 @@ test("co:okv renders compact additional codes with overflow marker", async () =>
   assert.match(body.text, /Основной/);
   assert.match(body.text, /62\.01/);
   assert.match(body.text, /Стр\. 1\/2/);
+});
+
+
+
+test("page-less callback falls back to page 1 for co:okv", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      return jsonResponse({
+        meta: { status: "ok" },
+        data: {
+          ОКВЭД: { Код: "62.01", Наим: "Разработка ПО" },
+          ОКВЭДДоп: [
+            { Код: "62.02", Наим: "Консультирование" },
+            { Код: "62.03", Наим: "Управление оборудованием" },
+            { Код: "62.09", Наим: "Прочая IT" },
+            { Код: "63.11", Наим: "Обработка данных" },
+            { Код: "63.12", Наим: "Порталы" },
+            { Код: "63.99", Наим: "Инфосервисы" }
+          ]
+        }
+      });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-okv-page-implicit", data: "co:okv:7707083893", message: { message_id: 73, chat: { id: 2 } } } }),
+    makeEnv()
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  assert.match(body.text, /62\.02/);
+  assert.match(body.text, /Стр\. 1\/2/);
+});
+
+test("co:succ callback renders successor screen and empty-state safely", async () => {
+  const calls = [];
+  let companyCall = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      companyCall += 1;
+      if (companyCall === 1) {
+        return jsonResponse({
+          meta: { status: "ok" },
+          data: {
+            Правопреемник: {
+              ИНН: "7712345678",
+              Наим: "ООО Новый правопреемник",
+              Статус: { Наим: "Действующее" },
+              Руковод: [{ ФИО: "Петров П.П." }]
+            }
+          }
+        });
+      }
+      return jsonResponse({ meta: { status: "ok" }, data: {} });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-succ", data: "co:succ:7707083893", message: { message_id: 74, chat: { id: 2 } } } }),
+    makeEnv()
+  );
+
+  let edit = calls.find((c) => c.url.includes("/editMessageText"));
+  let body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Правопреемник/);
+  assert.match(body.text, /ООО Новый правопреемник/);
+  assert.match(body.text, /Петров П\.П\./);
+  assert.match(body.text, /долги, суды, действующий статус/);
+
+  calls.length = 0;
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-succ-empty", data: "co:succ:7707083893", message: { message_id: 75, chat: { id: 2 } } } }),
+    makeEnv()
+  );
+
+  edit = calls.find((c) => c.url.includes("/editMessageText"));
+  body = JSON.parse(edit.options.body);
+  assert.match(body.text, /Правопреемник не найден/);
 });
 
 test("pager callback opens second page for co:okv", async () => {
