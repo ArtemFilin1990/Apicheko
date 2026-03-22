@@ -6,7 +6,6 @@ const COMPANY_NOT_FOUND_MESSAGE = "❌ Компания не найдена";
 const CHECKO_SERVICE_ERROR_MESSAGE = "⚠️ Ошибка сервиса Checko";
 const SEARCH_MIN_QUERY_LENGTH = 4;
 const DEFAULT_DADATA_API_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs";
-const AFFILIATED_LIMIT = 8;
 const CACHE_TTL_COMPANY_SECONDS = 12 * 60 * 60;
 const CACHE_TTL_DADATA_PARTY_SECONDS = 12 * 60 * 60;
 const CACHE_TTL_AFFILIATED_SECONDS = 24 * 60 * 60;
@@ -225,6 +224,8 @@ async function buildViewForCallback(env, data) {
     if (!["risk", "his", "lnk"].includes(section) || !id) return null;
     return buildEntrepreneurSectionView(env, section, id);
   }
+
+  if (data === "noop") return null;
 
   if (data.startsWith("co:")) {
     const parsed = parseCompanySectionCallback(data);
@@ -891,8 +892,10 @@ async function buildConnectionsView(env, id, page = 1) {
         "🔗 <b>Связи</b>",
         SECTION_DIVIDER,
         "",
-        "Связи недоступны: DaData не настроен.",
-        "Добавьте ключи DaData, чтобы открыть экран аффилированности."
+        "Раздел временно недоступен.",
+        "Источник данных не настроен.",
+        "",
+        "Можно вернуться в карточку."
       ].join("\n"),
       reply_markup: compactSectionKeyboard(id, "lnk")
     };
@@ -903,8 +906,11 @@ async function buildConnectionsView(env, id, page = 1) {
         "🔗 <b>Связи</b>",
         SECTION_DIVIDER,
         "",
-        "Сервис аффилированности временно недоступен.",
-        "Попробуйте позже."
+        "Раздел временно недоступен.",
+        "Источник данных сейчас не отвечает.",
+        "",
+        "Попробуйте позже.",
+        "Можно вернуться в карточку."
       ].join("\n"),
       reply_markup: compactSectionKeyboard(id, "lnk")
     };
@@ -913,11 +919,7 @@ async function buildConnectionsView(env, id, page = 1) {
   const managersCount = affiliated.managers.length;
   const foundersCount = affiliated.founders.length;
   const total = affiliated.total;
-  const listItems = [
-    ...affiliated.managers.map((item) => `• ${escapeHtml(item.name)} — через руководителя`),
-    ...affiliated.founders.map((item) => `• ${escapeHtml(item.name)} — через учредителя`)
-  ];
-  const pagedLinks = paginateItems(listItems, page);
+  const pagedLinks = paginateItems(affiliated.deduped.map(formatAffiliatedCompanyLine), page);
   const lines = [
     "🔗 <b>Связи</b>",
     SECTION_DIVIDER,
@@ -925,17 +927,30 @@ async function buildConnectionsView(env, id, page = 1) {
     `${getAffiliatedStatusEmoji(total)} <b>${escapeHtml(getAffiliatedDecisionSignal(total, managersCount, foundersCount))}</b>`,
     "",
     "<b>Сводка</b>",
-    `• Через руководителя: <b>${managersCount}</b>`,
-    `• Через учредителя: <b>${foundersCount}</b>`,
-    `• Общий объём сети: <b>${total}</b>`
+    `• Через руководителя: <b>${managersCount}</b>${formatAffiliatedSummaryNames(affiliated.managers)}`,
+    `• Через учредителя: <b>${foundersCount}</b>${formatAffiliatedSummaryNames(affiliated.founders)}`,
+    `• Общий объём сети: <b>${total}</b> (без дублей)`
   ];
 
   if (total === 0) {
-    lines.push("", "<b>Что это значит</b>", "По данным DaData плотной сети связанных компаний не видно.");
+    lines.push(
+      "",
+      "🟢 <b>Связи не найдены.</b>",
+      "",
+      "Компания, вероятно, самостоятельная:",
+      "общих руководителей или учредителей по данным DaData не видно."
+    );
     return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk") };
   }
 
-  lines.push("", `<b>Список</b> (Стр. ${pagedLinks.page}/${pagedLinks.totalPages})`, ...pagedLinks.items, "", "<b>Что это значит</b>", escapeHtml(getAffiliatedNetworkLabel(total)));
+  lines.push(
+    "",
+    `<b>Список компаний</b> (Стр. ${pagedLinks.page}/${pagedLinks.totalPages})`,
+    ...pagedLinks.items,
+    "",
+    "<b>Что это значит</b>",
+    escapeHtml(getAffiliatedNetworkLabel(total))
+  );
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk", pagedLinks.page, pagedLinks.totalPages) };
 }
 
@@ -961,7 +976,9 @@ async function buildSuccessorView(env, id) {
         "🏢 <b>Правопреемник</b>",
         SECTION_DIVIDER,
         "",
-        "Информация о правопреемнике не найдена."
+        "Правопреемник не найден.",
+        "",
+        "Источник не показал связанного правопреемника для этой компании."
       ].join("\n"),
       reply_markup: compactSectionKeyboard(id, "succ")
     };
@@ -974,11 +991,11 @@ async function buildSuccessorView(env, id) {
     "",
     `<b>${escapeHtml(firstNonEmpty([successor.Наим, successor.НаимСокр, successor.name, "Без названия"]))}</b>`,
     "",
-    `• Статус: <b>${escapeHtml(firstNonEmpty([successor.Статус?.Наим, successor.status, "нет данных"]))}</b>`,
-    `• ИНН: <code>${escapeHtml(successorId || "нет данных")}</code>`,
-    `• Руководитель: <b>${escapeHtml(firstNonEmpty([successor.Руковод?.[0]?.ФИО, successor.Руководитель, successor.director, "нет данных"]))}</b>`,
-    "• Связь: <b>правопреемник ликвидированной компании</b>",
-    "• Что проверить: <b>долги, суды, действующий статус</b>"
+    `• Статус: ${escapeHtml(firstNonEmpty([successor.Статус?.Наим, successor.status, "нет данных"]))}`,
+    `• ИНН: ${escapeHtml(successorId || "нет данных")}`,
+    `• Руководитель: ${escapeHtml(firstNonEmpty([successor.Руковод?.[0]?.ФИО, successor.Руководитель, successor.director, "нет данных"]))}`,
+    "• Связь: правопреемник ликвидированной компании",
+    "• Что проверить: долги, суды, действующий статус"
   ];
 
   const keyboard = compactSectionKeyboard(id, "succ");
@@ -1919,14 +1936,14 @@ async function findAffiliatedByInn(env, inn, scope) {
 }
 
 async function collectAffiliatedCompanies(env, sourceInn) {
-  if (!isDadataConfigured(env) || !sourceInn) return { managers: [], founders: [], total: 0, state: "missing_config" };
+  if (!isDadataConfigured(env) || !sourceInn) return { managers: [], founders: [], deduped: [], total: 0, state: "missing_config" };
 
   let party;
   try {
     party = await findPartyByInnOrOgrn(env, sourceInn);
   } catch (error) {
     if (error instanceof DadataServiceError) {
-      return { managers: [], founders: [], total: 0, state: "unavailable" };
+      return { managers: [], founders: [], deduped: [], total: 0, state: "unavailable" };
     }
     throw error;
   }
@@ -1944,9 +1961,9 @@ async function collectAffiliatedCompanies(env, sourceInn) {
   const sourceInnNormalized = String(sourceInn || "").trim();
   const seenManagers = new Set([sourceInnNormalized]);
   const seenFounders = new Set([sourceInnNormalized]);
-  const seenTotal = new Set();
   const managers = [];
   const founders = [];
+  const dedupedMap = new Map();
   let unavailableCount = 0;
   let attemptedCount = 0;
 
@@ -1962,32 +1979,35 @@ async function collectAffiliatedCompanies(env, sourceInn) {
     }
     const { group } = scopeConfigs[i];
     for (const item of result.value) {
-      const inn = String(item?.inn || "").trim();
-      if (!inn) continue;
-      const normalized = {
-        name: item?.name?.short_with_opf || item?.name?.full_with_opf || "Без названия",
-        inn,
-        status: item?.state?.status || "",
-        context: item?.okved || item?.address?.data?.city || ""
-      };
+      const normalized = normalizeAffiliatedCompany(item);
+      if (!normalized || normalized.inn === sourceInnNormalized) continue;
       if (group === "managers") {
-        if (seenManagers.has(inn)) continue;
-        seenManagers.add(inn);
-        managers.push(normalized);
-      } else {
-        if (seenFounders.has(inn)) continue;
-        seenFounders.add(inn);
+        if (!seenManagers.has(normalized.inn)) {
+          seenManagers.add(normalized.inn);
+          managers.push(normalized);
+        }
+      } else if (!seenFounders.has(normalized.inn)) {
+        seenFounders.add(normalized.inn);
         founders.push(normalized);
       }
-      seenTotal.add(inn);
+
+      const existing = dedupedMap.get(normalized.inn);
+      if (existing) {
+        existing.relations.add(group);
+        if (existing.status === "нет данных" && normalized.status !== "нет данных") existing.status = normalized.status;
+        if (existing.okved === "нет данных" && normalized.okved !== "нет данных") existing.okved = normalized.okved;
+      } else {
+        dedupedMap.set(normalized.inn, { ...normalized, relations: new Set([group]) });
+      }
     }
   }
 
   if (unavailableCount > 0 && managers.length === 0 && founders.length === 0 && attemptedCount > 0) {
-    return { managers: [], founders: [], total: 0, state: "unavailable" };
+    return { managers: [], founders: [], deduped: [], total: 0, state: "unavailable" };
   }
 
-  return { managers, founders, total: seenTotal.size, state: "ok" };
+  const deduped = [...dedupedMap.values()].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  return { managers, founders, deduped, total: deduped.length, state: "ok" };
 }
 
 async function findAffiliatedForPersons(env, inns, scope) {
@@ -2015,6 +2035,34 @@ function extractAffiliationSourceInns(value) {
     .flatMap((item) => [item?.inn, item?.data?.inn, item?.share?.inn])
     .map((inn) => String(inn || "").trim())
     .filter((inn) => /^\d{10,12}$/.test(inn));
+}
+
+function normalizeAffiliatedCompany(item) {
+  const inn = String(item?.inn || "").trim();
+  if (!inn) return null;
+  return {
+    name: item?.name?.short_with_opf || item?.name?.full_with_opf || "Без названия",
+    inn,
+    status: getReadableAffiliatedStatus(item?.state?.status),
+    okved: firstNonEmpty([item?.okved, item?.okved_type, "нет данных"])
+  };
+}
+
+function getReadableAffiliatedStatus(status) {
+  const normalized = String(status || "").trim().toUpperCase();
+  if (normalized === "ACTIVE") return "действует";
+  if (normalized === "LIQUIDATING") return "ликвидация";
+  if (normalized === "LIQUIDATED") return "ликвидирована";
+  return normalized ? normalized.toLowerCase() : "нет данных";
+}
+
+function formatAffiliatedSummaryNames(items) {
+  const names = ensureArray(items).map((item) => item?.name).filter(Boolean).slice(0, 2);
+  return names.length > 0 ? ` (${escapeHtml(names.join(", "))})` : "";
+}
+
+function formatAffiliatedCompanyLine(item) {
+  return `• ${escapeHtml(item.name)} (${escapeHtml(item.inn)}) — ${escapeHtml(item.status)} — ${escapeHtml(item.okved || "нет данных")}`;
 }
 
 function buildAffiliatedGroupLines(title, items, limit) {
@@ -2278,12 +2326,14 @@ function parseCompanySectionCallback(data) {
   return {
     section: match[1],
     id: match[2],
-    page: parsePageFromCallback(match[3])
+    page: parsePageFromCallback(data)
   };
 }
 
-function parsePageFromCallback(value) {
-  const page = Number.parseInt(String(value || "1"), 10);
+function parsePageFromCallback(data) {
+  const callbackMatch = String(data || "").match(/:p:(\d+)$/);
+  const rawPage = callbackMatch?.[1] || data;
+  const page = Number.parseInt(String(rawPage || "1"), 10);
   return Number.isFinite(page) && page > 0 ? page : 1;
 }
 
@@ -2305,7 +2355,7 @@ function buildPagerRow(section, id, page, totalPages) {
   if (!totalPages || totalPages <= 1) return null;
   const row = [];
   if (page > 1) row.push(kb("⬅️", `co:${section}:${id}:p:${page - 1}`));
-  row.push(kb(`${page}/${totalPages}`, `co:${section}:${id}:p:${page}`));
+  row.push(kb(`${page}/${totalPages}`, "noop"));
   if (page < totalPages) row.push(kb("➡️", `co:${section}:${id}:p:${page + 1}`));
   return row;
 }
