@@ -849,8 +849,8 @@ async function buildConnectionsView(env, id) {
         "🔗 <b>Связи</b>",
         SECTION_DIVIDER,
         "",
-        "Сервис аффилированности временно недоступен.",
-        "Попробуйте позже."
+        "Источник временно недоступен.",
+        "Не удалось получить связи компании из DaData. Попробуйте позже."
       ].join("\n"),
       reply_markup: compactSectionKeyboard(id, "lnk")
     };
@@ -861,21 +861,20 @@ async function buildConnectionsView(env, id) {
   const total = affiliated.total;
   const lines = startSection("🔗 <b>Связи</b>");
 
-  lines.push("", `🎯 <b>${escapeHtml(getAffiliatedDecisionSignal(total, managersCount, foundersCount))}</b>`);
-  lines.push(`Сеть: ${escapeHtml(getAffiliatedNetworkLabel(total))}`);
-  lines.push("", "🧭 <b>Сводка</b>");
-  lines.push(`Через руководителя: <b>${managersCount}</b>`);
-  lines.push(`Через учредителя: <b>${foundersCount}</b>`);
-  lines.push(`Общий объём сети: <b>${total}</b>`);
+  lines.push("", `${total === 0 ? "🟢" : total >= 6 ? "🟠" : "🟡"} <b>${escapeHtml(getAffiliatedDecisionSignal(total, managersCount, foundersCount))}</b>`);
+  lines.push("", "<b>Сводка</b>");
+  lines.push(`• Через руководителя: <b>${managersCount}</b>`);
+  lines.push(`• Через учредителя: <b>${foundersCount}</b>`);
+  lines.push(`• Общий объём сети: <b>${total}</b>`);
+  lines.push("", "<b>Что это значит</b>");
+  lines.push(escapeHtml(getAffiliatedMeaning(total, managersCount, foundersCount)));
 
   if (total === 0) {
-    lines.push("", "Аффилированные компании не найдены");
     return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk") };
   }
 
   lines.push(...buildAffiliatedGroupLines("Через руководителя", affiliated.managers, AFFILIATED_LIMIT));
   lines.push(...buildAffiliatedGroupLines("Через учредителя", affiliated.founders, AFFILIATED_LIMIT));
-  lines.push("", `Итог: ${escapeHtml(getAffiliatedNetworkLabel(total))}`);
 
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "lnk") };
 }
@@ -1318,39 +1317,112 @@ function getReadableCompanyStatus(status) {
 }
 
 function buildRiskDashboardText(result, companyData = {}) {
-  const levelMap = {
-    low: { emoji: "🟢", bluf: "Явных критичных рисков немного" },
-    medium: { emoji: "🟡", bluf: "Есть сигналы, которые стоит проверить перед сделкой" },
-    high: { emoji: "🟠", bluf: "Риск-профиль повышенный" },
-    critical: { emoji: "🔴", bluf: "Нужна жёсткая ручная проверка до сделки" }
-  };
-  const current = levelMap[result.level] || levelMap.medium;
-  const statusText = String(companyData?.Статус?.Наим || "").toLowerCase();
-  const isLiquidated = /ликвид|не\s*действ|прекращ/.test(statusText);
-  const negatives = result.negatives || [];
-  const unknowns = result.unknowns || [];
-  const summaryLine = (items, emptyText) => items.length > 0 ? items.slice(0, 2).join(", ") : emptyText;
+  const decisionMeta = getRiskDecisionMeta(result.decision);
+  const unknowns = ensureArray(result.unknowns);
+  const negatives = ensureArray(result.negatives);
+  const defendantSummary = buildRiskCourtSummary(negatives);
+  const debtSummary = buildRiskDebtSummary(negatives);
+  const taxSummary = buildRiskTaxSummary(negatives);
+  const meaningText = unknowns.length >= 3
+    ? `${decisionMeta.meaning} Данных для уверенного вывода не хватает, поэтому решение лучше считать осторожным.`
+    : decisionMeta.meaning;
 
-  return [
+  const lines = [
     "⚖️ <b>Риски</b>",
     SECTION_DIVIDER,
     "",
-    `${current.emoji} <b>${escapeHtml(isLiquidated ? "Высокий риск" : current.bluf)}</b>`,
+    `${decisionMeta.emoji} <b>${escapeHtml(decisionMeta.bluf)}</b>`,
     "",
-    "<b>Что важно</b>",
-    `• ${escapeHtml(isLiquidated ? "компания ликвидирована или прекратила деятельность" : summaryLine(negatives.slice(0, 1), "критичных стоп-сигналов немного"))}`,
-    `• ${escapeHtml(summaryLine(negatives.filter((item) => /налог|долг|фссп|пени/i.test(item)), "долги и ФССП не выглядят критично"))}`,
-    `• ${escapeHtml(summaryLine(negatives.filter((item) => /суд|арбитраж|ответчик/i.test(item)), "архивные суды требуют проверки только при наличии споров"))}`,
-    `• ${escapeHtml(isLiquidated ? "нужно проверить архивные обязательства и связанные структуры" : "проверьте разделы долгов, судов и связей перед сделкой")}`,
+    "<b>Сводка</b>",
+    `• Score: <b>${result.score}/100</b>`,
+    `• Решение: <b>${escapeHtml(decisionMeta.label)}</b>`,
+    `• Суды в роли ответчика: ${escapeHtml(defendantSummary)}`,
+    `• Долги / ФССП: ${escapeHtml(debtSummary)}`,
+    `• Налоговый риск: ${escapeHtml(taxSummary)}`,
     "",
     "<b>Что это значит</b>",
-    escapeHtml(isLiquidated ? "Для новой сделки компанию нужно рассматривать как недействующую. Проверку стоит продолжать по связанным компаниям и прошлым обязательствам." : result.recommendation),
+    escapeHtml(meaningText),
     "",
-    `Score: <b>${result.score}/100</b>`,
-    `Решение: <b>${escapeHtml(String(result.decision || "manual_review"))}</b>`,
-    negatives.length > 0 ? `Минусы: ${escapeHtml(negatives.slice(0, 4).join(", "))}` : "Минусы: явные негативные факторы не доминируют",
-    unknowns.length > 0 ? `Неизвестно: ${escapeHtml(unknowns.slice(0, 3).join(", "))}` : "Неизвестно: критичных пробелов в данных немного"
-  ].join("\n");
+    "<b>Что делать</b>",
+    escapeHtml(decisionMeta.recommendation)
+  ];
+
+  if (unknowns.length > 0) {
+    lines.push("", "Неизвестно:");
+    for (const item of unknowns.slice(0, 3)) lines.push(`• ${escapeHtml(item)}`);
+  }
+
+  return lines.join("\n");
+}
+
+function getRiskDecisionMeta(decision) {
+  if (decision === "approve_standard") {
+    return {
+      emoji: "🟢",
+      bluf: "Критичных факторов не обнаружено",
+      label: "стандартные условия",
+      meaning: "Компания выглядит устойчиво. Существенных блокеров по текущим данным не видно.",
+      recommendation: "Можно работать на стандартных условиях."
+    };
+  }
+  if (decision === "approve_caution") {
+    return {
+      emoji: "🟡",
+      bluf: "Есть отдельные сигналы, которые стоит учесть",
+      label: "работать с осторожностью",
+      meaning: "Риск не выглядит критичным, но условия сделки лучше сделать аккуратнее.",
+      recommendation: "Сократите отсрочку, проверьте документы и лимит."
+    };
+  }
+  if (decision === "manual_review") {
+    return {
+      emoji: "🟠",
+      bluf: "Нужна ручная проверка",
+      label: "ручная проверка перед сделкой",
+      meaning: "Есть сочетание факторов, которое требует отдельного анализа до согласования условий.",
+      recommendation: "Проверьте юрблок, долги, роль в судах и структуру связей."
+    };
+  }
+  if (decision === "prepay_only") {
+    return {
+      emoji: "🔴",
+      bluf: "Риск высокий",
+      label: "только предоплата",
+      meaning: "Для отсрочки платежа профиль компании выглядит слишком рискованным.",
+      recommendation: "Работать только по полной или поэтапной предоплате."
+    };
+  }
+  return {
+    emoji: "⛔",
+    bluf: "Есть критический стоп-фактор",
+    label: "отказ / обязательная правовая проверка",
+    meaning: "Новую сделку без отдельной правовой оценки рассматривать нельзя.",
+    recommendation: "Остановить сделку или перевести в юридический разбор."
+  };
+}
+
+function buildRiskCourtSummary(negatives) {
+  if (negatives.some((item) => /ответчик|судебный паттерн|судам: компания регулярно выступает ответчиком/i.test(item))) {
+    return "есть существенные сигналы";
+  }
+  if (negatives.some((item) => /судебный фон/i.test(item))) {
+    return "есть общий судебный фон";
+  }
+  return "критичных сигналов не видно";
+}
+
+function buildRiskDebtSummary(negatives) {
+  if (negatives.some((item) => /фссп|исполнительные производства|долговая нагрузка/i.test(item))) {
+    return "есть давление";
+  }
+  return "критичного давления не видно";
+}
+
+function buildRiskTaxSummary(negatives) {
+  if (negatives.some((item) => /налог|недоим|пени|штраф/i.test(item))) {
+    return "есть налоговые сигналы";
+  }
+  return "существенных сигналов не видно";
 }
 
 function firstExistingTaxValue(taxes, keys) {
@@ -1575,12 +1647,42 @@ async function findAffiliatedByInn(env, inn, scope) {
 async function collectAffiliatedCompanies(env, sourceInn) {
   if (!isDadataConfigured(env) || !sourceInn) return { managers: [], founders: [], total: 0, state: "missing_config" };
 
+  let party;
+  try {
+    party = await findPartyByInnOrOgrn(env, sourceInn);
+  } catch (error) {
+    if (error instanceof DadataServiceError) {
+      return { managers: [], founders: [], total: 0, state: "unavailable" };
+    }
+    throw error;
+  }
+
+  const managerInns = extractAffiliationPersonInns(party?.managers, party?.management?.inn);
+  const founderInns = extractAffiliationPersonInns(party?.founders);
   const scopeConfigs = [
-    { scope: ["MANAGERS"], group: "managers" },
-    { scope: ["FOUNDERS"], group: "founders" }
+    { scope: ["MANAGERS"], group: "managers", inns: managerInns },
+    { scope: ["FOUNDERS"], group: "founders", inns: founderInns }
   ];
   const results = await Promise.allSettled(
-    scopeConfigs.map(({ scope }) => findAffiliatedByInn(env, sourceInn, scope))
+    scopeConfigs.map(async ({ inns, scope }) => {
+      const settled = await Promise.allSettled(inns.map((inn) => findAffiliatedByInn(env, inn, scope)));
+      const items = [];
+      let hadSuccess = false;
+      let hadUnavailable = false;
+      for (const entry of settled) {
+        if (entry.status === "fulfilled") {
+          hadSuccess = true;
+          items.push(...entry.value);
+          continue;
+        }
+        if (entry.reason instanceof DadataServiceError) {
+          hadUnavailable = true;
+          continue;
+        }
+        throw entry.reason;
+      }
+      return { items, hadSuccess, hadUnavailable };
+    })
   );
 
   const sourceInnNormalized = String(sourceInn || "").trim();
@@ -1589,19 +1691,27 @@ async function collectAffiliatedCompanies(env, sourceInn) {
   const seenTotal = new Set();
   const managers = [];
   const founders = [];
-  let unavailableCount = 0;
+  let attemptedGroups = 0;
+  let successfulGroups = 0;
+  let unavailableGroups = 0;
 
   for (let i = 0; i < scopeConfigs.length; i++) {
     const result = results[i];
     if (result.status === "rejected") {
       if (result.reason instanceof DadataServiceError) {
-        unavailableCount += 1;
+        unavailableGroups += 1;
         continue;
       }
       throw result.reason;
     }
-    const { group } = scopeConfigs[i];
-    for (const item of result.value) {
+
+    const { group, inns } = scopeConfigs[i];
+    const { items, hadSuccess, hadUnavailable } = result.value;
+    if (inns.length > 0) attemptedGroups += 1;
+    if (hadSuccess) successfulGroups += 1;
+    else if (hadUnavailable) unavailableGroups += 1;
+
+    for (const item of items) {
       const inn = String(item?.inn || "").trim();
       if (!inn) continue;
       const normalized = {
@@ -1623,11 +1733,26 @@ async function collectAffiliatedCompanies(env, sourceInn) {
     }
   }
 
-  if (unavailableCount === scopeConfigs.length) {
+  if (attemptedGroups > 0 && successfulGroups === 0 && unavailableGroups > 0) {
     return { managers: [], founders: [], total: 0, state: "unavailable" };
   }
 
   return { managers, founders, total: seenTotal.size, state: "ok" };
+}
+
+function extractAffiliationPersonInns(items, fallbackInn) {
+  const seen = new Set();
+  const result = [];
+  const pushInn = (value) => {
+    const normalized = String(value || "").replace(/\D+/g, "");
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    result.push(normalized);
+  };
+
+  ensureArray(items).forEach((item) => pushInn(item?.inn || item?.INN || item?.person?.inn || item?.ФЛ?.ИНН || item?.ЮЛ?.ИНН));
+  pushInn(fallbackInn);
+  return result;
 }
 
 function buildAffiliatedGroupLines(title, items, limit) {
@@ -1653,9 +1778,24 @@ function getAffiliatedNetworkLabel(total) {
 }
 
 function getAffiliatedDecisionSignal(total, managersCount, foundersCount) {
-  if (total === 0) return "Критичных признаков аффилированности не найдено";
-  if (managersCount > 0 && foundersCount > 0 && total >= 4) return "Требует ручного анализа структуры";
-  return "Сеть связей ограниченная";
+  if (total === 0) return "Критичных признаков аффилированности не найдено.";
+  if (managersCount > 0 && foundersCount > 0 && total >= 4) return "Сеть связанных организаций плотная — нужен ручной анализ.";
+  if (total >= 3) return "Есть заметная сеть связанных организаций.";
+  return "Есть ограниченная сеть связанных организаций.";
+}
+
+function getAffiliatedMeaning(total, managersCount, foundersCount) {
+  if (total === 0) return "По данным DaData плотной сети связанных компаний не видно.";
+  if (managersCount > 0 && foundersCount > 0) {
+    return "Связи видны и через руководителей, и через учредителей. Перед сделкой стоит проверить ключевые компании сети.";
+  }
+  if (managersCount > 0) {
+    return "Связи проходят через руководителей. Это может указывать на управленческий контур группы компаний.";
+  }
+  if (foundersCount > 0) {
+    return "Связи проходят через учредителей. Это помогает понять контур владения и зависимые организации.";
+  }
+  return "Связанные организации не обнаружены в доступном наборе DaData.";
 }
 
 function normalizeEmailSuggestion(payload) {

@@ -65,7 +65,7 @@ co:tax:<id>
 - `co:debt` → `/company` + `/enforcements`
 - `co:ctr` → `/contracts`
 - `co:his` → `/history`
-- `co:lnk` → `/company` (+ `/person` при необходимости)
+- `co:lnk` → DaData `findById/party` + `findAffiliated/party`
 - `co:tax` → `/company`
 
 Дополнительно:
@@ -144,7 +144,7 @@ KV binding (optional):
 
 - Поиск по email использует `POST /findByEmail/company`.
 - Обогащение карточки `co:main` использует `POST /findById/party`.
-- Экран связей `co:lnk` дополнительно использует `POST /findAffiliated/party` по ИНН учредителей/руководителей.
+- Экран связей `co:lnk` сначала получает карточку через `POST /findById/party`, затем извлекает ИНН руководителей/учредителей и вызывает `POST /findAffiliated/party` по каждому найденному ИНН.
 - При отсутствии DaData ключей или временной ошибке DaData бот продолжает работать через Checko без падения.
 
 ## Risk scoring v2 (`co:risk`)

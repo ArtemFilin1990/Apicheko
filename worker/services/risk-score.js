@@ -30,6 +30,9 @@ const RULE_POINTS = {
   // litigation
   DEFENDANT_CASES_24M_LOW: -3,
   DEFENDANT_CASES_24M_MEDIUM: -8,
+  DEFENDANT_CASES_24M_HIGH: -14,
+  DEFENDANT_CASES_24M_PATTERN: -7,
+  LEGAL_LOAD_GENERAL: -4,
 
   // operational
   VERY_YOUNG_COMPANY: -10,
@@ -120,14 +123,12 @@ export function formatRiskResultForTelegram(result) {
     "⚠️ <b>Риски v2 (Checko + DaData Maximum)</b>",
     `Риск: <b>${levelText}</b>`,
     `Score: <b>${result.score}/100</b>`,
-    `Решение: <b>${escapeHtml(String(result.decision || "manual_review"))}</b>`,
-    "",
-    "Почему:"
+    `Решение: <b>${escapeHtml(String(result.decision || "manual_review"))}</b>`
   ];
 
 
   if (result.negatives.length > 0) {
-    lines.push("", "Минусы:");
+    lines.push("", "Почему:");
     for (const title of result.negatives.slice(0, 5)) lines.push(`• ${title}`);
   }
 
@@ -186,6 +187,7 @@ export function extractRiskMetrics(input) {
 
   const legalCases = extractCaseRows(input?.legalData);
   const litigation24m = analyzeDefendantCases24m(legalCases);
+  const caseStats = buildCaseStats(legalCases);
 
   const hasRevenueSignal = (revenue !== null && revenue > 0) || (dadataIncome !== null && dadataIncome > 0);
   const hasOperationalFootprint = Boolean((employeeCount !== null && employeeCount >= 2) || contactCount > 0 || hasRevenueSignal);
@@ -211,6 +213,7 @@ export function extractRiskMetrics(input) {
     taxPenalties,
     fsspCount,
     litigation24m,
+    caseStats,
 
     contractsCount: safeLength(input?.contractsData),
     revenue,
@@ -265,12 +268,79 @@ function applyFinancialRules(factors, metrics) {
     pushFactor(factors, "financial", "LOSS_MAKING", "Убыток по последней отчетности", "medium", RULE_POINTS.LOSS_MAKING, `Чистая прибыль: ${metrics.netProfit}`);
   }
 
-  if (metrics.financeMissing) {
+  const confirmedNoActivity = metrics.revenue === 0 && metrics.dadataIncome === 0;
+  const isYoungWithoutReports = metrics.ageYears !== null && metrics.ageYears < 3;
+
+  if (confirmedNoActivity && metrics.ageYears !== null && metrics.ageYears >= 3) {
+    pushFactor(factors, "financial", "FINANCE_GAP", "Подтверждена нулевая финансовая активность", "medium", RULE_POINTS.FINANCE_GAP, "Последняя выручка и доход = 0");
+  } else if (metrics.financeMissing && !isYoungWithoutReports) {
     pushFactor(factors, "financial", "FINANCE_GAP", "Недостаточно финансовых данных", "low", RULE_POINTS.FINANCE_GAP, "Нет revenue/income");
   }
 }
 
 function applyLitigationRules(factors, metrics) {
+  const litigation = metrics.litigation24m || {};
+  const caseStats = metrics.caseStats || {};
+
+  if (litigation.highConfidenceCount >= 6 || (litigation.highConfidenceCount >= 3 && litigation.totalAmount >= 1000000)) {
+    pushFactor(
+      factors,
+      "litigation",
+      "DEFENDANT_CASES_24M_HIGH",
+      "Высокое давление по судам: компания регулярно выступает ответчиком",
+      "high",
+      RULE_POINTS.DEFENDANT_CASES_24M_HIGH,
+      `Дел: ${litigation.highConfidenceCount}, сумма: ${litigation.totalAmount || 0}`
+    );
+  } else if (litigation.highConfidenceCount >= 3 || (litigation.highConfidenceCount >= 2 && litigation.totalAmount >= 300000)) {
+    pushFactor(
+      factors,
+      "litigation",
+      "DEFENDANT_CASES_24M_MEDIUM",
+      "Есть серия недавних дел, где компания подтверждённо выступает ответчиком",
+      "medium",
+      RULE_POINTS.DEFENDANT_CASES_24M_MEDIUM,
+      `Дел: ${litigation.highConfidenceCount}, сумма: ${litigation.totalAmount || 0}`
+    );
+  } else if (
+    litigation.highConfidenceCount >= 1 &&
+    (!litigation.zeroOrMissingOnly || litigation.materialDefendantCount > 0 || litigation.totalAmount > 0)
+  ) {
+    pushFactor(
+      factors,
+      "litigation",
+      "DEFENDANT_CASES_24M_LOW",
+      "Есть недавние дела, где компания выступает ответчиком",
+      "low",
+      RULE_POINTS.DEFENDANT_CASES_24M_LOW,
+      `Дел: ${litigation.highConfidenceCount}, сумма: ${litigation.totalAmount || 0}`
+    );
+  }
+
+  if (litigation.repeatedPattern) {
+    pushFactor(
+      factors,
+      "litigation",
+      "DEFENDANT_CASES_24M_PATTERN",
+      "Повторяющийся судебный паттерн по делам ответчика",
+      "medium",
+      RULE_POINTS.DEFENDANT_CASES_24M_PATTERN,
+      `Повторяемость: ${litigation.highConfidenceCount} дел`
+    );
+  }
+
+  const hasDefendantPenalty = factors.some((factor) => factor.group === "litigation" && factor.points < 0);
+  if (!hasDefendantPenalty && caseStats.nonDefendantCasesCount >= 5) {
+    pushFactor(
+      factors,
+      "litigation",
+      "LEGAL_LOAD_GENERAL",
+      "Есть общий судебный фон, но без подтверждённого давления по роли ответчика",
+      "low",
+      RULE_POINTS.LEGAL_LOAD_GENERAL,
+      `Прочих дел: ${caseStats.nonDefendantCasesCount}`
+    );
+  }
 }
 
 function applyOperationalRules(factors, metrics) {
@@ -317,6 +387,10 @@ function applyCompoundRules(factors, metrics) {
     pushFactor(factors, "compound", "CMP_AFFILIATIONS_YOUNG", "Комбинация: много аффилированности + молодая компания", "medium", RULE_POINTS.CMP_AFFILIATIONS_YOUNG, "many affiliations + young");
   }
 
+  if (defendantCases >= 3 && debtPressure) {
+    pushFactor(factors, "compound", "CMP_DEFENDANT_DEBT_PRESSURE", "Комбинация: серия судов ответчика + долговая нагрузка", "high", RULE_POINTS.CMP_DEFENDANT_DEBT_PRESSURE, "defendant cases + debt pressure");
+  }
+
   if (metrics.ageYears !== null && metrics.ageYears >= 7 && (metrics.taxDebt === 0 || metrics.taxDebt === null) && metrics.fsspCount === 0 && metrics.netProfit !== null && metrics.netProfit > 0) {
     pushFactor(factors, "compound", "CMP_STABLE_OLD_CLEAN", "Комбинация: зрелая компания без долгов и с прибылью", "low", RULE_POINTS.CMP_STABLE_OLD_CLEAN, "old + clean debt + stable finance");
   }
@@ -353,9 +427,16 @@ function scoreToLevel(score) {
 
 function decisionByScoreAndSignals(score, level, factors, metrics) {
   const hasCritical = factors.some((factor) => factor.points < 0 && factor.severity === "critical");
+  const hasBankruptcyBlock = metrics.hasBankruptcy || metrics.isInactive || metrics.isInLiquidation;
+  const defendantCases = metrics.litigation24m?.highConfidenceCount || 0;
+  const repeatedPattern = Boolean(metrics.litigation24m?.repeatedPattern);
+  const debtPressure = metrics.hasDebtPressure || (metrics.taxPenalties !== null && metrics.taxPenalties >= 50000);
+  const hasCompoundDefendantDebt = factors.some((factor) => factor.code === "CMP_DEFENDANT_DEBT_PRESSURE");
 
-  if (level === "critical" || hasCritical) return "reject_or_legal_review";
-  if (level === "high") return "prepay_only";
+  if (level === "critical" || hasCritical || hasBankruptcyBlock) return "reject_or_legal_review";
+  if (hasCompoundDefendantDebt || (defendantCases >= 6 && debtPressure)) return "prepay_only";
+  if (level === "high") return repeatedPattern || debtPressure ? "prepay_only" : "manual_review";
+  if ((defendantCases >= 3 && repeatedPattern) || (defendantCases >= 2 && debtPressure)) return "manual_review";
   if (level === "medium") return "approve_caution";
   return "approve_standard";
 }
@@ -569,7 +650,7 @@ function analyzeDefendantCases24m(legalCases) {
   }
 
   const repeatedPattern = hasRepeat(claimants) || hasRepeat(subjects);
-  const totalConsideredCount = highConfidenceCount + (mediumConfidenceCount > 0 ? 1 : 0);
+  const totalConsideredCount = highConfidenceCount + mediumConfidenceCount;
 
   return {
     highConfidenceCount,

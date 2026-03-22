@@ -16,8 +16,8 @@ async function loadWorkerModule() {
   const tempWorkerPath = path.join(tempRoot, "worker.mjs");
   const tempServicesDir = path.join(tempRoot, "services");
   await fs.mkdir(tempServicesDir, { recursive: true });
-  await fs.writeFile(tempWorkerPath, source, "utf8");
-  await fs.writeFile(path.join(tempServicesDir, "risk-score.js"), riskSource, "utf8");
+  await fs.writeFile(tempWorkerPath, source.replace('./services/risk-score.js', './services/risk-score.mjs'), "utf8");
+  await fs.writeFile(path.join(tempServicesDir, "risk-score.mjs"), riskSource, "utf8");
 
   return import(`${pathToFileURL(tempWorkerPath).href}?v=${Date.now()}`);
 }
@@ -385,11 +385,13 @@ test("co:risk renders deterministic score and reasons for inactive company", asy
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Высокий риск/);
+  assert.match(body.text, /Есть критический стоп-фактор/);
   assert.match(body.text, /Score: <b>\d+\/100<\/b>/);
-  assert.match(body.text, /Решение: <b>reject_or_legal_review<\/b>/);
-  assert.match(body.text, /Компания недействующая/);
+  assert.match(body.text, /Решение: <b>отказ \/ обязательная правовая проверка<\/b>/);
+  assert.match(body.text, /Суды в роли ответчика:/);
+  assert.match(body.text, /Новую сделку без отдельной правовой оценки рассматривать нельзя/);
   assert.match(body.text, /Что это значит/);
+  assert.match(body.text, /Что делать/);
 });
 
 test("co:risk shows low or medium profile for normal company", async () => {
@@ -430,11 +432,12 @@ test("co:risk shows low or medium profile for normal company", async () => {
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Явных критичных рисков немного|Есть сигналы, которые стоит проверить/);
-  assert.match(body.text, /Решение: <b>(approve_standard|approve_caution)<\/b>/);
-  assert.match(body.text, /Что важно/);
-  assert.match(body.text, /Минусы:/);
+  assert.match(body.text, /Критичных факторов не обнаружено|Есть отдельные сигналы, которые стоит учесть/);
+  assert.match(body.text, /Решение: <b>(стандартные условия|работать с осторожностью)<\/b>/);
+  assert.match(body.text, /Сводка/);
+  assert.match(body.text, /Суды в роли ответчика:/);
   assert.match(body.text, /Что это значит/);
+  assert.match(body.text, /Что делать/);
 });
 
 test("co:risk handles partial data without crash", async () => {
@@ -458,6 +461,7 @@ test("co:risk handles partial data without crash", async () => {
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Неизвестно:/);
   assert.match(body.text, /Score: <b>\d+\/100<\/b>/);
+  assert.match(body.text, /Данных для уверенного вывода не хватает/);
 });
 
 
@@ -484,6 +488,174 @@ test("risk scoring is deterministic for the same input", async () => {
   const one = riskModule.calculateCompanyRiskScore(payload);
   const two = riskModule.calculateCompanyRiskScore(payload);
   assert.deepEqual(one, two);
+});
+
+test("risk scoring rejects inactive company with bankruptcy", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: {
+      Статус: { Наим: "Не действует" },
+      Налоги: { СумНедоим: 0 }
+    },
+    bankruptcyData: [{ id: 1 }],
+    fedresursData: []
+  });
+
+  assert.equal(result.decision, "reject_or_legal_review");
+  assert.equal(result.level, "critical");
+});
+
+test("risk scoring keeps normal company at low or medium risk", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: {
+      Статус: { Наим: "Действующее" },
+      ДатаРег: "2012-01-01",
+      Налоги: { СумНедоим: 0 },
+      Контакты: { Тел: ["+7 495 123-45-67"], Емэйл: ["info@test.ru"] }
+    },
+    financesData: { "2023": { 2110: 7000000, 2400: 900000 } },
+    legalData: [],
+    fsspData: [],
+    contractsData: [{ id: 1 }],
+    historyData: [],
+    bankruptcyData: [],
+    fedresursData: [],
+    dadataParty: { employee_count: 20, invalid: false, phones: [{ value: "+7 495 123-45-67" }] }
+  });
+
+  assert.match(result.level, /^(low|medium)$/);
+  assert.match(result.decision, /^(approve_standard|approve_caution)$/);
+});
+
+test("single defendant case with zero claim stays low-penalty", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2016-01-01" },
+    legalData: [{ Дата: "2025-06-01", Роль: "Ответчик", СуммаИска: 0, Истец: "ООО Истец" }]
+  });
+
+  assert.ok(!result.factors.some((factor) => factor.code === "DEFENDANT_CASES_24M_MEDIUM" || factor.code === "DEFENDANT_CASES_24M_HIGH"));
+  assert.ok(!result.factors.some((factor) => factor.code === "DEFENDANT_CASES_24M_LOW"));
+});
+
+test("ambiguous role does not trigger strong defendant penalty", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2018-01-01" },
+    legalData: [{ Дата: "2025-05-01", Описание: "Стороны спора не указаны", СуммаИска: 450000 }]
+  });
+
+  assert.ok(!result.factors.some((factor) => factor.code.startsWith("DEFENDANT_CASES_24M")));
+});
+
+test("three confirmed defendant cases create material litigation pressure", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2015-01-01" },
+    legalData: [
+      { Дата: "2025-01-10", Роль: "Ответчик", СуммаИска: 250000, Истец: "ООО Истец 1", Предмет: "Долг" },
+      { Дата: "2025-02-14", Роль: "Ответчик", СуммаИска: 150000, Истец: "ООО Истец 2", Предмет: "Поставка" },
+      { Дата: "2025-03-20", Роль: "Ответчик", СуммаИска: 120000, Истец: "ООО Истец 3", Предмет: "Услуги" }
+    ]
+  });
+
+  assert.ok(result.factors.some((factor) => factor.code === "DEFENDANT_CASES_24M_MEDIUM" || factor.code === "DEFENDANT_CASES_24M_HIGH"));
+});
+
+test("confirmed defendant pattern plus debt pressure escalates decision", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: {
+      Статус: { Наим: "Действующее" },
+      ДатаРег: "2014-01-01",
+      Налоги: { СумНедоим: 250000 }
+    },
+    fsspData: [{ id: 1 }],
+    legalData: [
+      { Дата: "2025-01-10", Роль: "Ответчик", СуммаИска: 250000, Истец: "ООО Истец 1", Предмет: "Долг" },
+      { Дата: "2025-02-14", Роль: "Ответчик", СуммаИска: 350000, Истец: "ООО Истец 2", Предмет: "Долг" },
+      { Дата: "2025-03-20", Роль: "Ответчик", СуммаИска: 420000, Истец: "ООО Истец 3", Предмет: "Долг" },
+      { Дата: "2025-04-20", Роль: "Ответчик", СуммаИска: 520000, Истец: "ООО Истец 4", Предмет: "Долг" },
+      { Дата: "2025-05-20", Роль: "Ответчик", СуммаИска: 120000, Истец: "ООО Истец 5", Предмет: "Долг" },
+      { Дата: "2025-06-20", Роль: "Ответчик", СуммаИска: 110000, Истец: "ООО Истец 6", Предмет: "Долг" }
+    ]
+  });
+
+  assert.match(result.decision, /^(prepay_only|reject_or_legal_review)$/);
+  assert.ok(result.factors.some((factor) => factor.code === "CMP_DEFENDANT_DEBT_PRESSURE"));
+});
+
+test("repeated defendant pattern adds extra penalty", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2013-01-01" },
+    legalData: [
+      { Дата: "2025-01-10", Роль: "Ответчик", СуммаИска: 250000, Истец: "ООО Истец", Предмет: "Долг" },
+      { Дата: "2025-02-14", Роль: "Ответчик", СуммаИска: 150000, Истец: "ООО Истец", Предмет: "Долг" },
+      { Дата: "2025-03-20", Роль: "Ответчик", СуммаИска: 120000, Истец: "ООО Истец", Предмет: "Долг" }
+    ]
+  });
+
+  assert.ok(result.factors.some((factor) => factor.code === "DEFENDANT_CASES_24M_PATTERN"));
+});
+
+test("general legal load is not double-counted when defendant pressure exists", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: { Статус: { Наим: "Действующее" }, ДатаРег: "2011-01-01" },
+    legalData: [
+      { Дата: "2025-01-10", Роль: "Ответчик", СуммаИска: 250000, Истец: "ООО Истец 1", Предмет: "Долг" },
+      { Дата: "2025-02-14", Роль: "Ответчик", СуммаИска: 350000, Истец: "ООО Истец 2", Предмет: "Поставка" },
+      { Дата: "2025-03-20", Роль: "Ответчик", СуммаИска: 420000, Истец: "ООО Истец 3", Предмет: "Услуги" },
+      { Дата: "2025-04-20", Роль: "Истец", СуммаИска: 120000, Истец: "Компания", Предмет: "Взыскание" },
+      { Дата: "2025-05-20", Роль: "Истец", СуммаИска: 80000, Истец: "Компания", Предмет: "Взыскание" }
+    ]
+  });
+
+  assert.ok(result.factors.some((factor) => factor.code === "DEFENDANT_CASES_24M_MEDIUM" || factor.code === "DEFENDANT_CASES_24M_HIGH"));
+  assert.ok(!result.factors.some((factor) => factor.code === "LEGAL_LOAD_GENERAL"));
+});
+
+test("missing finance for young company does not create false high risk", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: {
+      Статус: { Наим: "Действующее" },
+      ДатаРег: "2025-01-01",
+      Налоги: { СумНедоим: 0 },
+      Контакты: { Тел: ["+7 495 123-45-67"] }
+    },
+    legalData: [],
+    fsspData: [],
+    dadataParty: { invalid: false, phones: [{ value: "+7 495 123-45-67" }] }
+  });
+
+  assert.notEqual(result.level, "high");
+  assert.notEqual(result.level, "critical");
+  assert.ok(!result.factors.some((factor) => factor.code === "FINANCE_GAP"));
+});
+
+test("telegram formatter remains compact and valid", async () => {
+  const riskModule = await import(`${pathToFileURL(riskSourcePath).href}?v=${Date.now()}`);
+  const result = riskModule.calculateCompanyRiskScore({
+    companyData: {
+      Статус: { Наим: "Действующее" },
+      ДатаРег: "2010-01-01",
+      Налоги: { СумНедоим: 120000 },
+      Контакты: { Тел: ["+7 495 123-45-67"] }
+    },
+    financesData: { "2023": { 2110: 4000000, 2400: 500000 } },
+    legalData: [{ Дата: "2025-02-01", Роль: "Ответчик", СуммаИска: 350000, Истец: "ООО Истец" }]
+  });
+
+  const text = riskModule.formatRiskResultForTelegram(result);
+  assert.match(text, /Риск: <b>/);
+  assert.match(text, /Score: <b>\d+\/100<\/b>/);
+  assert.match(text, /Решение: <b>/);
+  assert.match(text, /Почему:/);
+  assert.match(text, /Что делать:/);
+  assert.match(text, /Итог:/);
 });
 test("co:debt aggregates company taxes with enforcements", async () => {
   const calls = [];
@@ -721,13 +893,19 @@ test("co:lnk renders DaData affiliated companies", async () => {
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
       const payload = JSON.parse(options.body);
       assert.equal(payload.query, "7707083893");
+      return jsonResponse({ suggestions: [{ data: { inn: "7707083893", managers: [{ inn: "500000000001" }], founders: [{ inn: "600000000001" }] } }] });
+    }
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
+      const payload = JSON.parse(options.body);
       if (Array.isArray(payload.scope) && payload.scope.includes("MANAGERS")) {
+        assert.equal(payload.query, "500000000001");
         return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Альфа" }, state: { status: "ACTIVE" }, address: { data: { city: "Казань" } } } }] });
       }
       if (Array.isArray(payload.scope) && payload.scope.includes("FOUNDERS")) {
+        assert.equal(payload.query, "600000000001");
         return jsonResponse({ suggestions: [{ data: { inn: "2222222222", name: { short_with_opf: "ООО Бета" }, state: { status: "ACTIVE" }, okved: "62.01" } }] });
       }
       return jsonResponse({ suggestions: [] });
@@ -743,6 +921,7 @@ test("co:lnk renders DaData affiliated companies", async () => {
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
   assert.match(body.text, /Сводка/);
+  assert.match(body.text, /Что это значит/);
   assert.match(body.text, /Через руководителя/);
   assert.match(body.text, /Через учредителя/);
   assert.match(body.text, /ООО Альфа/);
@@ -752,6 +931,7 @@ test("co:lnk renders DaData affiliated companies", async () => {
   assert.ok(!calls.some((c) => c.url.includes("api.checko.ru") && c.url.includes("/company")));
   const affiliatedCalls = calls.filter((c) => c.url.includes("/findAffiliated/party"));
   assert.equal(affiliatedCalls.length, 2);
+  assert.ok(calls.some((c) => c.url.includes("/findById/party")));
 });
 
 test("co:lnk keeps cross-channel affiliation visible in both groups", async () => {
@@ -760,12 +940,17 @@ test("co:lnk keeps cross-channel affiliation visible in both groups", async () =
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({ suggestions: [{ data: { inn: "7707083893", managers: [{ inn: "500000000001" }], founders: [{ inn: "600000000001" }] } }] });
+    }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
       const payload = JSON.parse(options.body);
       if (Array.isArray(payload.scope) && payload.scope.includes("MANAGERS")) {
+        assert.equal(payload.query, "500000000001");
         return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Перекрёст" }, state: { status: "ACTIVE" } } }] });
       }
       if (Array.isArray(payload.scope) && payload.scope.includes("FOUNDERS")) {
+        assert.equal(payload.query, "600000000001");
         return jsonResponse({ suggestions: [{ data: { inn: "1111111111", name: { short_with_opf: "ООО Перекрёст" }, state: { status: "ACTIVE" } } }] });
       }
       return jsonResponse({ suggestions: [] });
@@ -792,6 +977,9 @@ test("co:lnk renders no-affiliations complete screen", async () => {
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({ suggestions: [{ data: { inn: "7707083893", managers: [{ inn: "500000000001" }], founders: [{ inn: "600000000001" }] } }] });
+    }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
       return jsonResponse({ suggestions: [] });
     }
@@ -805,8 +993,8 @@ test("co:lnk renders no-affiliations complete screen", async () => {
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /Аффилированные компании не найдены/);
-  assert.match(body.text, /Аффилированность не обнаружена/);
+  assert.match(body.text, /Критичных признаков аффилированности не найдено/);
+  assert.match(body.text, /По данным DaData плотной сети связанных компаний не видно/);
 });
 
 test("co:lnk renders service-state when DaData affiliated is unavailable", async () => {
@@ -815,6 +1003,9 @@ test("co:lnk renders service-state when DaData affiliated is unavailable", async
     const u = new URL(String(url));
     calls.push({ url: u.toString(), options });
     if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({ suggestions: [{ data: { inn: "7707083893", managers: [{ inn: "500000000001" }] } }] });
+    }
     if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
       return new Response("upstream failed", { status: 502 });
     }
@@ -828,7 +1019,8 @@ test("co:lnk renders service-state when DaData affiliated is unavailable", async
 
   const edit = calls.find((c) => c.url.includes("/editMessageText"));
   const body = JSON.parse(edit.options.body);
-  assert.match(body.text, /временно недоступен/);
+  assert.match(body.text, /Источник временно недоступен/);
+  assert.match(body.text, /Не удалось получить связи компании из DaData/);
 });
 
 test("DaData outage renders graceful service-state in main card", async () => {
