@@ -1479,6 +1479,33 @@ test("co:succ callback renders successor screen and empty-state safely", async (
   assert.match(body.text, /Правопреемник не найден/);
 });
 
+test("co:fil empty-state keeps affiliated-companies navigation context", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
+      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", Филиалы: [] } });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(
+    makeWebhookRequest({ callback_query: { id: "cb-fil-empty", data: "co:fil:7707083893", message: { message_id: 76, chat: { id: 2 } } } }),
+    makeEnv()
+  );
+
+  const edit = calls.find((c) => c.url.includes("/editMessageText"));
+  const body = JSON.parse(edit.options.body);
+  const callbacks = body.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
+
+  assert.match(body.text, /Филиальная сеть не обнаружена/);
+  assert.ok(callbacks.includes("co:lnk:7707083893"));
+  assert.ok(callbacks.includes("co:own:7707083893"));
+  assert.ok(callbacks.includes("co:main:7707083893"));
+});
+
 test("pager callback opens second page for co:okv", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
