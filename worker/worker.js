@@ -1568,17 +1568,13 @@ const COMPANY_NAV_SECTIONS = [
   { sec: "his", label: "История",    icon: "📜" },
 ];
 
-// Все 6 секций сразу, без пагинации кнопок
+// Каждая кнопка — на всю ширину (один ряд = одна кнопка)
 function buildCompanyKeyboard(company, active = "main") {
   const id = normalizedCompanyId(company);
 
-  const rows = [];
-  for (let i = 0; i < COMPANY_NAV_SECTIONS.length; i += 2) {
-    const pair = COMPANY_NAV_SECTIONS.slice(i, i + 2).map(({ sec, label, icon }) =>
-      kb(active === sec ? `${icon} ${label} ✦` : `${icon} ${label}`, `co:${sec}:${id}`)
-    );
-    rows.push(pair);
-  }
+  const rows = COMPANY_NAV_SECTIONS.map(({ sec, label, icon }) =>
+    [kb(active === sec ? `${icon} ${label} ✦` : `${icon} ${label}`, `co:${sec}:${id}`)]
+  );
 
   rows.push([kb("🏠 В меню", "menu")]);
   return { inline_keyboard: rows };
