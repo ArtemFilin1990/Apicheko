@@ -108,19 +108,19 @@ async function handleTelegramUpdate(request, env) {
   const chatId = msg.chat.id;
   const text = msg.text.trim();
 
-  if (text === "/start" || text === "🔎 Новый поиск") {
+  if (text === "/start") {
     const view = buildMainMenuView();
     await sendHtmlMessage(env, chatId, view);
     return jsonResponse({ ok: true });
   }
 
-  if (text === "/help" || text === "💬 Поддержка") {
+  if (text === "/help") {
     const view = buildHelpView();
     await sendHtmlMessage(env, chatId, view);
     return jsonResponse({ ok: true });
   }
 
-  if (text === "📁 История" || text === "/history") {
+  if (text === "/history") {
     const view = await buildLookupHistoryView(env, chatId);
     await sendHtmlMessage(env, chatId, view);
     return jsonResponse({ ok: true });
@@ -247,15 +247,15 @@ function buildMainMenuView() {
       "",
       "Покажу главное:",
       "• статус компании",
-      "• риски и долги",
       "• связи и аффилированность",
-      "• финансовые сигналы",
+      "• учредителей и ОКВЭД",
+      "• правопреемство и финансовый срез",
       "",
       "👇 Отправьте ИНН одним сообщением",
       "• 10 цифр — компания",
       "• 12 цифр — ИП или физлицо"
     ].join("\n"),
-    reply_markup: buildGlobalReplyKeyboard()
+    reply_markup: buildMainMenuKeyboard()
   };
 }
 
@@ -267,15 +267,15 @@ function buildHelpView() {
       "",
       "Отправьте ИНН, и бот соберёт краткую сводку по компании:",
       "• статус",
-      "• риски",
       "• связи",
-      "• финансы",
+      "• учредители",
+      "• ОКВЭД и правопреемство",
       "",
-      "Дальше можно открыть детали по кнопкам внутри карточки.",
+      "Дальше можно открыть детали по inline-кнопкам внутри карточки.",
       "",
-      "Если какой-то источник временно недоступен, бот покажет это отдельно и предложит следующий шаг."
+      "Если источник временно недоступен, бот покажет это отдельно и предложит следующий шаг."
     ].join("\n"),
-    reply_markup: buildGlobalReplyKeyboard()
+    reply_markup: buildMainMenuKeyboard()
   };
 }
 
@@ -291,7 +291,7 @@ async function buildLookupHistoryView(env, chatId) {
         "История пока недоступна без хранилища.",
         "Можно продолжить через новый поиск."
       ].join("\n"),
-      reply_markup: buildGlobalReplyKeyboard()
+      reply_markup: backMenuKeyboard("menu")
     };
   }
 
@@ -305,7 +305,7 @@ async function buildLookupHistoryView(env, chatId) {
         "Пока нет сохранённых проверок.",
         "Отправьте ИНН/ОГРН, и он появится в истории."
       ].join("\n"),
-      reply_markup: buildGlobalReplyKeyboard()
+      reply_markup: backMenuKeyboard("menu")
     };
   }
 
@@ -611,59 +611,45 @@ async function buildRiskView(env, id) {
 }
 
 async function buildFinancesView(env, id, page = 1) {
-  if (!isCheckoConfigured(env)) {
-    return buildCheckoMissingConfigView("📊 <b>Финансы</b>", id);
+  const partyState = await loadDadataPartyState(env, id);
+  if (partyState.state === "missing_config") {
+    return buildDadataMissingConfigView("📊 <b>Финансы</b>", id);
+  }
+  if (partyState.state === "unavailable") {
+    return buildDadataTemporaryUnavailableView("📊 <b>Финансы</b>", id);
   }
 
-  let companyPayload;
-  let financesPayload;
-  try {
-    [companyPayload, financesPayload] = await Promise.all([
-      checkoRequest(env, "company", identifierParams(id)),
-      checkoRequest(env, "finances", identifierParams(id))
-    ]);
-  } catch (error) {
-    if (error instanceof CheckoServiceError) {
-      return buildCheckoTemporaryUnavailableView("📊 <b>Финансы</b>", id);
-    }
-    throw error;
-  }
+  const party = partyState.party || {};
+  const finance = party.finance || {};
+  const employeeCount = parseNullableNumber(party.employee_count);
 
-  const companyData = companyPayload.data || {};
-  const financeRows = financesPayload.data || {};
-  const latestYear = getYearsSorted(financeRows)[0] || null;
-  const latestRow = latestYear ? financeRows[latestYear] || {} : {};
-  const staff = firstNonEmpty([companyData.ЧислСотр, companyData.Численность, companyData.Сотрудники, "нет данных"]);
-  const salary = firstNonEmpty([companyData.ЗПСреднемес, companyData.СрЗП, companyData.СредЗП, "нет данных"]);
-  const taxMode = firstNonEmpty([companyData.НалРежим?.Наим, companyData.НалогРежим?.Наим, companyData.Налогообложение?.Наим, "нет данных"]);
-  const mspStatus = firstNonEmpty([companyData.РМСП?.Кат, companyData.МСП?.Кат, "нет данных"]);
-  const financeSourceState = latestYear ? `отчётность за ${latestYear}` : "нет данных";
-
-  if (!latestYear && staff === "нет данных" && salary === "нет данных" && taxMode === "нет данных" && mspStatus === "нет данных") {
+  if (!hasVisibleFinanceData(finance, employeeCount)) {
     return {
       text: [
         "📊 <b>Финансы</b>",
         SECTION_DIVIDER,
         "",
         "Финансовые данные не найдены.",
-        "Источник не передал отчётность по этой компании."
+        "DaData не передал финансовый срез по этой компании."
       ].join("\n"),
       reply_markup: compactSectionKeyboard(id, "fin")
     };
   }
 
-  const financeBluf = buildCheckoFinanceBluf(latestRow, latestYear, staff);
+  const financeBluf = buildFinanceBluf(finance);
   const lines = [
     "📊 <b>Финансы</b>",
     SECTION_DIVIDER,
     "",
     escapeHtml(financeBluf),
     "",
-    `• Штат: <b>${escapeHtml(formatOptionalNumber(staff))}</b>`,
-    `• Средняя зарплата: <b>${escapeHtml(formatOptionalMoneyOrText(salary))}</b>`,
-    `• Спецрежим: <b>${escapeHtml(taxMode)}</b>`,
-    `• МСП: <b>${escapeHtml(mspStatus)}</b>`,
-    `• Источник отчётности: <b>${escapeHtml(financeSourceState)}</b>`
+    `• Год: <b>${escapeHtml(formatOptionalYear(finance.year))}</b>`,
+    `• Доход: <b>${escapeHtml(formatOptionalMoney(finance.income))}</b>`,
+    `• Расход: <b>${escapeHtml(formatOptionalMoney(finance.expense))}</b>`,
+    `• Выручка: <b>${escapeHtml(formatOptionalMoney(finance.revenue))}</b>`,
+    `• Задолженность: <b>${escapeHtml(formatOptionalMoney(finance.debt))}</b>`,
+    `• Пени и штрафы: <b>${escapeHtml(formatOptionalMoney(finance.penalty))}</b>`,
+    `• Сотрудники: <b>${escapeHtml(formatOptionalNumber(employeeCount))}</b>`
   ];
 
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "fin") };
@@ -1208,10 +1194,10 @@ async function sendHtmlMessage(env, chatId, view) {
 
 function buildCompanyKeyboard(id, env = {}, opts = {}) {
   const rows = [
-    [kb("⚖️ Риски", `co:risk:${id}`), kb("🏛 Суды", `co:arb:${id}`)],
-    [kb("🏦 Долги", `co:debt:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
-    [kb("📊 Финансы", `co:fin:${id}`), kb("📋 Контракты", `co:ctr:${id}`)],
-    [kb("🏢 Правопреемник", `co:succ:${id}`), kb("🗓 История", `co:his:${id}`)]
+    [kb("🔗 Связи", `co:lnk:${id}`), kb("👥 Учредители", `co:own:${id}`)],
+    [kb("📊 Финансы", `co:fin:${id}`), kb("🏷 ОКВЭД", `co:okv:${id}`)],
+    [kb("🏢 Правопреемник", `co:succ:${id}`)],
+    [kb("💬 Помощь", "help")]
   ];
   return withPagerRow(rows, "main", id, opts.page, opts.totalPages);
 }
@@ -1274,14 +1260,14 @@ function compactSectionKeyboard(id, section = "main", page = 1, totalPages = 1) 
   }
   if (section === "lnk") {
     rows = [
-      [kb("🏢 Правопреемник", `co:succ:${id}`)],
+      [kb("👥 Учредители", `co:own:${id}`), kb("🏢 Правопреемник", `co:succ:${id}`)],
       [kb("🔙 В карточку", `co:main:${id}`)]
     ];
     return withPagerRow(rows, section, id, page, totalPages);
   }
   if (section === "fin") {
     rows = [
-      [kb("🏦 Долги", `co:debt:${id}`), kb("📋 Контракты", `co:ctr:${id}`)],
+      [kb("🏷 ОКВЭД", `co:okv:${id}`), kb("👥 Учредители", `co:own:${id}`)],
       [kb("🔙 В карточку", `co:main:${id}`)]
     ];
     return withPagerRow(rows, section, id, page, totalPages);
@@ -1302,7 +1288,7 @@ function compactSectionKeyboard(id, section = "main", page = 1, totalPages = 1) 
   }
   if (section === "succ") {
     rows = [
-      [kb("🔗 Связи", `co:lnk:${id}`)],
+      [kb("🔗 Связи", `co:lnk:${id}`), kb("👥 Учредители", `co:own:${id}`)],
       [kb("🔙 В карточку", `co:main:${id}`)]
     ];
     return { inline_keyboard: rows };
@@ -1323,7 +1309,7 @@ function compactSectionKeyboard(id, section = "main", page = 1, totalPages = 1) 
   }
   if (section === "okv") {
     rows = [
-      [kb("👥 Учредители", `co:own:${id}`), kb("📊 Финансы", `co:fin:${id}`)],
+      [kb("👥 Учредители", `co:own:${id}`), kb("🏢 Правопреемник", `co:succ:${id}`)],
       [kb("🔙 В карточку", `co:main:${id}`)]
     ];
     return withPagerRow(rows, section, id, page, totalPages);
@@ -1337,11 +1323,13 @@ function compactSectionKeyboard(id, section = "main", page = 1, totalPages = 1) 
   return withPagerRow(rows, section, id, page, totalPages);
 }
 
-function buildGlobalReplyKeyboard() {
+function buildMainMenuKeyboard() {
   return {
-    keyboard: [[{ text: "🔎 Новый поиск" }], [{ text: "📁 История" }, { text: "💬 Поддержка" }]],
-    resize_keyboard: true,
-    is_persistent: true
+    inline_keyboard: [
+      [kb("🔎 Как искать", "search:inn"), kb("🧾 По названию", "search:name")],
+      [kb("✉️ По email", "search:email"), kb("📁 История", "noop")],
+      [kb("💬 Помощь", "help")]
+    ]
   };
 }
 
@@ -1883,23 +1871,18 @@ async function collectAffiliatedCompanies(env, sourceInn) {
   if (!isDadataConfigured(env) || !sourceInn) return { managers: [], founders: [], deduped: [], total: 0, state: "missing_config" };
 
   let party = null;
-  let degradedByParty = false;
   try {
     party = await findPartyByInnOrOgrn(env, sourceInn);
   } catch (error) {
     if (error instanceof DadataServiceError) {
-      degradedByParty = true;
+      return { managers: [], founders: [], deduped: [], total: 0, state: "unavailable" };
     } else {
       throw error;
     }
   }
 
-  let managerInns = extractAffiliationSourceInns([party?.management, ...(party?.managers || [])]);
-  let founderInns = extractAffiliationSourceInns(party?.founders || []);
-  if ((managerInns.length === 0 && founderInns.length === 0) && degradedByParty) {
-    managerInns = [String(sourceInn)];
-    founderInns = [String(sourceInn)];
-  }
+  const managerInns = extractAffiliationSourceInns([party?.management, ...(party?.managers || [])]);
+  const founderInns = extractAffiliationSourceInns(party?.founders || []);
   const scopeConfigs = [
     { scope: ["MANAGERS"], group: "managers", inns: managerInns },
     { scope: ["FOUNDERS"], group: "founders", inns: founderInns }
@@ -1961,22 +1944,6 @@ async function collectAffiliatedCompanies(env, sourceInn) {
 
   if (attemptedCount > 0 && unavailableGroups === attemptedCount) {
     return { managers: [], founders: [], deduped: [], total: 0, state: "unavailable" };
-  }
-
-  if (degradedByParty) {
-    if (managers.length > 0 && founders.length === 0) {
-      founders.push(...managers);
-      for (const item of managers) {
-        const existing = dedupedMap.get(item.inn);
-        if (existing) existing.relations.add("founders");
-      }
-    } else if (founders.length > 0 && managers.length === 0) {
-      managers.push(...founders);
-      for (const item of founders) {
-        const existing = dedupedMap.get(item.inn);
-        if (existing) existing.relations.add("managers");
-      }
-    }
   }
 
   const deduped = Array.from(dedupedMap.values())
