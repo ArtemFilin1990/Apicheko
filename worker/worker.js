@@ -1033,7 +1033,7 @@ async function buildBranchesView(env, id, page = 1) {
 ${SECTION_DIVIDER}
 
 Филиальная сеть не обнаружена или источник не передал данные.
-Это нормальная ситуация для компаний без обособленных подразделений.`, reply_markup: compactSectionKeyboard(id, "lnk") };
+Это нормальная ситуация для компаний без обособленных подразделений.`, reply_markup: compactSectionKeyboard(id, "fil") };
 
   const branchLines = branches.map((b) => `• КПП ${escapeHtml(b.КПП || "—")} — ${escapeHtml(truncate(String(b.Адрес || b.АдресРФ || "—"), 48))}`);
   const pagedBranches = paginateItems(branchLines, page);
@@ -1297,6 +1297,13 @@ function compactSectionKeyboard(id, section = "main", page = 1, totalPages = 1) 
   if (section === "own") {
     rows = [
       [kb("🏷 ОКВЭД", `co:okv:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
+      [kb("🔙 В карточку", `co:main:${id}`)]
+    ];
+    return withPagerRow(rows, section, id, page, totalPages);
+  }
+  if (section === "fil") {
+    rows = [
+      [kb("🔗 Связи", `co:lnk:${id}`), kb("👥 Учредители", `co:own:${id}`)],
       [kb("🔙 В карточку", `co:main:${id}`)]
     ];
     return withPagerRow(rows, section, id, page, totalPages);
