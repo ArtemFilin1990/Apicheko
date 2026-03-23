@@ -862,10 +862,6 @@ async function buildViewForCallback(env, data) {
   if (!data.startsWith("co:")) return null;
   const parsed = parseCompanySectionCallback(data);
   if (!parsed || !parsed.id) return null;
-  // nav: просто редиректим на main с нужной страницей навигации
-  if (parsed.section === "main" && parsed.navPage > 1) {
-    return buildCompanyNavPageView(env, parsed.id, parsed.navPage);
-  }
   if (!COMPANY_SECTION_TITLES[parsed.section]) return null;
   return buildCompanySectionView(env, parsed.section, parsed.id, parsed.page);
 }
@@ -986,15 +982,6 @@ async function buildCompanyByEmailView(env, email) {
   const company = await findCompanyByEmail(env, email);
   if (!company?.inn) throw new DadataNotFoundError();
   return buildCompanyMainView(env, company.inn);
-}
-
-async function buildCompanyNavPageView(env, query, navPage) {
-  const party = await findPartyByInnOrOgrn(env, query);
-  if (!party) throw new DadataNotFoundError();
-  // Получаем текущий view main-карточки, но с другой страницей nav
-  const view = await buildCompanyMainView(env, query);
-  view.reply_markup = buildCompanyKeyboard(buildCompanyContext(party, query), "main", navPage);
-  return view;
 }
 
 async function buildCompanyMainView(env, query) {
@@ -1526,41 +1513,24 @@ function buildMainMenuKeyboard() {
 }
 
 const COMPANY_NAV_SECTIONS = [
-  { sec: "scr", label: "Скоринг",     icon: "🎯" },
-  { sec: "fin", label: "Финансы",     icon: "📊" },
-  { sec: "own", label: "Учредители",  icon: "👥" },
-  { sec: "okv", label: "ОКВЭД",       icon: "🏷" },
-  { sec: "lnk", label: "Связи",       icon: "🔗" },
-  { sec: "his", label: "История",     icon: "📜" },
+  { sec: "scr", label: "Скоринг",    icon: "🎯" },
+  { sec: "fin", label: "Финансы",    icon: "📊" },
+  { sec: "own", label: "Учредители", icon: "👥" },
+  { sec: "okv", label: "ОКВЭД",      icon: "🏷" },
+  { sec: "lnk", label: "Связи",      icon: "🔗" },
+  { sec: "his", label: "История",    icon: "📜" },
 ];
-const NAV_PAGE_SIZE = 4; // кнопок-секций на страницу (2×2)
 
-function buildCompanyKeyboard(company, active = "main", navPage = 1) {
+// Все 6 секций сразу, без пагинации кнопок
+function buildCompanyKeyboard(company, active = "main") {
   const id = normalizedCompanyId(company);
 
-  const totalNavPages = Math.ceil(COMPANY_NAV_SECTIONS.length / NAV_PAGE_SIZE);
-  const currentNavPage = Math.min(Math.max(Number(navPage) || 1, 1), totalNavPages);
-  const slice = COMPANY_NAV_SECTIONS.slice(
-    (currentNavPage - 1) * NAV_PAGE_SIZE,
-    currentNavPage * NAV_PAGE_SIZE
-  );
-
-  // Разбиваем по 2 в ряд
   const rows = [];
-  for (let i = 0; i < slice.length; i += 2) {
-    const pair = slice.slice(i, i + 2).map(({ sec, label, icon }) =>
+  for (let i = 0; i < COMPANY_NAV_SECTIONS.length; i += 2) {
+    const pair = COMPANY_NAV_SECTIONS.slice(i, i + 2).map(({ sec, label, icon }) =>
       kb(active === sec ? `${icon} ${label} ✦` : `${icon} ${label}`, `co:${sec}:${id}`)
     );
     rows.push(pair);
-  }
-
-  // Пагинация навигации если секций > NAV_PAGE_SIZE
-  if (totalNavPages > 1) {
-    const pager = [];
-    if (currentNavPage > 1) pager.push(kb("◀", `co:main:${id}:nav:${currentNavPage - 1}`));
-    pager.push(kb(`${currentNavPage}/${totalNavPages}`, "noop"));
-    if (currentNavPage < totalNavPages) pager.push(kb("▶", `co:main:${id}:nav:${currentNavPage + 1}`));
-    rows.push(pager);
   }
 
   rows.push([kb("🏠 В меню", "menu")]);
