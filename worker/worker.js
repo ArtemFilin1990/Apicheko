@@ -784,7 +784,7 @@ async function handleTelegramUpdate(request, env) {
   const text = msg.text.trim();
 
   if (text === "/start") {
-    const view = buildMainMenuView();
+    const view = buildWelcomeView();
     await sendHtmlMessage(env, chatId, view);
     return jsonResponse({ ok: true });
   }
@@ -892,6 +892,32 @@ async function buildCompanySectionView(env, section, id, page = 1) {
     default:
       return null;
   }
+}
+
+function buildWelcomeView() {
+  return {
+    text: [
+      "👋 Привет!",
+      "",
+      "Я помогаю быстро проверить любую компанию или ИП по базе ЕГРЮЛ / ЕГРИП.",
+      "",
+      "Просто отправь ИНН, ОГРН или корпоративный email — и я покажу:",
+      "",
+      "🎯 Скоринг надёжности контрагента",
+      "📊 Финансы: выручка, прибыль, долги",
+      "👥 Учредителей с долями",
+      "🔗 Связанные компании",
+      "🏷 Виды деятельности (ОКВЭД)",
+      "📜 Историю изменений",
+      "",
+      "Данные из DaData (тариф Максимальный) — актуальные сведения ФНС.",
+      "",
+      SECTION_DIVIDER,
+      "",
+      "Отправь ИНН / ОГРН прямо сюда или нажми кнопку ниже:"
+    ].join("\n"),
+    reply_markup: buildMainMenuKeyboard()
+  };
 }
 
 function buildMainMenuView() {
