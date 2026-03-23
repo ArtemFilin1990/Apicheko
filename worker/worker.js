@@ -178,7 +178,12 @@ async function buildCompanySectionView(env, section, id, page = 1) {
 function buildMainMenuView() {
   return {
     text: [
-
+      "🏢 <b>Проверка компаний — DaData</b>",
+      "──────────────────",
+      "",
+      "Введите ИНН (10 цифр), ОГРН (13 цифр), ИНН/КПП или корпоративный email.",
+      "",
+      "Данные из ЕГРЮЛ / ЕГРИП через DaData: карточка, учредители, финансы, связи, ОКВЭД."
     ].join("\n"),
     reply_markup: buildMainMenuKeyboard()
   };
@@ -409,7 +414,8 @@ async function buildLookupHistoryView(env, chatId) {
 function buildMainMenuKeyboard() {
   return {
     inline_keyboard: [
-
+      [kb("🔎 Поиск по ИНН / ОГРН", "search:inn"), kb("✉️ Поиск по email", "search:email")],
+      [kb("ℹ️ Справка", "help")]
     ]
   };
 }

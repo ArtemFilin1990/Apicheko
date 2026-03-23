@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import html
-
+from datetime import date, datetime
+from typing import Any
 
 from dadata import CompanyData
 
@@ -34,106 +35,121 @@ def _nested(d: dict, *keys: str) -> Any:
     return current if current != "" else None
 
 
-def build_main_card(company: CompanyData) -> str:
-
-        for path in paths:
-            current = obj
-            ok = True
-            for part in path.split("."):
-                if current is None:
-                    ok = False
-                    break
-                if isinstance(current, dict):
-                    current = current.get(part)
-                else:
-                    current = getattr(current, part, None)
-            if ok and current not in (None, "", [], {}, ()):
-                return current
-        return None
-
-
-        if value is None:
-            return []
-        if isinstance(value, (list, tuple, set)):
-            return list(value)
-        return [value]
-
-
-        for item in _as_list(value):
-            if isinstance(item, dict):
-                candidate = item.get("value") or item.get("unrestricted_value") or item.get("data")
+def _get(obj: Any, *paths: str) -> Any:
+    """Return first non-empty value found by dot-path traversal of obj."""
+    for path in paths:
+        current = obj
+        ok = True
+        for part in path.split("."):
+            if current is None:
+                ok = False
+                break
+            if isinstance(current, dict):
+                current = current.get(part)
             else:
-                candidate = getattr(item, "value", None) or getattr(item, "unrestricted_value", None) or str(item)
-            if candidate not in (None, "", "None", "null"):
-                return str(candidate).strip()
+                current = getattr(current, part, None)
+        if ok and current not in (None, "", [], {}, ()):
+            return current
+    return None
+
+
+def _as_list(value: Any) -> list:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return [value]
+
+
+def _first_contact(value: Any) -> str | None:
+    for item in _as_list(value):
+        if isinstance(item, dict):
+            candidate = item.get("value") or item.get("unrestricted_value") or item.get("data")
+        else:
+            candidate = getattr(item, "value", None) or getattr(item, "unrestricted_value", None) or str(item)
+        if candidate not in (None, "", "None", "null"):
+            return str(candidate).strip()
+    return None
+
+
+def _clean(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if value in ("", "None", "null"):
+            return None
+        return value
+    return value
+
+
+def _format_int(value: Any) -> str | None:
+    value = _clean(value)
+    if value is None:
+        return None
+    try:
+        number = int(round(float(str(value).replace(" ", "").replace(",", "."))))
+    except (TypeError, ValueError):
+        return None
+    return f"{number:,}".replace(",", " ")
+
+
+def _format_date(value: Any) -> str | None:
+    value = _clean(value)
+    if value is None:
         return None
 
+    if isinstance(value, datetime):
+        return value.strftime("%d.%m.%Y")
+    if isinstance(value, date):
+        return value.strftime("%d.%m.%Y")
 
-        if value is None:
-            return None
-        if isinstance(value, str):
-            value = value.strip()
-            if value in ("", "None", "null"):
-                return None
-            return value
-        return value
-
-
-        value = _clean(value)
-        if value is None:
-            return None
+    if isinstance(value, (int, float)):
         try:
-            number = int(round(float(str(value).replace(" ", "").replace(",", "."))))
-        except (TypeError, ValueError):
-            return None
-        return f"{number:,}".replace(",", " ")
-
-
-        value = _clean(value)
-        if value is None:
-            return None
-
-        if isinstance(value, datetime):
-            return value.strftime("%d.%m.%Y")
-        if isinstance(value, date):
-            return value.strftime("%d.%m.%Y")
-
-        if isinstance(value, (int, float)):
-            try:
-                ts = float(value)
-                if ts > 10_000_000_000:
-                    ts /= 1000
-                return datetime.fromtimestamp(ts).strftime("%d.%m.%Y")
-            except Exception:
-                return None
-
-        raw = str(value).strip()
-        if not raw:
-            return None
-
-
-            try:
-                return datetime.strptime(raw[:26], fmt).strftime("%d.%m.%Y")
-            except Exception:
-                pass
-
-        try:
-            return datetime.fromisoformat(raw.replace("Z", "+00:00")).strftime("%d.%m.%Y")
+            ts = float(value)
+            if ts > 10_000_000_000:
+                ts /= 1000
+            return datetime.fromtimestamp(ts).strftime("%d.%m.%Y")
         except Exception:
             return None
 
+    raw = str(value).strip()
+    if not raw:
+        return None
 
-        visible = [line for line in block_lines if line]
-        if not visible:
-            return
-        if lines and lines[-1] != "":
-            lines.append("")
-        lines.append(title)
-        lines.extend(visible)
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(raw[:26], fmt).strftime("%d.%m.%Y")
+        except Exception:
+            pass
 
-    company_name = _escape(
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).strftime("%d.%m.%Y")
+    except Exception:
+        return None
 
-    ) or "Компания"
+
+def _escape(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    return html.escape(str(value))
+
+
+def _add_block(lines: list[str], title: str, block_lines: list[str]) -> None:
+    visible = [line for line in block_lines if line]
+    if not visible:
+        return
+    if lines and lines[-1] != "":
+        lines.append("")
+    lines.append(title)
+    lines.extend(visible)
+
+
+def build_main_card(company: CompanyData) -> str:
+    """Build main company card text from CompanyData (DaData source)."""
+    lines: list[str] = []
+
+    company_name = _escape(_get(company, "name")) or "Компания"
 
     status_raw = str(_clean(_get(company, "status", "state.status")) or "").upper()
     if status_raw == "ACTIVE":
@@ -145,8 +161,12 @@ def build_main_card(company: CompanyData) -> str:
     else:
         status_text = "⚪ Неизвестно"
 
-
+    registration_date = _format_date(_get(company, "registration_date", "state.registration_date"))
     status_line = status_text + (f" (с {registration_date})" if registration_date else "")
+
+    lines.append(f"🏢 <b>{company_name}</b>")
+    lines.append("")
+    lines.append(status_line)
 
     inn = _escape(_get(company, "inn"))
     kpp = _escape(_get(company, "kpp"))
@@ -163,7 +183,8 @@ def build_main_card(company: CompanyData) -> str:
     else:
         okved = None
 
-
+    capital_raw = _clean(_get(company, "capital", "capital.value"))
+    capital = _format_int(capital_raw)
     if capital == "0":
         capital = None
 
@@ -173,13 +194,16 @@ def build_main_card(company: CompanyData) -> str:
     email = _escape(_first_contact(_get(company, "email", "emails")))
     phone = _escape(_first_contact(_get(company, "phone", "phones")))
 
+    director_name = _escape(_get(company, "management.name", "manager", "director"))
+    director_post = _escape(_get(company, "management.post"))
 
+    requisites: list[str] = []
     if inn or kpp:
         if inn and kpp:
             requisites.append(f"• ИНН / КПП: <code>{inn}</code> / <code>{kpp}</code>")
         elif inn:
             requisites.append(f"• ИНН: <code>{inn}</code>")
-
+        if kpp and not inn:
             requisites.append(f"• КПП: <code>{kpp}</code>")
     if ogrn:
         requisites.append(f"• ОГРН: <code>{ogrn}</code>")
@@ -187,7 +211,7 @@ def build_main_card(company: CompanyData) -> str:
         requisites.append(f"• ОКВЭД: {okved}")
     _add_block(lines, "[ ⚖️ ] Реквизиты", requisites)
 
-
+    management_block: list[str] = []
     if director_name:
         management_line = f"• {director_name}"
         if director_post:
@@ -199,12 +223,12 @@ def build_main_card(company: CompanyData) -> str:
         management_block.append(f"• Штат: {employees} сотрудников")
     _add_block(lines, "[ 👥 ] Управление и Капитал", management_block)
 
-
+    revenue_block: list[str] = []
     if revenue:
         revenue_block.append(f"• По данным ФНС: <b>{revenue} ₽</b>")
     _add_block(lines, "[ 💰 ] Выручка", revenue_block)
 
-
+    contacts_block: list[str] = []
     if address:
         contacts_block.append(f"• {address}")
     if email:
@@ -334,7 +358,6 @@ def format_financial(data: dict) -> str:
 
     latest = reports[0] if isinstance(reports, list) else reports
 
-    # Checko uses accounting form codes (2110=revenue, 2400=net profit, 1600=assets, 1300=capital)
     year = _pick(latest, "Год", "year")
     revenue = _pick(latest, "2110", "Выручка", "revenue")
     net_profit = _pick(latest, "2400", "ЧистПриб", "netProfit")
@@ -566,6 +589,7 @@ def format_search_results(results: list[dict]) -> str:
     else:
         lines.append("\nВыберите запись из списка ниже:")
     return "\n".join(lines)
+
 
 SECTION_TITLES = {
     "main": "🏢 Карточка компании",

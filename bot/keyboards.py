@@ -31,12 +31,14 @@ def buildCompanyKeyboard(company) -> InlineKeyboardMarkup:
     b.button(text="🔗 Связи", callback_data=CompanyNav(sec="lnk", ident=ident))
     b.button(text="👥 Учредители", callback_data=CompanyNav(sec="own", ident=ident))
     b.button(text="🏷 ОКВЭД", callback_data=CompanyNav(sec="okv", ident=ident))
+    b.button(text="🧾 Налоги", callback_data=CompanyNav(sec="tax", ident=ident))
 
     if revenue not in (None, "") or authorized_capital not in (None, ""):
         b.button(text="📊 Финансы", callback_data=CompanyNav(sec="fin", ident=ident))
 
     b.button(text="📜 История (ФНС)", url="https://egrul.nalog.ru/")
-    b.adjust(2, 2, 1, 1)
+    b.button(text="🏠 В меню", callback_data="menu")
+    b.adjust(2, 2, 1, 1, 1, 1)
     return b.as_markup()
 
 
