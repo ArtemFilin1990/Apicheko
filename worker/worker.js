@@ -1434,67 +1434,93 @@ async function buildHistoryView(env, query, page = 1) {
   const party = await findPartyByInnOrOgrn(env, query);
   if (!party) throw new DadataNotFoundError();
 
-  const lines = ["📜 <b>История компании</b>", SECTION_DIVIDER, ""];
+  // ── Статичный заголовок (всегда на каждой странице) ──────────────────────
+  const header = ["📜 <b>История компании</b>", SECTION_DIVIDER, ""];
 
-  // Регистрация
-  const regDate = formatTimestamp(party?.state?.registration_date);
-  const ogrnDate = formatTimestamp(party?.ogrn_date);
-  if (regDate) lines.push(`📅 <b>Зарегистрирована:</b> <b>${escapeHtml(regDate)}</b>`);
-  if (ogrnDate && ogrnDate !== regDate) lines.push(`🏛 <b>ОГРН выдан:</b> ${escapeHtml(ogrnDate)}`);
-
-  // Ликвидация
-  const liqDate = formatTimestamp(party?.state?.liquidation_date);
-  if (liqDate) lines.push(`🔴 <b>Ликвидирована:</b> <b>${escapeHtml(liqDate)}</b>`);
-
-  // Актуальность данных
+  const regDate    = formatTimestamp(party?.state?.registration_date);
+  const ogrnDate   = formatTimestamp(party?.ogrn_date);
+  const liqDate    = formatTimestamp(party?.state?.liquidation_date);
   const actualDate = formatTimestamp(party?.state?.actuality_date);
-  if (actualDate) lines.push(`🔄 <b>Данные актуальны на:</b> ${escapeHtml(actualDate)}`);
 
-  lines.push("");
+  if (regDate)    header.push(`📅 <b>Зарегистрирована:</b> <b>${escapeHtml(regDate)}</b>`);
+  if (ogrnDate && ogrnDate !== regDate)
+                  header.push(`🏛 <b>ОГРН выдан:</b> ${escapeHtml(ogrnDate)}`);
+  if (liqDate)    header.push(`🔴 <b>Ликвидирована:</b> <b>${escapeHtml(liqDate)}</b>`);
+  if (actualDate) header.push(`🔄 <b>Данные актуальны на:</b> ${escapeHtml(actualDate)}`);
 
-  // Собираем все элементы истории в единый список для пагинации
-  const managers = ensureArray(party?.managers);
+  // Постановка на учёт (authorities)
+  const ftsReg = party?.authorities?.fts_registration;
+  if (ftsReg?.name) {
+    header.push(`🏛 <b>Регистратор:</b> ${escapeHtml(ftsReg.name)}`);
+  }
+  if (ftsReg?.address) {
+    header.push(`   ${escapeHtml(ftsReg.address)}`);
+  }
+
+  // ── Пагинируемый список (руководители + предшественники + преемники) ──────
+  const managers     = ensureArray(party?.managers);
   const predecessors = ensureArray(party?.predecessors);
-  const successors = ensureArray(party?.successors);
+  const successors   = ensureArray(party?.successors);
 
-  // Каждый элемент = { type, data }
   const allItems = [
-    ...managers.map(m => ({ type: "manager", data: m })),
+    ...managers.map(m     => ({ type: "manager",     data: m })),
     ...predecessors.map(p => ({ type: "predecessor", data: p })),
-    ...successors.map(s => ({ type: "successor", data: s })),
+    ...successors.map(s   => ({ type: "successor",   data: s })),
   ];
 
-  const totalPages = Math.max(1, Math.ceil(allItems.length / PAGE_SIZE));
+  const totalPages  = Math.max(1, Math.ceil(allItems.length / PAGE_SIZE));
   const currentPage = clampPage(page, totalPages);
-  const slice = allItems.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const slice       = allItems.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-  if (!slice.length && allItems.length === 0) {
-    lines.push("История изменений недоступна.");
-  } else {
+  const body = [];
+
+  if (allItems.length > 0) {
+    body.push("", BLOCK_DIVIDER);
+
+    // Заголовок группы для первого элемента страницы
+    const firstType = slice[0]?.type;
+    if (firstType === "manager")     body.push(`<b>Руководители</b>  <i>(${managers.length})</i>`);
+    if (firstType === "predecessor") body.push("<b>Правопредшественники</b>");
+    if (firstType === "successor")   body.push("<b>Правопреемники</b>");
+    body.push("");
+
+    let lastType = firstType;
     for (const [i, entry] of slice.entries()) {
       const { type, data } = entry;
-      if (type === "manager") {
-        const mname = escapeHtml(firstNonEmpty([data?.name, (data?.fio || {})?.source, "—"]));
-        const mpost = data?.post ? `  <i>${escapeHtml(data.post)}</i>` : "";
-        const mdate = data?.start_date ? `  с ${escapeHtml(formatTimestamp(data.start_date))}` : "";
-        const invalid = data?.invalidity ? "  ⚠️ <i>недостоверный</i>" : "";
-        lines.push(`👤 <b>${mname}</b>${mpost}${mdate}${invalid}`);
-      } else if (type === "predecessor") {
-        lines.push(`◀ <b>Предшественник:</b> ${escapeHtml(data?.name || "—")}`);
-        if (data?.inn) lines.push(`   ИНН: <code>${escapeHtml(data.inn)}</code>`);
-      } else if (type === "successor") {
-        lines.push(`▶ <b>Правопреемник:</b> ${escapeHtml(data?.name || "—")}`);
-        if (data?.inn) lines.push(`   ИНН: <code>${escapeHtml(data.inn)}</code>`);
+
+      // Разделитель при смене группы
+      if (type !== lastType) {
+        body.push("");
+        if (type === "predecessor") body.push("<b>Правопредшественники</b>", "");
+        if (type === "successor")   body.push("<b>Правопреемники</b>", "");
+        lastType = type;
       }
-      if (i < slice.length - 1) lines.push("");
+
+      if (type === "manager") {
+        const mname   = escapeHtml(firstNonEmpty([data?.name, (data?.fio || {})?.source, "—"]));
+        const mpost   = data?.post       ? `  <i>${escapeHtml(data.post)}</i>`                       : "";
+        const mdate   = data?.start_date ? `  <i>с ${escapeHtml(formatTimestamp(data.start_date))}</i>` : "";
+        const invalid = data?.invalidity ? "  ⚠️ <i>недостоверный</i>"                               : "";
+        body.push(`• <b>${mname}</b>${mpost}${mdate}${invalid}`);
+      } else if (type === "predecessor") {
+        body.push(`• <b>${escapeHtml(data?.name || "—")}</b>`);
+        if (data?.inn) body.push(`  ИНН: <code>${escapeHtml(data.inn)}</code>`);
+      } else if (type === "successor") {
+        body.push(`• <b>${escapeHtml(data?.name || "—")}</b>`);
+        if (data?.inn) body.push(`  ИНН: <code>${escapeHtml(data.inn)}</code>`);
+      }
+
+      if (i < slice.length - 1) body.push("");
     }
+  } else {
+    body.push("", "<i>Нет данных об изменениях</i>");
   }
 
   // Ссылка на ЕГРЮЛ
-  lines.push("", `<a href="https://egrul.nalog.ru/">📋 Полная история в ЕГРЮЛ ↗</a>`);
+  body.push("", `<a href="https://egrul.nalog.ru/">📋 Полная история в ЕГРЮЛ ↗</a>`);
 
   return {
-    text: lines.join("\n"),
+    text: [...header, ...body].join("\n"),
     reply_markup: buildSectionKeyboard(buildCompanyContext(party, query), "his", currentPage, totalPages)
   };
 }
