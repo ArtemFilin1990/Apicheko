@@ -1,7 +1,8 @@
 const DEFAULT_DADATA_API_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs";
 const DEFAULT_WEBHOOK_PATH = "/webhook";
 const COMPANY_NOT_FOUND_MESSAGE = "❌ Компания не найдена";
-const SECTION_DIVIDER = "──────────────────";
+const SECTION_DIVIDER = "\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015";
+const BLOCK_DIVIDER = "\u00b7\u00b7\u00b7\u00b7\u00b7\u00b7\u00b7\u00b7\u00b7\u00b7\u00b7\u00b7\u00b7\u00b7\u00b7\u00b7\u00b7\u00b7";
 const PAGE_SIZE = 5;
 const MAX_AFFILIATION_SOURCE_INNS = 5;
 const CACHE_TTL_DADATA_PARTY_SECONDS = 12 * 60 * 60;
@@ -114,6 +115,7 @@ async function handleCallbackQuery(callbackQuery, env) {
   if (!chatId || !messageId) return;
 
   try {
+    env.__cbChatId__ = chatId;
     const view = await buildViewForCallback(env, String(callbackQuery.data || ""));
     if (!view) return;
     await editMessage(env, chatId, messageId, view.text, view.reply_markup);
@@ -147,6 +149,7 @@ async function buildViewForCallback(env, data) {
   if (data === "help") return buildHelpView();
   if (data === "search:inn") return buildSearchInnView();
   if (data === "search:email") return buildSearchEmailView();
+  if (data === "history") return buildLookupHistoryView(env, env.__cbChatId__ || null);
 
   if (data.startsWith("select:company:")) {
     return buildCompanyMainView(env, data.split(":").pop());
@@ -178,12 +181,16 @@ async function buildCompanySectionView(env, section, id, page = 1) {
 function buildMainMenuView() {
   return {
     text: [
-      "🏢 <b>Проверка компаний — DaData</b>",
-      "──────────────────",
+      "🔍 <b>Проверка контрагентов</b>",
+      SECTION_DIVIDER,
       "",
-      "Введите ИНН (10 цифр), ОГРН (13 цифр), ИНН/КПП или корпоративный email.",
+      "Отправь в чат один из форматов:",
+      "• <code>7707083893</code> — ИНН (10 цифр)",
+      "• <code>1027700132195</code> — ОГРН (13 цифр)",
+      "• <code>7707083893/773601001</code> — ИНН/КПП",
+      "• <code>info@company.ru</code> — корп. email",
       "",
-      "Данные из ЕГРЮЛ / ЕГРИП через DaData: карточка, учредители, финансы, связи, ОКВЭД."
+      "📊 Данные ЕГРЮЛ/ЕГРИП через DaData · учредители · финансы · связи · ОКВЭД"
     ].join("\n"),
     reply_markup: buildMainMenuKeyboard()
   };
@@ -192,10 +199,24 @@ function buildMainMenuView() {
 function buildHelpView() {
   return {
     text: [
-      "ℹ️ <b>Как пользоваться ботом</b>",
+      "ℹ️ <b>Как пользоваться</b>",
       SECTION_DIVIDER,
       "",
-
+      "<b>Что вводить:</b>",
+      "• ИНН (10 цифр) — юрлицо",
+      "• ОГРН (13 цифр) — любая организация",
+      "• ИНН/КПП — конкретный филиал",
+      "• Корпоративный email — найти компанию по почте",
+      "",
+      "<b>Что возвращает карточка:</b>",
+      "🏢 Название · статус · реквизиты",
+      "👤 Руководитель · адрес · капитал",
+      "👥 Учредители с долями (тариф Максимальный)",
+      "📊 Финансы: выручка, доход, расход, долги, штрафы",
+      "🔗 Связи: все аффилированные компании · с ролями",
+      "🏷 ОКВЭД: основной · дополнительные с названиями",
+      "",
+      "<b>Команды:</b> /start · /help · /history"
     ].join("\n"),
     reply_markup: buildMainMenuKeyboard()
   };
@@ -257,24 +278,49 @@ async function buildCompanyByEmailView(env, email) {
 async function buildCompanyMainView(env, query) {
   const party = await findPartyByInnOrOgrn(env, query);
   if (!party) throw new DadataNotFoundError();
-  const id = normalizedCompanyId(party, query);
+
+  const shortName = firstNonEmpty([party?.name?.short_with_opf, party?.name?.full_with_opf, "Компания"]);
+  const fullName = party?.name?.full_with_opf;
+  const statusBadge = companyStatusBadge(party?.state?.status);
+  const regDate = formatTimestamp(party?.state?.registration_date);
+  const revenue = party?.finance?.revenue;
+  const invalidNote = party?.invalid ? "  ⚠️ <i>Недостоверные сведения ФНС</i>" : "";
+
+  const lines = [
+    `🏢 <b>${escapeHtml(shortName)}</b>${invalidNote}`,
+  ];
+  if (fullName && fullName !== shortName) {
+    lines.push(`<i>${escapeHtml(fullName)}</i>`);
+  }
+  lines.push(
+    SECTION_DIVIDER,
+    "",
+    `${statusBadge}` + (regDate ? `  ·  зарег. <b>${escapeHtml(regDate)}</b>` : ""),
+    "",
+    `🪪 <b>ИНН:</b> <code>${escapeHtml(firstNonEmpty([party?.inn, "—"]))}</code>   🏛 <b>ОГРН:</b> <code>${escapeHtml(firstNonEmpty([party?.ogrn, "—"]))}</code>`,
+  );
+  if (party?.kpp) {
+    lines.push(`🧩 <b>КПП:</b> <code>${escapeHtml(party.kpp)}</code>`);
+  }
+  lines.push(
+    "",
+    `👤 <b>Руководитель:</b> ${escapeHtml(firstNonEmpty([party?.management?.name, "—"]))}` +
+      (party?.management?.post ? `  <i>${escapeHtml(party.management.post)}</i>` : ""),
+    `📍 <b>Адрес:</b> ${escapeHtml(firstNonEmpty([party?.address?.value, "—"]))}`,
+    "",
+    BLOCK_DIVIDER,
+    `💼 <b>Капитал:</b> <b>${escapeHtml(formatMoney(party?.capital?.value))}</b>   👥 <b>Сотрудники:</b> <b>${escapeHtml(firstNonEmpty([party?.employee_count != null ? String(party.employee_count) : null, "—"]))}</b>`,
+  );
+  if (revenue != null) {
+    lines.push(`💰 <b>Выручка:</b> <b>${escapeHtml(formatMoney(revenue))}</b>` + (party?.finance?.year ? `  <i>(${party.finance.year})</i>` : ""));
+  }
+  const okveds = ensureArray(party?.okveds);
+  const mainOkved = okveds.find(o => o?.main);
+  lines.push(`🏷 <b>ОКВЭД:</b> ${escapeHtml(firstNonEmpty([party?.okved, "—"]))}` + (mainOkved?.name ? `  <i>${escapeHtml(mainOkved.name)}</i>` : ""));
+  lines.push("");
 
   return {
-    text: [
-      `🏢 <b>${escapeHtml(firstNonEmpty([party?.name?.short_with_opf, party?.name?.full_with_opf, "Компания"]))}</b>`,
-      SECTION_DIVIDER,
-      "",
-      `🪪 ИНН: <code>${escapeHtml(firstNonEmpty([party?.inn, "—"]))}</code>`,
-      `🏛 ОГРН: <code>${escapeHtml(firstNonEmpty([party?.ogrn, "—"]))}</code>`,
-      `📌 Статус: <b>${escapeHtml(readablePartyStatus(party?.state?.status))}</b>`,
-      `👤 Руководитель: ${escapeHtml(firstNonEmpty([party?.management?.name, "—"]))}`,
-      `📍 Адрес: ${escapeHtml(firstNonEmpty([party?.address?.value, "—"]))}`,
-      `💼 Капитал: ${escapeHtml(formatMoney(party?.capital?.value))}`,
-      `👥 Сотрудники: ${escapeHtml(firstNonEmpty([party?.employee_count, "—"]))}`,
-      `🏷 ОКВЭД: ${escapeHtml(firstNonEmpty([party?.okved, "—"]))}`,
-      "",
-      "✨ Ниже можно открыть нужный раздел карточки."
-    ].join("\n"),
+    text: lines.join("\n"),
     reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query))
   };
 }
@@ -289,13 +335,16 @@ async function buildFoundersView(env, query) {
   if (!founders.length) {
     lines.push("Учредители не найдены.");
   } else {
-    for (const founder of founders.slice(0, 10)) {
-      lines.push(
-        `• <b>${escapeHtml(firstNonEmpty([founder?.name, founder?.fio, "—"]))}</b>`,
-        `  ИНН: <code>${escapeHtml(firstNonEmpty([founder?.inn, "—"]))}</code>`,
-        `  Доля: ${escapeHtml(formatShare(founder?.share))}`
-      );
+    for (const [i, founder] of founders.slice(0, 10).entries()) {
+      const fname = escapeHtml(firstNonEmpty([founder?.name, founder?.fio, "—"]));
+      const finn = escapeHtml(firstNonEmpty([founder?.inn, "—"]));
+      const fshare = escapeHtml(formatShare(founder?.share));
+      const ftype = founder?.type === "PHYSICAL" ? "👤" : "🏢";
+      lines.push(`${ftype} <b>${fname}</b>`);
+      lines.push(`   ИНН: <code>${finn}</code>   Доля: <b>${fshare}</b>`);
+      if (i < founders.slice(0, 10).length - 1) lines.push("");
     }
+    if (founders.length > 10) lines.push(`<i>…и ещё ${founders.length - 10}</i>`);
   }
 
   return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "own") };
@@ -313,18 +362,32 @@ async function buildFinancesView(env, query) {
   const penalty = party?.finance?.penalty || party?.finance?.tax_penalty;
   const year = party?.finance?.year || party?.finance?.period;
 
+  const profitVal = (income != null && expense != null) ? (Number(income) - Number(expense)) : null;
+  const profitPct = (income && expense && Number(income) > 0)
+    ? Math.round((Number(income) - Number(expense)) / Number(income) * 100)
+    : null;
+  const profitTrend = profitPct != null ? (profitPct >= 0 ? "▲" : "▼") : "";
+  const finLines = [
+    "📊 <b>Финансы</b>",
+    SECTION_DIVIDER,
+    "",
+    `<b>Период:</b> <b>${escapeHtml(firstNonEmpty([year, "—"]))}</b>`,
+    "",
+    `📈 <b>Доходы:</b>  <b>${escapeHtml(formatMoney(income))}</b>`,
+    `📉 <b>Расходы:</b> <b>${escapeHtml(formatMoney(expense))}</b>`,
+  ];
+  if (profitVal != null) {
+    finLines.push(`${profitPct >= 0 ? "✅" : "🔴"} <b>Прибыль:</b>  <b>${escapeHtml(formatMoney(profitVal))}</b>` + (profitPct != null ? `  <i>${profitTrend} ${Math.abs(profitPct)}%</i>` : ""));
+  }
+  finLines.push(
+    "",
+    BLOCK_DIVIDER,
+    `🧾 <b>Налог. режим:</b> ${escapeHtml(firstNonEmpty([tax, "—"]))}`,
+    `⚠️ <b>Задолженность:</b> <b>${escapeHtml(formatMoney(debt))}</b>`,
+    `🔴 <b>Пени и штрафы:</b> <b>${escapeHtml(formatMoney(penalty))}</b>`,
+  );
   return {
-    text: [
-      "📊 <b>Финансы</b>",
-      SECTION_DIVIDER,
-      "",
-      `Период: ${escapeHtml(firstNonEmpty([year, "—"]))}`,
-      `Доходы: ${escapeHtml(formatMoney(income))}`,
-      `Расходы: ${escapeHtml(formatMoney(expense))}`,
-      `Налоговый режим: ${escapeHtml(firstNonEmpty([tax, "—"]))}`,
-      `Задолженность: ${escapeHtml(formatMoney(debt))}`,
-      `Пени и штрафы: ${escapeHtml(formatMoney(penalty))}`
-    ].join("\n"),
+    text: finLines.join("\n"),
     reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "fin")
   };
 }
@@ -334,14 +397,25 @@ async function buildOkvedView(env, query) {
   if (!party) throw new DadataNotFoundError();
   const id = normalizedCompanyId(party, query);
   const okveds = ensureArray(party?.okveds);
+  const mainOkved = okveds.find(o => o?.main);
+  const extraOkveds = okveds.filter(o => !o?.main);
   const lines = ["🏷 <b>ОКВЭД</b>", SECTION_DIVIDER, ""];
-  lines.push(`Основной: ${escapeHtml(firstNonEmpty([party?.okved, "—"]))}`);
 
-  if (okveds.length) {
-    lines.push("", "Дополнительные:");
-    for (const item of okveds.slice(0, 10)) {
-      lines.push(`• ${escapeHtml(firstNonEmpty([item, item?.name, item?.code, "—"]))}`);
+  lines.push("<b>Основной:</b>");
+  if (mainOkved) {
+    lines.push(`• <b>${escapeHtml(mainOkved.code || party?.okved || "—")}</b>  <i>${escapeHtml(mainOkved.name || "")}</i>`);
+  } else {
+    lines.push(`• <b>${escapeHtml(firstNonEmpty([party?.okved, "—"]))}</b>`);
+  }
+
+  if (extraOkveds.length) {
+    lines.push("", `<b>Дополнительные</b> (${extraOkveds.length}):`);
+    for (const item of extraOkveds.slice(0, 15)) {
+      const code = escapeHtml(item?.code || "—");
+      const name = item?.name ? `  <i>${escapeHtml(item.name)}</i>` : "";
+      lines.push(`• ${code}${name}`);
     }
+    if (extraOkveds.length > 15) lines.push(`<i>…и ещё ${extraOkveds.length - 15}</i>`);
   }
 
   return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "okv") };
@@ -366,17 +440,19 @@ async function buildConnectionsView(env, query, page = 1) {
   const currentPage = clampPage(page, totalPages);
   const slice = deduped.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-  const lines = ["🔗 <b>Связи</b>", SECTION_DIVIDER, ""];
+  const lines = [`🔗 <b>Связи</b>  <i>(${deduped.length})</i>`, SECTION_DIVIDER, ""];
   if (!slice.length) {
     lines.push("Связанные компании не найдены.");
   } else {
-    for (const item of slice) {
-      lines.push(
-        `• <b>${escapeHtml(item.name)}</b>`,
-        `  ИНН: <code>${escapeHtml(item.inn)}</code>`,
-        `  Статус: ${escapeHtml(item.status)}`,
-        `  Основание: ${escapeHtml(item.relations.join(", "))}`
-      );
+    for (const [i, item] of slice.entries()) {
+      const roleIcon = item.relations.some(r => r.includes("учредитель")) ? "👥" :
+                       item.relations.some(r => r.includes("руковод")) ? "👤" : "🔗";
+      const statusIcon = item.status === "Действует" ? "🟢" :
+                         item.status === "Ликвидирована" ? "🔴" :
+                         item.status === "Банкротство" ? "🔴" : "🟡";
+      lines.push(`• <b>${escapeHtml(item.name)}</b>  ${roleIcon}`);
+      lines.push(`  <code>${escapeHtml(item.inn)}</code>  ${statusIcon} ${escapeHtml(item.status)}  · <i>${escapeHtml(item.relations.join(", "))}</i>`);
+      if (i < slice.length - 1) lines.push("");
     }
   }
 
@@ -414,8 +490,8 @@ async function buildLookupHistoryView(env, chatId) {
 function buildMainMenuKeyboard() {
   return {
     inline_keyboard: [
-      [kb("🔎 Поиск по ИНН / ОГРН", "search:inn"), kb("✉️ Поиск по email", "search:email")],
-      [kb("ℹ️ Справка", "help")]
+      [kb("🔎 По ИНН / ОГРН", "search:inn"), kb("✉️ По email", "search:email")],
+      [kb("📜 История", "history"), kb("ℹ️ Справка", "help")]
     ]
   };
 }
@@ -660,6 +736,30 @@ function firstNonEmpty(values) {
 
 function ensureArray(value) {
   return Array.isArray(value) ? value : value ? [value] : [];
+}
+
+function companyStatusBadge(status) {
+  const s = String(status || "").toUpperCase();
+  if (s === "ACTIVE")       return "🟢 <b>Действует</b>";
+  if (s === "LIQUIDATING")  return "🟡 <b>Ликвидируется</b>";
+  if (s === "LIQUIDATED")   return "🔴 <b>Ликвидирована</b>";
+  if (s === "BANKRUPT")     return "🔴 <b>Банкротство</b>";
+  if (s === "REORGANIZING") return "🔄 <b>Реорганизация</b>";
+  return "⚪ <b>Неизвестно</b>";
+}
+
+function formatTimestamp(ts) {
+  if (!ts) return null;
+  try {
+    const d = new Date(Number(ts));
+    if (isNaN(d.getTime())) return null;
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    return `${dd}.${mm}.${yyyy}`;
+  } catch {
+    return null;
+  }
 }
 
 function readablePartyStatus(status) {
