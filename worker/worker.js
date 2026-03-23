@@ -13,6 +13,7 @@ const CACHE_TTL_EMAIL_SECONDS = 6 * 60 * 60;
 const HISTORY_MAX_ITEMS = 10;
 const SECTION_DIVIDER = "──────────────────";
 const PAGE_SIZE = 5;
+const EXTERNAL_FETCH_TIMEOUT_MS = 10000;
 
 const COMPANY_SECTION_TITLES = {
   main: "🏢 Карточка",
@@ -246,9 +247,9 @@ function buildMainMenuView() {
       "",
       "Покажу главное:",
       "• статус компании",
-      "• риски и долги",
       "• связи и аффилированность",
-      "• финансовые сигналы",
+      "• финансовый контур",
+      "• учредителей и ОКВЭД",
       "",
       "👇 Отправьте ИНН одним сообщением",
       "• 10 цифр — компания",
@@ -615,60 +616,44 @@ async function buildRiskView(env, id) {
 }
 
 async function buildFinancesView(env, id, page = 1) {
-  if (!isCheckoConfigured(env)) {
-    return buildCheckoMissingConfigView("📈 <b>Финансы</b>", id);
+  const partyState = await loadDadataPartyState(env, id);
+  if (partyState.state === "missing_config") {
+    return buildDadataMissingConfigView("📊 <b>Финансы</b>", id);
+  }
+  if (partyState.state === "unavailable") {
+    return buildDadataTemporaryUnavailableView("📊 <b>Финансы</b>", id);
   }
 
-  let payload;
-  try {
-    payload = await checkoRequest(env, "finances", identifierParams(id));
-  } catch (error) {
-    if (error instanceof CheckoServiceError) {
-      return buildCheckoTemporaryUnavailableView("📈 <b>Финансы</b>", id);
-    }
-    throw error;
-  }
-  const rows = payload.data || {};
-  const years = getYearsSorted(rows).slice(0, 4);
-  if (years.length === 0) {
+  const finance = partyState.party?.finance;
+  if (!finance || typeof finance !== "object" || !hasVisibleFinanceData(finance, partyState.party?.employee_count)) {
     return {
       text: [
         "📊 <b>Финансы</b>",
         SECTION_DIVIDER,
         "",
-        "Отчётность не найдена.",
-        "Источник не передал финансовые данные за последние годы."
+        "Финансовый контур не найден.",
+        "DaData не передал финансовые показатели по этой компании."
       ].join("\n"),
       reply_markup: compactSectionKeyboard(id, "fin")
     };
   }
 
-  const companyPayload = await safeSectionData(env, "company", identifierParams(id));
-  const companyData = companyPayload.data || {};
-  const dadataParty = await safeFindPartyByInnOrOgrn(env, String(companyData.ИНН || companyData.ОГРН || id));
-  const reportLines = years.map((year) => {
-    const item = rows[year] || {};
-    return `• ${year}: выручка ${escapeHtml(formatMoney(item[2110]))}, прибыль ${escapeHtml(formatMoney(item[2400]))}`;
-  });
-  const pagedReports = paginateItems(reportLines, page);
-  const financeSourceState = normalizeFinanceReportLinks(payload["bo.nalog.ru"]?.Отчет).length > 0 ? "есть ссылки ФНС" : "данные Checko";
   const lines = [
     "📊 <b>Финансы</b>",
     SECTION_DIVIDER,
     "",
-    escapeHtml(summarizeFinanceBluf(rows)),
+    escapeHtml(buildFinanceBluf(finance)),
     "",
-    `• Штат: <b>${escapeHtml(formatOptionalNumber(dadataParty?.employee_count || companyData.ЧислРаб || companyData.СЧР))}</b>`,
-    `• Средняя зарплата: <b>${escapeHtml(formatOptionalMoney(companyData.СредЗП || companyData.СредняяЗП))}</b>`,
-    `• Спецрежим: <b>${escapeHtml(firstNonEmpty([companyData.НалРежим?.Наим, companyData.НалогРежим?.Наим, "нет данных"]))}</b>`,
-    `• МСП: <b>${escapeHtml(firstNonEmpty([companyData.РМСП?.Кат, "нет данных"]))}</b>`,
-    `• Источник отчётности: <b>${escapeHtml(financeSourceState)}</b>`,
-    "",
-    `<b>Отчётность</b> (Стр. ${pagedReports.page}/${pagedReports.totalPages})`,
-    ...pagedReports.items,
+    `• Год: <b>${escapeHtml(formatOptionalYear(finance.year))}</b>`,
+    `• Доход: <b>${escapeHtml(formatOptionalMoney(finance.income))}</b>`,
+    `• Расход: <b>${escapeHtml(formatOptionalMoney(finance.expense))}</b>`,
+    `• Выручка: <b>${escapeHtml(formatOptionalMoney(finance.revenue))}</b>`,
+    `• Долг: <b>${escapeHtml(formatOptionalMoney(finance.debt))}</b>`,
+    `• Пени: <b>${escapeHtml(formatOptionalMoney(finance.penalty))}</b>`,
+    `• Штат: <b>${escapeHtml(formatOptionalNumber(partyState.party?.employee_count))}</b>`
   ];
 
-  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "fin", pagedReports.page, pagedReports.totalPages) };
+  return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "fin") };
 }
 
 async function buildArbitrationView(env, id, page = 1) {
@@ -962,21 +947,15 @@ async function buildConnectionsView(env, id, page = 1) {
 }
 
 async function buildSuccessorView(env, id, page = 1) {
-  if (!isCheckoConfigured(env)) {
-    return buildCheckoMissingConfigView("🏢 <b>Правопреемник</b>", id);
+  const partyState = await loadDadataPartyState(env, id);
+  if (partyState.state === "missing_config") {
+    return buildDadataMissingConfigView("🏢 <b>Правопреемник</b>", id);
+  }
+  if (partyState.state === "unavailable") {
+    return buildDadataTemporaryUnavailableView("🏢 <b>Правопреемник</b>", id);
   }
 
-  let payload;
-  try {
-    payload = await checkoRequest(env, "company", identifierParams(id));
-  } catch (error) {
-    if (error instanceof CheckoServiceError) {
-      return buildCheckoTemporaryUnavailableView("🏢 <b>Правопреемник</b>", id);
-    }
-    throw error;
-  }
-
-  const successor = getSuccessorEntity(payload.data || {});
+  const successor = ensureArray(partyState.party?.successors)[0] || null;
   if (!successor) {
     return {
       text: [
@@ -1001,9 +980,9 @@ async function buildSuccessorView(env, id, page = 1) {
     "",
     `• Статус: ${escapeHtml(firstNonEmpty([successor.Статус?.Наим, statusLabel(successor.state?.status), "нет данных"]))}`,
     `• ИНН: ${escapeHtml(successorId || "нет данных")}`,
-    `• Руководитель: ${escapeHtml(firstNonEmpty([successor.Руковод?.[0]?.ФИО, successor.management?.name, "нет данных"]))}`,
+    `• Руководитель: ${escapeHtml(firstNonEmpty([successor.Руковод?.[0]?.ФИО, successor.management?.name, successor.managers?.[0]?.name, "нет данных"]))}`,
     "• Связь: правопреемник ликвидированной компании",
-    "• Что проверить: долги, суды, действующий статус"
+    "• Что проверить: действующий статус и связи"
   ];
 
   const keyboard = compactSectionKeyboard(id, "succ");
@@ -1014,30 +993,24 @@ async function buildSuccessorView(env, id, page = 1) {
 }
 
 async function buildFoundersView(env, id, page = 1) {
-  if (!isCheckoConfigured(env)) {
-    return buildCheckoMissingConfigView("👥 <b>Учредители</b>", id);
+  const partyState = await loadDadataPartyState(env, id);
+  if (partyState.state === "missing_config") {
+    return buildDadataMissingConfigView("👥 <b>Учредители</b>", id);
+  }
+  if (partyState.state === "unavailable") {
+    return buildDadataTemporaryUnavailableView("👥 <b>Учредители</b>", id);
   }
 
-  let payload;
-  try {
-    payload = await checkoRequest(env, "company", identifierParams(id));
-  } catch (error) {
-    if (error instanceof CheckoServiceError) {
-      return buildCheckoTemporaryUnavailableView("👥 <b>Учредители</b>", id);
-    }
-    throw error;
-  }
-  const founders = getCompanyFounders(payload.data || {});
+  const founders = ensureArray(partyState.party?.founders);
   if (founders.length === 0) return { text: `👥 <b>Учредители</b>
 ${SECTION_DIVIDER}
 
 Учредители не найдены.
-Это не всегда негативный фактор: часть структур не раскрывает состав в источнике.
-Можно вернуться в карточку и проверить связи или реквизиты.`, reply_markup: compactSectionKeyboard(id, "lnk") };
+DaData не передал состав учредителей по этой компании.`, reply_markup: compactSectionKeyboard(id, "own") };
 
-  const founderLines = founders.map((f) => `• ${escapeHtml(f.ФИО || f.Наим || "—")} — ${escapeHtml(String(f.Доля?.Процент || f.Доля?.Проц || f.ДоляПроц || "—"))}%`);
+  const founderLines = founders.map((founder) => formatFounderLine(founder));
   const pagedFounders = paginateItems(founderLines, page);
-  const lines = ["👥 <b>Учредители</b>", SECTION_DIVIDER, "", ...pagedFounders.items];
+  const lines = ["👥 <b>Учредители</b>", SECTION_DIVIDER, "", `<b>Список</b> (Стр. ${pagedFounders.page}/${pagedFounders.totalPages})`, ...pagedFounders.items];
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "own", pagedFounders.page, pagedFounders.totalPages) };
 }
 
@@ -1069,33 +1042,27 @@ ${SECTION_DIVIDER}
 }
 
 async function buildOkvedView(env, id, page = 1) {
-  if (!isCheckoConfigured(env)) {
-    return buildCheckoMissingConfigView("🔖 <b>ОКВЭД</b>", id);
+  const partyState = await loadDadataPartyState(env, id);
+  if (partyState.state === "missing_config") {
+    return buildDadataMissingConfigView("🏷 <b>ОКВЭД</b>", id);
+  }
+  if (partyState.state === "unavailable") {
+    return buildDadataTemporaryUnavailableView("🏷 <b>ОКВЭД</b>", id);
   }
 
-  let payload;
-  try {
-    payload = await checkoRequest(env, "company", identifierParams(id));
-  } catch (error) {
-    if (error instanceof CheckoServiceError) {
-      return buildCheckoTemporaryUnavailableView("🔖 <b>ОКВЭД</b>", id);
-    }
-    throw error;
-  }
-  const data = payload.data || {};
-  const primary = data.ОКВЭД;
-  const additional = ensureArray(data.ОКВЭДДоп || data.ДопОКВЭД);
-  const additionalLines = additional.map((o) => `• ${escapeHtml(formatOkved(o))}`);
+  const primary = partyState.party?.okved;
+  const additional = ensureArray(partyState.party?.okveds).filter((item) => String(item?.code || item?.name || "").trim());
+  const additionalLines = additional.map((item) => `• ${escapeHtml(formatDadataOkved(item))}`);
   const pagedOkved = paginateItems(additionalLines, page);
   const lines = [
-    "🔖 <b>ОКВЭД</b>",
+    "🏷 <b>ОКВЭД</b>",
     SECTION_DIVIDER,
     "",
-    `<b>Основной</b> ${escapeHtml(formatOkved(primary))}`,
+    `<b>Основной ОКВЭД</b> ${escapeHtml(primary || "нет данных")}`,
   ];
   if (additional.length === 0) lines.push("Дополнительные: нет данных");
   else lines.push("", `<b>Дополнительные</b> (Стр. ${pagedOkved.page}/${pagedOkved.totalPages})`, ...pagedOkved.items);
-  if (!primary && additional.length === 0) return { text: `🔖 <b>ОКВЭД</b>
+  if (!primary && additional.length === 0) return { text: `🏷 <b>ОКВЭД</b>
 ${SECTION_DIVIDER}
 
 Данные по ОКВЭД не найдены`, reply_markup: compactSectionKeyboard(id, "okv") };
@@ -1227,18 +1194,12 @@ async function sendHtmlMessage(env, chatId, view) {
 }
 
 function buildCompanyKeyboard(id, env = {}, opts = {}) {
-  const rows = [];
-  if (isCheckoConfigured(env)) {
-    rows.push(
-      [kb("⚖️ Риски", `co:risk:${id}`), kb("🏛 Суды", `co:arb:${id}`)],
-      [kb("🏦 Долги", `co:debt:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
-      [kb("📊 Финансы", `co:fin:${id}`), kb("📋 Контракты", `co:ctr:${id}`)],
-      [kb("🏢 Правопреемник", `co:succ:${id}`), kb("🗓 История", `co:his:${id}`)]
-    );
-  } else {
-    rows.push([kb("🔗 Связи", `co:lnk:${id}`)]);
-  }
-  rows.push([kb("🏠 Меню", "menu")]);
+  const rows = [
+    [kb("🔗 Связи", `co:lnk:${id}`), kb("👥 Учредители", `co:own:${id}`)],
+    [kb("📊 Финансы", `co:fin:${id}`), kb("🏷 ОКВЭД", `co:okv:${id}`)],
+    [kb("🏢 Правопреемник", `co:succ:${id}`), kb("🏢 Карточка", `co:main:${id}`)],
+    [kb("🏠 Меню", "menu")]
+  ];
   return withPagerRow(rows, "main", id, opts.page, opts.totalPages);
 }
 
@@ -1307,7 +1268,7 @@ function compactSectionKeyboard(id, section = "main", page = 1, totalPages = 1) 
   }
   if (section === "fin") {
     rows = [
-      [kb("🏦 Долги", `co:debt:${id}`), kb("📋 Контракты", `co:ctr:${id}`)],
+      [kb("🏷 ОКВЭД", `co:okv:${id}`), kb("👥 Учредители", `co:own:${id}`)],
       [kb("🔙 В карточку", `co:main:${id}`)]
     ];
     return withPagerRow(rows, section, id, page, totalPages);
@@ -1328,18 +1289,31 @@ function compactSectionKeyboard(id, section = "main", page = 1, totalPages = 1) 
   }
   if (section === "succ") {
     rows = [
-      [kb("⚖️ Риски", `co:risk:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
+      [kb("🔗 Связи", `co:lnk:${id}`), kb("👥 Учредители", `co:own:${id}`)],
       [kb("🔙 В карточку", `co:main:${id}`)]
     ];
     return { inline_keyboard: rows };
   }
-  rows = [
-      [kb("⚖️ Риски", `co:risk:${id}`), kb("🏛 Суды", `co:arb:${id}`)],
-      [kb("🏦 Долги", `co:debt:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
-      [kb("📊 Финансы", `co:fin:${id}`), kb("📋 Контракты", `co:ctr:${id}`)],
-      [kb("🏢 Правопреемник", `co:succ:${id}`), kb("🗓 История", `co:his:${id}`)],
-      [kb("🔙 В карточку", `co:main:${id}`), kb("🏠 Меню", "menu")]
+  if (section === "own") {
+    rows = [
+      [kb("🏷 ОКВЭД", `co:okv:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
+      [kb("🔙 В карточку", `co:main:${id}`)]
     ];
+    return withPagerRow(rows, section, id, page, totalPages);
+  }
+  if (section === "okv") {
+    rows = [
+      [kb("👥 Учредители", `co:own:${id}`), kb("📊 Финансы", `co:fin:${id}`)],
+      [kb("🔙 В карточку", `co:main:${id}`)]
+    ];
+    return withPagerRow(rows, section, id, page, totalPages);
+  }
+  rows = [
+    [kb("🔗 Связи", `co:lnk:${id}`), kb("👥 Учредители", `co:own:${id}`)],
+    [kb("📊 Финансы", `co:fin:${id}`), kb("🏷 ОКВЭД", `co:okv:${id}`)],
+    [kb("🏢 Правопреемник", `co:succ:${id}`), kb("🏢 Карточка", `co:main:${id}`)],
+    [kb("🏠 Меню", "menu")]
+  ];
   return withPagerRow(rows, section, id, page, totalPages);
 }
 
@@ -1805,7 +1779,7 @@ async function loadCheckoRequest(env, endpoint, params = {}) {
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   }
 
-  const response = await fetch(url.toString(), { method: "GET" });
+  const response = await fetchWithTimeout(url.toString(), { method: "GET" });
   const raw = await response.text();
   const snippet = buildSnippet(raw);
   if (response.status !== 200) {
@@ -1979,10 +1953,12 @@ async function collectAffiliatedCompanies(env, sourceInn) {
     }
   }
 
-  const deduped = Array.from(dedupedMap.values()).map((item) => ({
-    ...item,
-    relations: Array.from(item.relations).sort()
-  }));
+  const deduped = Array.from(dedupedMap.values())
+    .map((item) => ({
+      ...item,
+      relations: Array.from(item.relations).sort()
+    }))
+    .sort(compareAffiliatedCompanies);
 
   return {
     managers,
@@ -1991,6 +1967,16 @@ async function collectAffiliatedCompanies(env, sourceInn) {
     total: deduped.length,
     state: "ok"
   };
+}
+
+async function loadDadataPartyState(env, id) {
+  if (!isDadataConfigured(env)) return { state: "missing_config", party: null };
+  try {
+    return { state: "ok", party: await findPartyByInnOrOgrn(env, id) };
+  } catch (error) {
+    if (error instanceof DadataServiceError) return { state: "unavailable", party: null };
+    throw error;
+  }
 }
 
 function extractAffiliationSourceInns(value) {
@@ -2009,6 +1995,20 @@ function normalizeAffiliatedCompany(item) {
     status: getReadableAffiliatedStatus(item?.state?.status),
     okved: firstNonEmpty([item?.okved, item?.okved_type, "нет данных"])
   };
+}
+
+function compareAffiliatedCompanies(left, right) {
+  const statusDelta = getAffiliatedStatusRank(left?.status) - getAffiliatedStatusRank(right?.status);
+  if (statusDelta !== 0) return statusDelta;
+  return String(left?.name || "").localeCompare(String(right?.name || ""), "ru");
+}
+
+function getAffiliatedStatusRank(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "действует") return 0;
+  if (normalized === "ликвидация") return 1;
+  if (normalized === "ликвидирована") return 2;
+  return 3;
 }
 
 function getReadableAffiliatedStatus(status) {
@@ -2043,6 +2043,74 @@ function buildLinksMeaning(total, managersCount, foundersCount) {
   if (managersCount > 0) return "Связи через руководителя могут показывать управленческий контур группы.";
   if (foundersCount > 0) return "Связи через учредителя помогают увидеть общую структуру владения.";
   return "Связи стоит проверить вручную.";
+}
+
+function formatFounderLine(founder) {
+  const name = firstNonEmpty([founder?.name, founder?.fio, founder?.ФИО, founder?.Наим, "без названия"]);
+  const inn = firstNonEmpty([founder?.inn, founder?.INN, "нет данных"]);
+  const share = firstNonEmpty([
+    founder?.share?.value,
+    founder?.share?.percentage,
+    founder?.share?.ratio,
+    founder?.Доля?.Процент,
+    founder?.Доля?.Проц,
+    founder?.ДоляПроц
+  ]);
+  const invalid = founder?.invalid === true || founder?.invalidity === true || founder?.Недостоверность === true;
+  const details = [
+    `ИНН: <code>${escapeHtml(String(inn))}</code>`,
+    share ? `доля: ${escapeHtml(String(share))}${String(share).includes("%") ? "" : "%"}` : null,
+    invalid ? "недостоверность: есть" : null
+  ].filter(Boolean);
+  return `• ${escapeHtml(String(name))}${details.length ? ` — ${details.join(" · ")}` : ""}`;
+}
+
+function formatDadataOkved(item) {
+  return [item?.code, item?.name].filter(Boolean).join(" — ") || "нет данных";
+}
+
+function hasVisibleFinanceData(finance, employeeCount) {
+  return [finance?.year, finance?.income, finance?.expense, finance?.revenue, finance?.debt, finance?.penalty, employeeCount]
+    .some((value) => value !== undefined && value !== null && value !== "");
+}
+
+function buildFinanceBluf(finance) {
+  const year = formatOptionalYear(finance?.year);
+  const revenue = formatOptionalMoney(finance?.revenue);
+  if (year !== "нет данных" && revenue !== "нет данных") {
+    return `Последний доступный финансовый срез — ${year} год, выручка ${revenue}.`;
+  }
+  if (year !== "нет данных") {
+    return `Последний доступный финансовый срез — ${year} год.`;
+  }
+  return "Финансовые показатели доступны частично: проверьте ключевые суммы ниже.";
+}
+
+function formatOptionalYear(value) {
+  const year = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(year) && year > 0 ? String(year) : "нет данных";
+}
+
+function buildDadataMissingConfigView(title, id) {
+  return {
+    text: `${title}
+${SECTION_DIVIDER}
+
+DaData не настроен.
+Попросите администратора добавить ключи и откройте раздел снова.`,
+    reply_markup: compactSectionKeyboard(id)
+  };
+}
+
+function buildDadataTemporaryUnavailableView(title, id) {
+  return {
+    text: `${title}
+${SECTION_DIVIDER}
+
+DaData временно недоступен.
+Попробуйте открыть раздел чуть позже.`,
+    reply_markup: compactSectionKeyboard(id)
+  };
 }
 
 function formatAffiliatedSummaryNames(items) {
@@ -2240,7 +2308,7 @@ async function dadataPost(env, endpoint, payload) {
   let response;
   let raw;
   try {
-    response = await fetch(`${baseUrl}/${endpoint}`, {
+    response = await fetchWithTimeout(`${baseUrl}/${endpoint}`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -2378,13 +2446,23 @@ function verifyTelegramWebhookSecret(request, env) {
 
 async function telegramRequest(env, method, body) {
   const url = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`;
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
   });
   if (response.status !== 200) {
     throw new Error(`Telegram API HTTP ${response.status}`);
+  }
+}
+
+async function fetchWithTimeout(resource, options = {}, timeoutMs = EXTERNAL_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(new Error("Request timeout")), timeoutMs);
+  try {
+    return await fetch(resource, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
