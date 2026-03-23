@@ -178,17 +178,21 @@ async function buildCompanySectionView(env, section, id, page = 1) {
 function buildMainMenuView() {
   return {
     text: [
-      "👋 <b>Проверка компании через DaData</b>",
+      "✨ <b>EvaCore — экспресс-проверка компании через DaData</b>",
       SECTION_DIVIDER,
       "",
-      "Поддерживаются только DaData-экраны:",
-      "• карточка компании",
-      "• связи",
-      "• учредители",
-      "• финансы",
-      "• ОКВЭД",
+      "🚀 <b>Что можно открыть за 1 тап:</b>",
+      "• 🏢 карточку компании",
+      "• 🔗 связи и аффилированность",
+      "• 👥 учредителей",
+      "• 📊 финансы",
+      "• 🏷 ОКВЭД",
       "",
-      "👇 Отправьте ИНН / ОГРН или корпоративный email"
+      "🧭 <b>Как начать:</b>",
+      "• отправьте ИНН компании или ОГРН",
+      "• либо пришлите корпоративный email",
+      "",
+      "💡 Пример: <code>7707083893</code>"
     ].join("\n"),
     reply_markup: buildMainMenuKeyboard()
   };
@@ -197,14 +201,15 @@ function buildMainMenuView() {
 function buildHelpView() {
   return {
     text: [
-      "ℹ️ <b>Как пользоваться</b>",
+      "ℹ️ <b>Как пользоваться ботом</b>",
       SECTION_DIVIDER,
       "",
-      "1. Отправьте ИНН / ОГРН компании.",
-      "2. Либо отправьте корпоративный email.",
-      "3. Навигируйтесь только по DaData-разделам в inline-кнопках.",
+      "1. 🔎 Отправьте ИНН / ОГРН компании.",
+      "2. ✉️ Или пришлите корпоративный email.",
+      "3. 👆 Откройте нужный раздел кнопками под карточкой.",
       "",
-      "Неподдерживаемые legacy-разделы удалены из интерфейса."
+      "⚡ Каждый экран отвечает на один вопрос без лишнего шума.",
+      "🔒 В меню доступны только актуальные DaData-разделы."
     ].join("\n"),
     reply_markup: buildMainMenuKeyboard()
   };
@@ -216,10 +221,12 @@ function buildSearchInnView() {
       "🔎 <b>Поиск по ИНН / ОГРН</b>",
       SECTION_DIVIDER,
       "",
-      "Отправьте:",
-      "• ИНН компании — 10 цифр",
-      "• ОГРН — 13 цифр",
-      "• ИНН/КПП — через слеш"
+      "Отправьте один из форматов:",
+      "• 🧾 ИНН компании — 10 цифр",
+      "• 🏛 ОГРН — 13 цифр",
+      "• 🧩 ИНН/КПП — через слеш",
+      "",
+      "⚡ После ответа сразу откроется карточка и разделы проверки."
     ].join("\n"),
     reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
   };
@@ -232,7 +239,9 @@ function buildSearchEmailView() {
       SECTION_DIVIDER,
       "",
       "Отправьте корпоративный email, например:",
-      "<code>info@company.ru</code>"
+      "<code>info@company.ru</code>",
+      "",
+      "📨 Бот найдёт компанию и откроет основную карточку."
     ].join("\n"),
     reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
   };
@@ -417,8 +426,8 @@ async function buildLookupHistoryView(env, chatId) {
 function buildMainMenuKeyboard() {
   return {
     inline_keyboard: [
-      [kb("🔎 По ИНН / ОГРН", "search:inn"), kb("✉️ По Email", "search:email")],
-      [kb("ℹ️ Помощь", "help")]
+      [kb("🚀 ИНН / ОГРН", "search:inn"), kb("📨 Email", "search:email")],
+      [kb("🪄 Как это работает", "help")]
     ]
   };
 }
@@ -426,15 +435,15 @@ function buildMainMenuKeyboard() {
 function buildCompanyKeyboard(company, active = "main") {
   const id = normalizedCompanyId(company);
   const rows = [
-    [kb(active === "main" ? "• Скоринг" : "⚖️ Скоринг", `co:main:${id}`), kb(active === "lnk" ? "• Связи" : "🔗 Связи", `co:lnk:${id}`)],
-    [kb(active === "own" ? "• Учредители" : "👥 Учредители", `co:own:${id}`), kb(active === "okv" ? "• ОКВЭД" : "🏷 ОКВЭД", `co:okv:${id}`)]
+    [kb(active === "main" ? "✨ Карточка" : "🏢 Карточка", `co:main:${id}`), kb(active === "lnk" ? "✨ Связи" : "🔗 Связи", `co:lnk:${id}`)],
+    [kb(active === "own" ? "✨ Учредители" : "👥 Учредители", `co:own:${id}`), kb(active === "okv" ? "✨ ОКВЭД" : "🏷 ОКВЭД", `co:okv:${id}`)]
   ];
 
   if (companyHasFinance(company)) {
-    rows.push([kb(active === "fin" ? "• Финансы" : "📊 Финансы", `co:fin:${id}`)]);
+    rows.push([kb(active === "fin" ? "✨ Финансы" : "📊 Финансы", `co:fin:${id}`)]);
   }
 
-  rows.push([{ text: "📜 История (ФНС)", url: "https://egrul.nalog.ru/" }]);
+  rows.push([{ text: "📜 История в ФНС ↗", url: "https://egrul.nalog.ru/" }]);
   return { inline_keyboard: rows };
 }
 
