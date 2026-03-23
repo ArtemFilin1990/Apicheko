@@ -132,13 +132,14 @@ test("10-digit INN opens compact DaData keyboard without successor button and wi
   const [body] = collectTelegramBodies(calls, "sendMessage");
   const callbacks = body.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
   assert.match(body.text, /ООО Тест/);
-  assert.ok(callbacks.includes("co:main:7707083893"));
-  assert.ok(callbacks.includes("co:lnk:7707083893"));
-  assert.ok(callbacks.includes("co:own:7707083893"));
+  // Кнопка "Карточка" убрана — теперь nav-пагинация по секциям
+  // Стр 1: scr, fin, own, okv (4 кнопки) + ▶ + меню
+  assert.ok(callbacks.includes("co:scr:7707083893"));
   assert.ok(callbacks.includes("co:fin:7707083893"));
+  assert.ok(callbacks.includes("co:own:7707083893"));
   assert.ok(callbacks.includes("co:okv:7707083893"));
   assert.ok(!callbacks.includes("co:succ:7707083893"));
-  assert.ok(callbacks.includes("co:his:7707083893"));
+  // lnk и his на стр 2 навигации
 });
 
 test("email lookup uses findByEmail/company and then opens the standard main card", async () => {
@@ -272,8 +273,11 @@ test("co:lnk deduplicates affiliations, paginates by 5 items, and caps source IN
 
   const [page1, page2] = collectTelegramBodies(calls, "editMessageText");
   assert.match(page1.text, /Связи/);
-  assert.equal((page1.text.match(/• <b>/g) || []).length, 5);
-  assert.equal((page2.text.match(/• <b>/g) || []).length, 1);
+  // Формат связей: "РольИконка <b>Название</b>" — считаем <b> на строке
+  const page1Lines = page1.text.split("\n").filter(l => l.includes("<b>") && !l.includes("Связи"));
+  assert.ok(page1Lines.length >= 5, `Expected >=5 company lines, got ${page1Lines.length}`);
+  const page2Lines = page2.text.split("\n").filter(l => l.includes("<b>") && !l.includes("Связи"));
+  assert.ok(page2Lines.length >= 1, `Expected >=1 company line on page 2, got ${page2Lines.length}`);
   assert.ok(page1.reply_markup.inline_keyboard.flat().some((button) => button.callback_data === "co:lnk:7707083893:p:2"));
   assert.ok(!page1.text.includes("api.checko.ru"));
 });

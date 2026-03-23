@@ -861,7 +861,12 @@ async function buildViewForCallback(env, data) {
 
   if (!data.startsWith("co:")) return null;
   const parsed = parseCompanySectionCallback(data);
-  if (!parsed || !COMPANY_SECTION_TITLES[parsed.section] || !parsed.id) return null;
+  if (!parsed || !parsed.id) return null;
+  // nav: просто редиректим на main с нужной страницей навигации
+  if (parsed.section === "main" && parsed.navPage > 1) {
+    return buildCompanyNavPageView(env, parsed.id, parsed.navPage);
+  }
+  if (!COMPANY_SECTION_TITLES[parsed.section]) return null;
   return buildCompanySectionView(env, parsed.section, parsed.id, parsed.page);
 }
 
@@ -983,6 +988,15 @@ async function buildCompanyByEmailView(env, email) {
   return buildCompanyMainView(env, company.inn);
 }
 
+async function buildCompanyNavPageView(env, query, navPage) {
+  const party = await findPartyByInnOrOgrn(env, query);
+  if (!party) throw new DadataNotFoundError();
+  // Получаем текущий view main-карточки, но с другой страницей nav
+  const view = await buildCompanyMainView(env, query);
+  view.reply_markup = buildCompanyKeyboard(buildCompanyContext(party, query), "main", navPage);
+  return view;
+}
+
 async function buildCompanyMainView(env, query) {
   const party = await findPartyByInnOrOgrn(env, query);
   if (!party) throw new DadataNotFoundError();
@@ -1025,6 +1039,25 @@ async function buildCompanyMainView(env, query) {
   const okveds = ensureArray(party?.okveds);
   const mainOkved = okveds.find(o => o?.main);
   lines.push(`🏷 <b>ОКВЭД:</b> ${escapeHtml(firstNonEmpty([party?.okved, "—"]))}` + (mainOkved?.name ? `  <i>${escapeHtml(mainOkved.name)}</i>` : ""));
+
+  // Контакты из DaData (тариф Максимальный)
+  const phones = ensureArray(party?.phones);
+  const emails = ensureArray(party?.emails);
+  if (phones.length || emails.length) {
+    lines.push("");
+    if (phones.length) {
+      const phoneList = phones.slice(0, 2).map(p => {
+        const d = p?.data;
+        if (!d) return null;
+        return `+${d.country_code || "7"}${d.city_code || ""}${d.number || ""}`;
+      }).filter(Boolean).join("  ");
+      if (phoneList) lines.push(`📞 <b>Телефон:</b> ${escapeHtml(phoneList)}`);
+    }
+    if (emails.length) {
+      const emailList = emails.slice(0, 2).map(e => e?.data ? `${e.data.local}@${e.data.domain}` : null).filter(Boolean).join("  ");
+      if (emailList) lines.push(`✉️ <b>Email:</b> ${escapeHtml(emailList)}`);
+    }
+  }
   lines.push("");
 
   return {
@@ -1055,7 +1088,21 @@ async function buildFoundersView(env, query) {
     if (founders.length > 10) lines.push(`<i>…и ещё ${founders.length - 10}</i>`);
   }
 
-  return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "own") };
+  // Кнопки для учредителей-юрлиц (по ИНН)
+  const founderButtons = founders.slice(0, 10)
+    .filter(f => f?.inn && /^\d{10}$/.test(String(f.inn)))
+    .map(f => {
+      const fname = firstNonEmpty([f?.name, "—"]);
+      const shortLabel = fname.length > 30 ? fname.slice(0, 28) + "…" : fname;
+      return [kb(`🏢 ${shortLabel}`, `select:company:${f.inn}`)];
+    });
+
+  const baseKb = buildCompanyKeyboard(buildCompanyContext(party, query), "own");
+  const finalKb = {
+    inline_keyboard: [...founderButtons, ...baseKb.inline_keyboard]
+  };
+
+  return { text: lines.join("\n"), reply_markup: finalKb };
 }
 
 async function buildFinancesView(env, query) {
@@ -1158,8 +1205,10 @@ async function buildConnectionsView(env, query, page = 1) {
       const statusIcon = item.status === "Действует" ? "🟢" :
                          item.status === "Ликвидирована" ? "🔴" :
                          item.status === "Банкротство" ? "🔴" : "🟡";
-      lines.push(`• <b>${escapeHtml(item.name)}</b>  ${roleIcon}`);
-      lines.push(`  <code>${escapeHtml(item.inn)}</code>  ${statusIcon} ${escapeHtml(item.status)}  · <i>${escapeHtml(item.relations.join(", "))}</i>`);
+      const displayName = item.name !== "Без названия" ? item.name : `ИНН ${item.inn}`;
+      lines.push(`${roleIcon} <b>${escapeHtml(displayName)}</b>`);
+      lines.push(`  ${statusIcon} ${escapeHtml(item.status)}  · <i>${escapeHtml(item.relations.join(", "))}</i>`);
+      lines.push(`  ИНН: <code>${escapeHtml(item.inn)}</code>`);
       if (i < slice.length - 1) lines.push("");
     }
   }
@@ -1386,19 +1435,46 @@ function buildMainMenuKeyboard() {
   };
 }
 
-function buildCompanyKeyboard(company, active = "main") {
-  const id = normalizedCompanyId(company);
-  const activeBtn = (sec, label, icon) =>
-    kb(active === sec ? `${icon} ${label} ✦` : `${icon} ${label}`, `co:${sec}:${id}`);
+const COMPANY_NAV_SECTIONS = [
+  { sec: "scr", label: "Скоринг",     icon: "🎯" },
+  { sec: "fin", label: "Финансы",     icon: "📊" },
+  { sec: "own", label: "Учредители",  icon: "👥" },
+  { sec: "okv", label: "ОКВЭД",       icon: "🏷" },
+  { sec: "lnk", label: "Связи",       icon: "🔗" },
+  { sec: "his", label: "История",     icon: "📜" },
+];
+const NAV_PAGE_SIZE = 4; // кнопок-секций на страницу (2×2)
 
-  return {
-    inline_keyboard: [
-      [activeBtn("main", "Карточка", "🏢"), activeBtn("scr", "Скоринг", "🎯")],
-      [activeBtn("fin", "Финансы", "📊"), activeBtn("own", "Учредители", "👥")],
-      [activeBtn("okv", "ОКВЭД", "🏷"), activeBtn("lnk", "Связи", "🔗")],
-      [activeBtn("his", "История", "📜"), kb("🏠 В меню", "menu")]
-    ]
-  };
+function buildCompanyKeyboard(company, active = "main", navPage = 1) {
+  const id = normalizedCompanyId(company);
+
+  const totalNavPages = Math.ceil(COMPANY_NAV_SECTIONS.length / NAV_PAGE_SIZE);
+  const currentNavPage = Math.min(Math.max(Number(navPage) || 1, 1), totalNavPages);
+  const slice = COMPANY_NAV_SECTIONS.slice(
+    (currentNavPage - 1) * NAV_PAGE_SIZE,
+    currentNavPage * NAV_PAGE_SIZE
+  );
+
+  // Разбиваем по 2 в ряд
+  const rows = [];
+  for (let i = 0; i < slice.length; i += 2) {
+    const pair = slice.slice(i, i + 2).map(({ sec, label, icon }) =>
+      kb(active === sec ? `${icon} ${label} ✦` : `${icon} ${label}`, `co:${sec}:${id}`)
+    );
+    rows.push(pair);
+  }
+
+  // Пагинация навигации если секций > NAV_PAGE_SIZE
+  if (totalNavPages > 1) {
+    const pager = [];
+    if (currentNavPage > 1) pager.push(kb("◀", `co:main:${id}:nav:${currentNavPage - 1}`));
+    pager.push(kb(`${currentNavPage}/${totalNavPages}`, "noop"));
+    if (currentNavPage < totalNavPages) pager.push(kb("▶", `co:main:${id}:nav:${currentNavPage + 1}`));
+    rows.push(pager);
+  }
+
+  rows.push([kb("🏠 В меню", "menu")]);
+  return { inline_keyboard: rows };
 }
 
 function buildConnectionsKeyboard(company, page, totalPages) {
@@ -1534,8 +1610,10 @@ function parseCompanySectionCallback(data) {
   const section = parts[1];
   const id = parts[2];
   let page = 1;
+  let navPage = 1;
   if (parts[3] === "p" && parts[4]) page = Number(parts[4]) || 1;
-  return { section, id, page };
+  if (parts[3] === "nav" && parts[4]) navPage = Number(parts[4]) || 1;
+  return { section, id, page, navPage };
 }
 
 async function persistViewHistory(env, chatId, view) {
