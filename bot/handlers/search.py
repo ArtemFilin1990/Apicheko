@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
+from dadata import DadataError, get_company_by_email
 from bot.formatters import format_bank, format_company, format_entrepreneur, format_person, format_search_results
 from bot.keyboards import (
     cancel_keyboard,
@@ -20,6 +21,7 @@ from utils.checko_payload import extract_search_results
 router = Router(name="search")
 
 IDENTIFIER_RE = re.compile(r"^\d{9}$|^\d{10}$|^\d{12}$|^\d{13}$|^\d{15}$")
+EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
 class SearchState(StatesGroup):
@@ -124,6 +126,21 @@ async def handle_name_input(
     await message.answer("🔄 Ищу…")
 
     try:
+        if EMAIL_RE.match(query):
+            company = await get_company_by_email(query)
+            if company is None:
+                await message.answer(
+                    "📭 По этому email компания не найдена.",
+                    reply_markup=cancel_keyboard(),
+                )
+                return
+
+            await message.answer(
+                format_company(company.to_checko_payload()),
+                reply_markup=company_nav_keyboard(company.inn),
+            )
+            return
+
         data = await checko_api.search(query)
         items = extract_search_results(data)
         text = format_search_results(items)
@@ -137,5 +154,10 @@ async def handle_name_input(
     except CheckoAPIError as exc:
         await message.answer(
             f"⚠️ Ошибка при поиске:\n<i>{html.escape(str(exc))}</i>",
+            reply_markup=cancel_keyboard(),
+        )
+    except DadataError as exc:
+        await message.answer(
+            f"⚠️ Ошибка DaData:\n<i>{html.escape(str(exc))}</i>",
             reply_markup=cancel_keyboard(),
         )

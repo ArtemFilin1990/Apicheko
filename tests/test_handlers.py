@@ -1,10 +1,13 @@
 """Tests for handler bug fixes."""
 import unittest
 from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import patch
 
-from bot.handlers.callbacks import _DETAIL_FETCHERS, calculate_risk_score, cb_detail
+from bot.handlers.callbacks import _DETAIL_FETCHERS, build_connections_screen, calculate_risk_score, cb_company_nav, cb_detail
+from bot.handlers.search import handle_name_input
 from bot.keyboards import cancel_keyboard, company_detail_keyboard, main_menu_keyboard
 from services.checko_api import CheckoAPI
+from dadata import AffiliatedData, CompanyData
 
 
 class EntrepreneurDetailFetcherTests(unittest.IsolatedAsyncioTestCase):
@@ -100,3 +103,76 @@ class CemeteryRiskTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(score, 2 * 4 + 1 * 6 + 3 * 10)
         self.assertEqual(label, "🔴 Высокий риск")
+
+
+class DadataHandlersTests(unittest.IsolatedAsyncioTestCase):
+    def _make_message(self, text: str) -> MagicMock:
+        message = MagicMock()
+        message.text = text
+        message.answer = AsyncMock()
+        message.from_user = MagicMock(id=77)
+        return message
+
+    async def test_handle_name_input_uses_dadata_email_lookup(self) -> None:
+        state = MagicMock()
+        state.clear = AsyncMock()
+        db = MagicMock()
+        db.add_search = AsyncMock()
+        api = MagicMock(spec=CheckoAPI)
+        api.search = AsyncMock()
+        message = self._make_message("info@example.com")
+
+        company = CompanyData(
+            inn="7707083893",
+            name="ООО Ромашка",
+            ogrn="1027700132195",
+            address="г. Москва, ул. Тверская, д. 1",
+            status="Действует",
+            manager="Иванов И.И.",
+            okved="62.01 — Разработка программного обеспечения",
+        )
+
+        with patch("bot.handlers.search.get_company_by_email", AsyncMock(return_value=company)):
+            await handle_name_input(message, state, db, api)
+
+        api.search.assert_not_called()
+        state.clear.assert_awaited_once()
+        db.add_search.assert_awaited_once_with(user_id=77, query="info@example.com")
+        message.answer.assert_any_await(unittest.mock.ANY)
+        _, kwargs = message.answer.await_args_list[-1]
+        self.assertEqual(kwargs["reply_markup"].inline_keyboard[0][0].callback_data, "co:main:7707083893")
+
+    async def test_company_nav_links_uses_dadata_affiliations(self) -> None:
+        call = MagicMock()
+        call.message = MagicMock()
+        call.message.edit_text = AsyncMock()
+        call.answer = AsyncMock()
+        callback_data = MagicMock(sec="lnk", ident="7707083893")
+        api = MagicMock(spec=CheckoAPI)
+
+        affiliations = [
+            AffiliatedData(inn="1234567890", name="ООО Ромашка", type="Дочерняя компания"),
+            AffiliatedData(inn="0987654321", name="Иванов Иван Иванович", type="Руководитель"),
+        ]
+
+        with patch("bot.handlers.callbacks.get_affiliated", AsyncMock(return_value=affiliations)):
+            await cb_company_nav(call, callback_data, api)
+
+        call.answer.assert_awaited()
+        final_text = call.message.edit_text.await_args_list[-1].args[0]
+        self.assertIn("Связанные лица и компании", final_text)
+        self.assertIn("ООО Ромашка", final_text)
+        self.assertIn("Дочерняя компания", final_text)
+        self.assertIn("Иванов Иван Иванович", final_text)
+
+    async def test_build_connections_screen_trims_long_affiliation_list(self) -> None:
+        affiliations = [
+            AffiliatedData(inn=f"7707083{i:03d}", name=f"Компания {i}", type="Связанная компания")
+            for i in range(20)
+        ]
+
+        with patch("bot.handlers.callbacks.get_affiliated", AsyncMock(return_value=affiliations)):
+            text = await build_connections_screen("7707083893")
+
+        self.assertIn("Показаны основные связи", text)
+        self.assertEqual(text.count("• <b>Компания"), 15)
