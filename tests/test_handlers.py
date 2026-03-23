@@ -8,6 +8,7 @@ from bot.handlers.callbacks import _DETAIL_FETCHERS, build_connections_screen, c
 from bot.handlers.search import handle_name_input
 from bot.keyboards import cancel_keyboard, company_detail_keyboard, main_menu_keyboard
 from services.checko_api import CheckoAPI
+from bot.formatters import build_main_card
 from dadata import AffiliatedData, CompanyData
 
 
@@ -205,3 +206,28 @@ class DadataHandlersTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Показаны основные связи", text)
         self.assertEqual(text.count("• <b>Компания"), 15)
+
+
+class DadataMainCardFormatterTests(unittest.TestCase):
+    def test_build_main_card_formats_structured_company_view(self) -> None:
+        company = CompanyData(
+            inn="7707083893",
+            name="ООО Ромашка",
+            ogrn="1027700132195",
+            address="г. Москва, ул. Тверская, д. 1",
+            status="ACTIVE",
+            manager="Иванов И.И.",
+            okved="62.01",
+            email="info@example.com",
+        )
+
+        text = build_main_card(company)
+
+        self.assertIn("🏢 <b>ООО Ромашка</b>", text)
+        self.assertIn("🟢 Действующая", text)
+        self.assertIn("• ИНН: <code>7707083893</code>", text)
+        self.assertIn("• ОГРН: <code>1027700132195</code>", text)
+        self.assertIn("• ОКВЭД: 62.01", text)
+        self.assertIn("• Иванов И.И.", text)
+        self.assertIn("• Email: info@example.com", text)
+        self.assertIn("• г. Москва, ул. Тверская, д. 1", text)
