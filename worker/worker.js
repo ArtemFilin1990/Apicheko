@@ -228,12 +228,11 @@ function buildSearchInnView() {
       "🔎 <b>Поиск по ИНН / ОГРН</b>",
       SECTION_DIVIDER,
       "",
-      "Отправьте один из форматов:",
-      "• 🧾 ИНН компании — 10 цифр",
-      "• 🏛 ОГРН — 13 цифр",
-      "• 🧩 ИНН/КПП — через слеш",
+      "Отправь <b>прямо в чат</b> один из форматов:",
       "",
-      "⚡ После ответа сразу откроется карточка и разделы проверки."
+      "• <code>7707083893</code> — ИНН (10 цифр)",
+      "• <code>1027700132195</code> — ОГРН (13 цифр)",
+      "• <code>7707083893/773601001</code> — ИНН/КПП"
     ].join("\n"),
     reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
   };
@@ -242,13 +241,11 @@ function buildSearchInnView() {
 function buildSearchEmailView() {
   return {
     text: [
-      "✉️ <b>Поиск по email</b>",
+      "✉️ <b>Поиск по корпоративному email</b>",
       SECTION_DIVIDER,
       "",
-      "Отправьте корпоративный email, например:",
-      "<code>info@company.ru</code>",
-      "",
-      "📨 Бот найдёт компанию и откроет основную карточку."
+      "Отправь <b>прямо в чат</b>, например:",
+      "<code>info@company.ru</code>"
     ].join("\n"),
     reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
   };
@@ -257,15 +254,18 @@ function buildSearchEmailView() {
 function buildUnsupportedLookupView() {
   return {
     text: [
-      "🆔 <b>Поддерживаемые форматы</b>",
+      "❓ <b>Формат не распознан</b>",
       SECTION_DIVIDER,
       "",
-      "• ИНН компании (10 цифр)",
-      "• ОГРН (13 цифр)",
-      "• ИНН/КПП",
-      "• корпоративный email"
+      "Поддерживаются:",
+      "• ИНН компании — <b>10 цифр</b>",
+      "• ОГРН — <b>13 цифр</b>",
+      "• ИНН/КПП через слеш",
+      "• корпоративный email",
+      "",
+      "Введи один из этих форматов прямо в чат."
     ].join("\n"),
-    reply_markup: buildMainMenuKeyboard()
+    reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
   };
 }
 
@@ -498,29 +498,33 @@ function buildMainMenuKeyboard() {
 
 function buildCompanyKeyboard(company, active = "main") {
   const id = normalizedCompanyId(company);
-  const rows = [
-    [kb(active === "main" ? "✨ Карточка" : "🏢 Карточка", `co:main:${id}`), kb(active === "lnk" ? "✨ Связи" : "🔗 Связи", `co:lnk:${id}`)],
-    [kb(active === "own" ? "✨ Учредители" : "👥 Учредители", `co:own:${id}`), kb(active === "okv" ? "✨ ОКВЭД" : "🏷 ОКВЭД", `co:okv:${id}`)]
-  ];
+  const activeBtn = (sec, label, icon) =>
+    kb(active === sec ? `${icon} ${label} ✦` : `${icon} ${label}`, `co:${sec}:${id}`);
 
-  if (companyHasFinance(company)) {
-    rows.push([kb(active === "fin" ? "✨ Финансы" : "📊 Финансы", `co:fin:${id}`)]);
-  }
-
-  rows.push([{ text: "📜 История в ФНС ↗", url: "https://egrul.nalog.ru/" }]);
-  return { inline_keyboard: rows };
+  return {
+    inline_keyboard: [
+      [activeBtn("main", "Карточка", "🏢"), activeBtn("fin", "Финансы", "📊")],
+      [activeBtn("own", "Учредители", "👥"), activeBtn("okv", "ОКВЭД", "🏷")],
+      [activeBtn("lnk", "Связи", "🔗"), { text: "📜 ФНС ↗", url: "https://egrul.nalog.ru/" }],
+      [kb("🏠 В меню", "menu")]
+    ]
+  };
 }
 
 function buildConnectionsKeyboard(company, page, totalPages) {
   const id = normalizedCompanyId(company);
-  const keyboard = [...buildCompanyKeyboard(company, "lnk").inline_keyboard];
+  // Start from base keyboard rows (all except last "В меню" row)
+  const base = buildCompanyKeyboard(company, "lnk").inline_keyboard;
+  const menuRow = base[base.length - 1];
+  const keyboard = base.slice(0, base.length - 1);
   if (totalPages > 1) {
     const pager = [];
-    if (page > 1) pager.push(kb("⬅️ Назад", `co:lnk:${id}:p:${page - 1}`));
-    pager.push(kb(`${page}/${totalPages}`, "noop"));
-    if (page < totalPages) pager.push(kb("➡️ Далее", `co:lnk:${id}:p:${page + 1}`));
-    keyboard.splice(companyHasFinance(company) ? 2 : 2, 0, pager);
+    if (page > 1) pager.push(kb("⬅️", `co:lnk:${id}:p:${page - 1}`));
+    pager.push(kb(`${page} / ${totalPages}`, "noop"));
+    if (page < totalPages) pager.push(kb("➡️", `co:lnk:${id}:p:${page + 1}`));
+    keyboard.push(pager);
   }
+  keyboard.push(menuRow);
   return { inline_keyboard: keyboard };
 }
 
@@ -782,7 +786,10 @@ function formatMoney(value) {
 
 function formatShare(share) {
   if (!share) return "—";
-  if (share.value !== undefined && share.type) return `${share.value} ${share.type}`;
+  if (share.value !== undefined && share.type) {
+    const t = String(share.type).replace("PERCENT", "%").replace("FRACTION", "д.");
+    return `${share.value} ${t}`;
+  }
   if (share.value !== undefined) return String(share.value);
   return "—";
 }
