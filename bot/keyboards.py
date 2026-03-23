@@ -1,6 +1,7 @@
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from types import SimpleNamespace
 
 
 class CompanyNav(CallbackData, prefix="co"):
@@ -19,30 +20,29 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def company_nav_keyboard(ident: str) -> InlineKeyboardMarkup:
+def buildCompanyKeyboard(company) -> InlineKeyboardMarkup:
+    ident = str(getattr(company, "inn", "")).strip()
+    finance = getattr(company, "finance", None) or {}
+    revenue = finance.get("revenue") if isinstance(finance, dict) else getattr(finance, "revenue", None)
+    authorized_capital = getattr(company, "authorized_capital", None)
+
     b = InlineKeyboardBuilder()
-
-    b.button(text="🏢 Карточка", callback_data=CompanyNav(sec="main", ident=ident))
-    b.button(text="⚠️ Проверки", callback_data=CompanyNav(sec="risk", ident=ident))
-
-    b.button(text="💰 Финансы", callback_data=CompanyNav(sec="fin", ident=ident))
-    b.button(text="⚖️ Арбитраж", callback_data=CompanyNav(sec="arb", ident=ident))
-
-    b.button(text="🛡️ ФССП", callback_data=CompanyNav(sec="fsp", ident=ident))
-    b.button(text="📑 Контракты", callback_data=CompanyNav(sec="ctr", ident=ident))
-
-    b.button(text="🕓 История", callback_data=CompanyNav(sec="his", ident=ident))
+    b.button(text="⚖️ Скоринг", callback_data=CompanyNav(sec="main", ident=ident))
     b.button(text="🔗 Связи", callback_data=CompanyNav(sec="lnk", ident=ident))
-
     b.button(text="👥 Учредители", callback_data=CompanyNav(sec="own", ident=ident))
-    b.button(text="🏬 Филиалы", callback_data=CompanyNav(sec="fil", ident=ident))
+    b.button(text="🏷 ОКВЭД", callback_data=CompanyNav(sec="okv", ident=ident))
 
-    b.button(text="🏭 ОКВЭД", callback_data=CompanyNav(sec="okv", ident=ident))
-    b.button(text="🧾 Налоги", callback_data=CompanyNav(sec="tax", ident=ident))
+    if revenue not in (None, "") or authorized_capital not in (None, ""):
+        b.button(text="📊 Финансы", callback_data=CompanyNav(sec="fin", ident=ident))
 
-    b.button(text="🏠 В меню", callback_data="menu")
-    b.adjust(2, 2, 2, 2, 2, 2, 1)
+    b.button(text="📜 История (ФНС)", url="https://egrul.nalog.ru/")
+    b.adjust(2, 2, 1, 1)
     return b.as_markup()
+
+
+def company_nav_keyboard(ident: str) -> InlineKeyboardMarkup:
+    company = SimpleNamespace(inn=ident, finance=None, authorized_capital=None)
+    return buildCompanyKeyboard(company)
 
 
 def company_detail_keyboard(inn: str) -> InlineKeyboardMarkup:
