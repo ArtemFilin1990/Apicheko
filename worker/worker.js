@@ -1043,21 +1043,42 @@ async function buildCompanyMainView(env, query) {
   // Контакты из DaData (тариф Максимальный)
   const phones = ensureArray(party?.phones);
   const emails = ensureArray(party?.emails);
-  if (phones.length || emails.length) {
-    lines.push("");
-    if (phones.length) {
-      const phoneList = phones.slice(0, 2).map(p => {
-        const d = p?.data;
-        if (!d) return null;
-        return `+${d.country_code || "7"}${d.city_code || ""}${d.number || ""}`;
-      }).filter(Boolean).join("  ");
-      if (phoneList) lines.push(`📞 <b>Телефон:</b> ${escapeHtml(phoneList)}`);
-    }
-    if (emails.length) {
-      const emailList = emails.slice(0, 2).map(e => e?.data ? `${e.data.local}@${e.data.domain}` : null).filter(Boolean).join("  ");
-      if (emailList) lines.push(`✉️ <b>Email:</b> ${escapeHtml(emailList)}`);
-    }
+  const contactLines = [];
+  if (phones.length) {
+    const phoneList = phones.slice(0, 2).map(p => {
+      const d = p?.data;
+      if (!d) return null;
+      return `+${d.country_code || "7"}${d.city_code || ""}${d.number || ""}`;
+    }).filter(Boolean).join("  ");
+    if (phoneList) contactLines.push(`📞 <b>Телефон:</b> ${escapeHtml(phoneList)}`);
   }
+  if (emails.length) {
+    const emailList = emails.slice(0, 2).map(e => e?.data ? `${e.data.local}@${e.data.domain}` : null).filter(Boolean).join("  ");
+    if (emailList) contactLines.push(`✉️ <b>Email:</b> ${escapeHtml(emailList)}`);
+  }
+  if (contactLines.length) {
+    lines.push("");
+    lines.push(...contactLines);
+  }
+
+  // Регистратор и налоговый орган
+  const ftsReg = party?.authorities?.fts_registration;
+  const ftsReport = party?.authorities?.fts_report;
+  if (ftsReg?.name || ftsReport?.name) {
+    lines.push("");
+    lines.push(BLOCK_DIVIDER);
+    if (ftsReg?.name) lines.push(`🏛 <b>Регистратор:</b> ${escapeHtml(ftsReg.name)}`);
+    if (ftsReport?.name && ftsReport.name !== ftsReg?.name) lines.push(`🧾 <b>Налоговый орган:</b> ${escapeHtml(ftsReport.name)}`);
+  }
+
+  // МСП
+  const smb = party?.documents?.smb;
+  if (smb?.issue_date) {
+    const catMap = { MICRO: "Микропредприятие", SMALL: "Малое предприятие", MEDIUM: "Среднее предприятие" };
+    const cat = catMap[smb.category] || smb.category || "";
+    lines.push(`🏭 <b>МСП:</b> ${escapeHtml(cat)}` + (smb.issue_date ? `  <i>с ${formatTimestamp(smb.issue_date)}</i>` : ""));
+  }
+
   lines.push("");
 
   return {
@@ -1076,13 +1097,29 @@ async function buildFoundersView(env, query) {
   if (!founders.length) {
     lines.push("Учредители не найдены.");
   } else {
+    lines.push("<b>Актуальные учредители</b>");
+    lines.push("");
     for (const [i, founder] of founders.slice(0, 10).entries()) {
-      const fname = escapeHtml(firstNonEmpty([founder?.name, founder?.fio, "—"]));
+      const fname = escapeHtml(firstNonEmpty([founder?.name, (founder?.fio || {})?.source, "—"]));
       const finn = escapeHtml(firstNonEmpty([founder?.inn, "—"]));
-      const fshare = escapeHtml(formatShare(founder?.share));
       const ftype = founder?.type === "PHYSICAL" ? "👤" : "🏢";
-      lines.push(`${ftype} <b>${fname}</b>`);
-      lines.push(`   ИНН: <code>${finn}</code>   Доля: <b>${fshare}</b>`);
+      const invalidMark = founder?.invalidity ? "  ⚠️ <i>Сведения недостоверны</i>" : "";
+
+      // Доля: рублями + процент
+      let shareStr = "—";
+      if (founder?.share) {
+        const s = founder.share;
+        if (s.value !== undefined) {
+          const pct = s.type?.replace("PERCENT", "%") || "";
+          shareStr = `${s.value} ${pct}`.trim();
+        }
+      }
+      // Доля в рублях из capital
+      const shareRub = founder?.capital_rub || founder?.share?.nominal_value;
+
+      lines.push(`${ftype} <b>${fname}</b>${invalidMark}`);
+      if (finn !== "—") lines.push(`   ИНН: <code>${finn}</code>`);
+      lines.push(`   Доля: <b>${escapeHtml(shareStr)}</b>` + (shareRub ? `  (${escapeHtml(formatMoney(shareRub))})` : ""));
       if (i < founders.slice(0, 10).length - 1) lines.push("");
     }
     if (founders.length > 10) lines.push(`<i>…и ещё ${founders.length - 10}</i>`);
@@ -1117,30 +1154,51 @@ async function buildFinancesView(env, query) {
   const penalty = party?.finance?.penalty || party?.finance?.tax_penalty;
   const year = party?.finance?.year || party?.finance?.period;
 
-  const profitVal = (income != null && expense != null) ? (Number(income) - Number(expense)) : null;
-  const profitPct = (income && expense && Number(income) > 0)
-    ? Math.round((Number(income) - Number(expense)) / Number(income) * 100)
-    : null;
-  const profitTrend = profitPct != null ? (profitPct >= 0 ? "▲" : "▼") : "";
+  // Основной период DaData (один год)
   const finLines = [
     "📊 <b>Финансы</b>",
     SECTION_DIVIDER,
     "",
-    `<b>Период:</b> <b>${escapeHtml(firstNonEmpty([year, "—"]))}</b>`,
-    "",
-    `📈 <b>Доходы:</b>  <b>${escapeHtml(formatMoney(income))}</b>`,
-    `📉 <b>Расходы:</b> <b>${escapeHtml(formatMoney(expense))}</b>`,
   ];
-  if (profitVal != null) {
-    finLines.push(`${profitPct >= 0 ? "✅" : "🔴"} <b>Прибыль:</b>  <b>${escapeHtml(formatMoney(profitVal))}</b>` + (profitPct != null ? `  <i>${profitTrend} ${Math.abs(profitPct)}%</i>` : ""));
+
+  if (year) {
+    const profitVal = (income != null && expense != null) ? (Number(income) - Number(expense)) : null;
+    const profitPct = (income && expense && Number(income) > 0)
+      ? Math.round((Number(income) - Number(expense)) / Number(income) * 100)
+      : null;
+    const profitTrend = profitPct != null ? (profitPct >= 0 ? "▲" : "▼") : "";
+
+    finLines.push(
+      `<b>${escapeHtml(String(year))}</b>`,
+      `  💰 Выручка: <b>${escapeHtml(formatMoney(income))}</b>`,
+      `  📉 Расходы: <b>${escapeHtml(formatMoney(expense))}</b>`,
+    );
+    if (profitVal != null) {
+      finLines.push(`  ${profitPct >= 0 ? "✅" : "🔴"} Прибыль: <b>${escapeHtml(formatMoney(profitVal))}</b>` + (profitPct != null ? `  <i>${profitTrend} ${Math.abs(profitPct)}%</i>` : ""));
+    }
+    // Выручка из revenue если income нет
+    if (income == null && party?.finance?.revenue != null) {
+      finLines.push(`  📊 Выручка (DaData): <b>${escapeHtml(formatMoney(party.finance.revenue))}</b>`);
+    }
+  } else {
+    finLines.push("<i>Финансовые данные недоступны</i>");
   }
-  finLines.push(
-    "",
-    BLOCK_DIVIDER,
-    `🧾 <b>Налог. режим:</b> ${escapeHtml(firstNonEmpty([tax, "—"]))}`,
-    `⚠️ <b>Задолженность:</b> <b>${escapeHtml(formatMoney(debt))}</b>`,
-    `🔴 <b>Пени и штрафы:</b> <b>${escapeHtml(formatMoney(penalty))}</b>`,
-  );
+
+  // Налоги и задолженности
+  finLines.push("", BLOCK_DIVIDER);
+  finLines.push(`🧾 <b>Налог. режим:</b> ${escapeHtml(firstNonEmpty([tax, "не применяется"]))}`);
+
+  const debtAmt = party?.finance?.debt ?? null;
+  const penaltyAmt = party?.finance?.penalty ?? null;
+  if (debtAmt != null && Number(debtAmt) > 0) {
+    finLines.push(`⚠️ <b>Задолженность:</b> <b>${escapeHtml(formatMoney(debtAmt))}</b>`);
+  } else {
+    finLines.push(`✅ <b>Задолженность:</b> нет`);
+  }
+  if (penaltyAmt != null && Number(penaltyAmt) > 0) {
+    finLines.push(`🔴 <b>Пени и штрафы:</b> <b>${escapeHtml(formatMoney(penaltyAmt))}</b>`);
+  }
+
   return {
     text: finLines.join("\n"),
     reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "fin")
@@ -1195,19 +1253,31 @@ async function buildConnectionsView(env, query, page = 1) {
   const currentPage = clampPage(page, totalPages);
   const slice = deduped.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-  const lines = [`🔗 <b>Связи</b>  <i>(${deduped.length})</i>`, SECTION_DIVIDER, ""];
+  // Группировка по типу связи
+  const byFounder = deduped.filter(c => c.relations.some(r => r.includes("учредитель")));
+  const byManager = deduped.filter(c => c.relations.some(r => r.includes("руковод")));
+  const byOther   = deduped.filter(c => !c.relations.some(r => r.includes("учредитель") || r.includes("руковод")));
+
+  const pagesAll = deduped; // пагинация по всему списку
+  const lines = [
+    `🔗 <b>Связи</b>  <i>(всего ${deduped.length})</i>`,
+    `<i>👥 По учредителю: ${byFounder.length}  ·  👤 По руководителю: ${byManager.length}</i>`,
+    SECTION_DIVIDER, ""
+  ];
   if (!slice.length) {
     lines.push("Связанные компании не найдены.");
   } else {
     for (const [i, item] of slice.entries()) {
-      const roleIcon = item.relations.some(r => r.includes("учредитель")) ? "👥" :
-                       item.relations.some(r => r.includes("руковод")) ? "👤" : "🔗";
+      const isFounder = item.relations.some(r => r.includes("учредитель"));
+      const isManager = item.relations.some(r => r.includes("руковод"));
+      const roleIcon = isFounder ? "👥" : isManager ? "👤" : "🔗";
+      const roleLabel = isFounder ? "учредитель" : isManager ? "руководитель" : "аффилированность";
       const statusIcon = item.status === "Действует" ? "🟢" :
                          item.status === "Ликвидирована" ? "🔴" :
                          item.status === "Банкротство" ? "🔴" : "🟡";
       const displayName = item.name !== "Без названия" ? item.name : `ИНН ${item.inn}`;
       lines.push(`${roleIcon} <b>${escapeHtml(displayName)}</b>`);
-      lines.push(`  ${statusIcon} ${escapeHtml(item.status)}  · <i>${escapeHtml(item.relations.join(", "))}</i>`);
+      lines.push(`  ${statusIcon} ${escapeHtml(item.status)}  ·  <i>${escapeHtml(roleLabel)}</i>`);
       lines.push(`  ИНН: <code>${escapeHtml(item.inn)}</code>`);
       if (i < slice.length - 1) lines.push("");
     }
@@ -1324,7 +1394,27 @@ async function buildScoringView(env, query) {
     lines.push("");
   }
 
-  lines.push(BLOCK_DIVIDER);
+  // Спецреестры ФНС (из DaData)
+  lines.push("", BLOCK_DIVIDER, "<b>Спецреестры ФНС</b>");
+  const massAddr = Boolean(party?.address?.data?.qc_complete === "5");
+  const invalid = Boolean(party?.invalid);
+  const mgmtInvalid = ensureArray(party?.managers).some(m => m?.invalidity);
+  const founderInvalid = ensureArray(party?.founders).some(f => f?.invalidity);
+
+  lines.push(`${invalid ? "⚠️" : "✅"} Недостоверность сведений: ${invalid ? "есть" : "нет"}`);
+  lines.push(`${mgmtInvalid ? "⚠️" : "✅"} Недостоверность руководителя: ${mgmtInvalid ? "есть" : "нет"}`);
+  lines.push(`${founderInvalid ? "⚠️" : "✅"} Недостоверность учредителя: ${founderInvalid ? "есть" : "нет"}`);
+  lines.push(`${massAddr ? "⚠️" : "✅"} Массовый адрес: ${massAddr ? "да" : "нет"}`);
+
+  // Лицензии
+  const licenses = ensureArray(party?.licenses);
+  lines.push(`📋 <b>Лицензии:</b> ${licenses.length > 0 ? String(licenses.length) : "нет"}`);
+
+  // Филиалы
+  const branchCount = party?.branch_count;
+  if (branchCount != null) lines.push(`🏬 <b>Филиалы:</b> ${branchCount}`);
+
+  lines.push("", BLOCK_DIVIDER);
   lines.push(`💡 ${escapeHtml(result.recommendation)}`);
 
   return {
