@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import html
+from datetime import date, datetime
 from typing import Any
+
+from dadata import CompanyData
 
 
 def _fmt(value: Any, default: str = "—") -> str:
@@ -30,6 +33,222 @@ def _nested(d: dict, *keys: str) -> Any:
         if current is None:
             return None
     return current if current != "" else None
+
+
+def build_main_card(company: CompanyData) -> str:
+    def _get(obj: Any, *paths: str) -> Any:
+        for path in paths:
+            current = obj
+            ok = True
+            for part in path.split("."):
+                if current is None:
+                    ok = False
+                    break
+                if isinstance(current, dict):
+                    current = current.get(part)
+                else:
+                    current = getattr(current, part, None)
+            if ok and current not in (None, "", [], {}, ()):
+                return current
+        return None
+
+    def _as_list(value: Any) -> list[Any]:
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple, set)):
+            return list(value)
+        return [value]
+
+    def _first_contact(value: Any) -> str | None:
+        for item in _as_list(value):
+            if isinstance(item, dict):
+                candidate = item.get("value") or item.get("unrestricted_value") or item.get("data")
+            else:
+                candidate = getattr(item, "value", None) or getattr(item, "unrestricted_value", None) or str(item)
+            if candidate not in (None, "", "None", "null"):
+                return str(candidate).strip()
+        return None
+
+    def _clean(value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.strip()
+            if value in ("", "None", "null"):
+                return None
+            return value
+        return value
+
+    def _escape(value: Any) -> str | None:
+        value = _clean(value)
+        return html.escape(str(value)) if value is not None else None
+
+    def _format_int(value: Any) -> str | None:
+        value = _clean(value)
+        if value is None:
+            return None
+        try:
+            number = int(round(float(str(value).replace(" ", "").replace(",", "."))))
+        except (TypeError, ValueError):
+            return None
+        return f"{number:,}".replace(",", " ")
+
+    def _format_date(value: Any) -> str | None:
+        value = _clean(value)
+        if value is None:
+            return None
+
+        if isinstance(value, datetime):
+            return value.strftime("%d.%m.%Y")
+        if isinstance(value, date):
+            return value.strftime("%d.%m.%Y")
+
+        if isinstance(value, (int, float)):
+            try:
+                ts = float(value)
+                if ts > 10_000_000_000:
+                    ts /= 1000
+                return datetime.fromtimestamp(ts).strftime("%d.%m.%Y")
+            except Exception:
+                return None
+
+        raw = str(value).strip()
+        if not raw:
+            return None
+
+        for fmt in (
+            "%Y-%m-%d",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S.%f",
+            "%d.%m.%Y",
+            "%Y/%m/%d",
+        ):
+            try:
+                return datetime.strptime(raw[:26], fmt).strftime("%d.%m.%Y")
+            except Exception:
+                pass
+
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).strftime("%d.%m.%Y")
+        except Exception:
+            return None
+
+    def _add_block(lines: list[str], title: str, block_lines: list[str]) -> None:
+        visible = [line for line in block_lines if line]
+        if not visible:
+            return
+        if lines and lines[-1] != "":
+            lines.append("")
+        lines.append(title)
+        lines.extend(visible)
+
+    company_name = _escape(
+        _get(
+            company,
+            "name.short_with_opf",
+            "name.full_with_opf",
+            "short_name",
+            "full_name",
+            "name",
+        )
+    ) or "Компания"
+
+    status_raw = str(_clean(_get(company, "status", "state.status")) or "").upper()
+    if status_raw == "ACTIVE":
+        status_text = "🟢 Действующая"
+    elif status_raw == "LIQUIDATING":
+        status_text = "🟡 В процессе ликвидации"
+    elif status_raw in {"LIQUIDATED", "BANKRUPT"}:
+        status_text = "🔴 <b>ЛИКВИДИРОВАНА</b>"
+    else:
+        status_text = "⚪ Неизвестно"
+
+    registration_date = _format_date(
+        _get(
+            company,
+            "registration_date",
+            "state.registration_date",
+            "state.registration_date_ts",
+        )
+    )
+    status_line = status_text + (f" (с {registration_date})" if registration_date else "")
+
+    inn = _escape(_get(company, "inn"))
+    kpp = _escape(_get(company, "kpp"))
+    ogrn = _escape(_get(company, "ogrn", "ogrnip"))
+
+    okved_code = _clean(_get(company, "okved", "okved.code"))
+    okved_name = _clean(_get(company, "okved_name", "okved.name"))
+    if okved_code and okved_name:
+        okved = f"{html.escape(str(okved_code))} — {html.escape(str(okved_name))}"
+    elif okved_code:
+        okved = html.escape(str(okved_code))
+    elif okved_name:
+        okved = html.escape(str(okved_name))
+    else:
+        okved = None
+
+    director_name = _escape(_get(company, "director_name", "management.name", "management.fio", "manager"))
+    director_post = _escape(_get(company, "director_post", "management.post", "management.position"))
+
+    capital = _format_int(_get(company, "capital", "capital.value"))
+    if capital == "0":
+        capital = None
+
+    employees = _format_int(_get(company, "employees", "employee_count"))
+    revenue = _format_int(_get(company, "finance.revenue"))
+    address = _escape(_get(company, "address", "address.value", "address.unrestricted_value"))
+    email = _escape(_first_contact(_get(company, "email", "emails")))
+    phone = _escape(_first_contact(_get(company, "phone", "phones")))
+
+    lines: list[str] = [
+        f"🏢 <b>{company_name}</b>",
+        "──────────────────",
+        status_line,
+    ]
+
+    requisites: list[str] = []
+    if inn or kpp:
+        if inn and kpp:
+            requisites.append(f"• ИНН / КПП: <code>{inn}</code> / <code>{kpp}</code>")
+        elif inn:
+            requisites.append(f"• ИНН: <code>{inn}</code>")
+        elif kpp:
+            requisites.append(f"• КПП: <code>{kpp}</code>")
+    if ogrn:
+        requisites.append(f"• ОГРН: <code>{ogrn}</code>")
+    if okved:
+        requisites.append(f"• ОКВЭД: {okved}")
+    _add_block(lines, "[ ⚖️ ] Реквизиты", requisites)
+
+    management_block: list[str] = []
+    if director_name:
+        management_line = f"• {director_name}"
+        if director_post:
+            management_line += f" ({director_post})"
+        management_block.append(management_line)
+    if capital:
+        management_block.append(f"• Уставный капитал: {capital} ₽")
+    if employees:
+        management_block.append(f"• Штат: {employees} сотрудников")
+    _add_block(lines, "[ 👥 ] Управление и Капитал", management_block)
+
+    revenue_block: list[str] = []
+    if revenue:
+        revenue_block.append(f"• По данным ФНС: <b>{revenue} ₽</b>")
+    _add_block(lines, "[ 💰 ] Выручка", revenue_block)
+
+    contacts_block: list[str] = []
+    if address:
+        contacts_block.append(f"• {address}")
+    if email:
+        contacts_block.append(f"• Email: {email}")
+    if phone:
+        contacts_block.append(f"• Телефон: {phone}")
+    _add_block(lines, "[ 📞 ] Контакты и Адрес", contacts_block)
+
+    lines.append("──────────────────")
+    return "\n".join(lines)
 
 
 def format_company(data: dict) -> str:
