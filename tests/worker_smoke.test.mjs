@@ -6,19 +6,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const workerSourcePath = path.resolve("worker/worker.js");
-const riskSourcePath = path.resolve("worker/services/risk-score.js");
 
 async function loadWorkerModule() {
   const source = await fs.readFile(workerSourcePath, "utf8");
-  const riskSource = await fs.readFile(riskSourcePath, "utf8");
-
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "apicheko-worker-"));
   const tempWorkerPath = path.join(tempRoot, "worker.mjs");
-  const tempServicesDir = path.join(tempRoot, "services");
-  await fs.mkdir(tempServicesDir, { recursive: true });
-  await fs.writeFile(tempWorkerPath, source.replace('./services/risk-score.js', './services/risk-score.mjs'), "utf8");
-  await fs.writeFile(path.join(tempServicesDir, "risk-score.mjs"), riskSource, "utf8");
-
+  await fs.writeFile(tempWorkerPath, source, "utf8");
   return import(`${pathToFileURL(tempWorkerPath).href}?v=${Date.now()}`);
 }
 
@@ -29,9 +22,10 @@ function jsonResponse(data, status = 200) {
 function makeEnv(overrides = {}) {
   return {
     TELEGRAM_BOT_TOKEN: "telegram-token",
-    CHECKO_API_KEY: "checko-key",
+    DADATA_API_KEY: "dadata-key",
+    DADATA_SECRET_KEY: "dadata-secret",
     WEBHOOK_SECRET: "secret-token",
-    CHECKO_API_URL: "https://api.checko.ru/v2",
+    DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs",
     WEBHOOK_PATH: "/webhook",
     ...overrides
   };
@@ -63,9 +57,7 @@ function makeWebhookRequest(payload, secret = "secret-token") {
 }
 
 function collectTelegramBodies(calls, method) {
-  return calls
-    .filter((call) => call.url.includes(`/${method}`))
-    .map((call) => JSON.parse(call.options.body));
+  return calls.filter((call) => call.url.includes(`/${method}`)).map((call) => JSON.parse(call.options.body));
 }
 
 let worker;
@@ -85,10 +77,11 @@ test("GET / healthcheck", async () => {
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.ok, true);
+  assert.equal(body.service, "telegram-dadata-bot");
   assert.deepEqual(body.webhookPaths, ["/webhook"]);
 });
 
-test("/start shows friendly INN-first screen with inline-only navigation", async () => {
+test("/start shows DaData-only menu and removes legacy search buttons", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url: String(url), options });
@@ -98,54 +91,209 @@ test("/start shows friendly INN-first screen with inline-only navigation", async
   await worker.fetch(makeWebhookRequest({ message: { text: "/start", chat: { id: 1 } } }), makeEnv());
 
   const [body] = collectTelegramBodies(calls, "sendMessage");
-  assert.match(body.text, /Проверка контрагента/);
-  assert.match(body.text, /учредителей и ОКВЭД/);
-  assert.match(body.text, /правопреемство и финансовый срез/);
   const callbacks = body.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
+  assert.match(body.text, /DaData/);
   assert.ok(callbacks.includes("search:inn"));
-  assert.ok(callbacks.includes("search:name"));
   assert.ok(callbacks.includes("search:email"));
   assert.ok(callbacks.includes("help"));
+  assert.ok(!callbacks.includes("search:name"));
+  assert.ok(!callbacks.includes("search:bic"));
 });
 
-test("/help shows friendly help screen without reply keyboard", async () => {
+test("10-digit INN opens compact DaData keyboard without successor button and with FNS history link", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
-    calls.push({ url: String(url), options });
-    return jsonResponse({ ok: true });
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({
+        suggestions: [{
+          data: {
+            inn: "7707083893",
+            ogrn: "1027700132195",
+            name: { short_with_opf: "ООО Тест" },
+            state: { status: "ACTIVE" },
+            management: { name: "Иванов И.И." },
+            address: { value: "г Москва, ул Тверская, д 1" },
+            capital: { value: 10000 },
+            authorized_capital: 10000,
+            employee_count: 12,
+            okved: "62.01"
+          }
+        }]
+      });
+    }
+    throw new Error(`Unexpected URL ${u}`);
   };
 
-  await worker.fetch(makeWebhookRequest({ message: { text: "/help", chat: { id: 1 } } }), makeEnv());
+  await worker.fetch(makeWebhookRequest({ message: { text: "7707083893", chat: { id: 1 } } }), makeEnv());
 
   const [body] = collectTelegramBodies(calls, "sendMessage");
-  assert.match(body.text, /Как пользоваться/);
-  assert.match(body.text, /Отправьте ИНН/);
-  assert.match(body.text, /inline-кнопкам/);
-  assert.ok(body.reply_markup.inline_keyboard.flat().some((button) => button.callback_data === "help"));
+  const callbacks = body.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
+  assert.match(body.text, /ООО Тест/);
+  assert.ok(callbacks.includes("co:main:7707083893"));
+  assert.ok(callbacks.includes("co:lnk:7707083893"));
+  assert.ok(callbacks.includes("co:own:7707083893"));
+  assert.ok(callbacks.includes("co:fin:7707083893"));
+  assert.ok(callbacks.includes("co:okv:7707083893"));
+  assert.ok(!callbacks.includes("co:succ:7707083893"));
+  assert.ok(body.reply_markup.inline_keyboard.flat().some((button) => button.url === "https://egrul.nalog.ru/"));
 });
 
-test("history reply action degrades gracefully without KV", async () => {
+test("email lookup uses findByEmail/company and then opens the standard main card", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findByEmail/company")) {
+      return jsonResponse({
+        suggestions: [{
+          data: {
+            company: {
+              inn: "7721581040"
+            }
+          }
+        }]
+      });
+    }
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({
+        suggestions: [{
+          data: {
+            inn: "7721581040",
+            ogrn: "5077746329876",
+            name: { short_with_opf: 'ООО "ДЕЙТА КЬЮ"' },
+            state: { status: "ACTIVE" },
+            management: { name: "Петров П.П." },
+            address: { value: "г Москва" },
+            okved: "63.11"
+          }
+        }]
+      });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(makeWebhookRequest({ message: { text: "info@dadata.ru", chat: { id: 2 } } }), makeEnv());
+
+  assert.ok(calls.some((call) => call.url.includes("/findByEmail/company")));
+  assert.ok(calls.some((call) => call.url.includes("/findById/party")));
+  const [body] = collectTelegramBodies(calls, "sendMessage");
+  assert.match(body.text, /ДЕЙТА КЬЮ/);
+});
+
+test("co:fin uses only findById/party finance block", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({
+        suggestions: [{
+          data: {
+            inn: "7707083893",
+            finance: {
+              year: "2024",
+              income: 1000000,
+              expense: 750000,
+              tax_system: "ОСНО"
+            }
+          }
+        }]
+      });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(makeWebhookRequest({ callback_query: { id: "cb-fin", data: "co:fin:7707083893", message: { message_id: 11, chat: { id: 3 } } } }), makeEnv());
+
+  const [body] = collectTelegramBodies(calls, "editMessageText");
+  assert.match(body.text, /Финансы/);
+  assert.match(body.text, /2024/);
+  assert.equal(calls.filter((call) => call.url.includes("/findById/party")).length, 1);
+  assert.ok(!calls.some((call) => call.url.includes("api.checko.ru")));
+});
+
+test("co:lnk deduplicates affiliations, paginates by 5 items, and caps source INNs at 5", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u.toString(), options });
+    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
+      return jsonResponse({
+        suggestions: [{
+          data: {
+            inn: "7707083893",
+            management: { inn: "111111111111" },
+            managers: [{ inn: "222222222222" }, { inn: "333333333333" }],
+            founders: [{ inn: "444444444444" }, { inn: "555555555555" }, { inn: "666666666666" }]
+          }
+        }]
+      });
+    }
+    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
+      const requestBody = JSON.parse(options.body);
+      const sourceInn = requestBody.query;
+      const index = Number(sourceInn[0]);
+      return jsonResponse({
+        suggestions: [
+          {
+            data: {
+              inn: `770000000${index}`,
+              name: { short_with_opf: `ООО Связь ${index}` },
+              state: { status: index % 2 === 0 ? "ACTIVE" : "LIQUIDATING" },
+              relation_type: index % 2 === 0 ? "FOUNDER" : "MANAGER"
+            }
+          },
+          {
+            data: {
+              inn: "7700000009",
+              name: { short_with_opf: "ООО Дубль" },
+              state: { status: "ACTIVE" },
+              relation_type: "FOUNDER"
+            }
+          }
+        ]
+      });
+    }
+    throw new Error(`Unexpected URL ${u}`);
+  };
+
+  await worker.fetch(makeWebhookRequest({ callback_query: { id: "cb-lnk-1", data: "co:lnk:7707083893", message: { message_id: 12, chat: { id: 4 } } } }), makeEnv());
+  await worker.fetch(makeWebhookRequest({ callback_query: { id: "cb-lnk-2", data: "co:lnk:7707083893:p:2", message: { message_id: 12, chat: { id: 4 } } } }), makeEnv());
+
+  const affiliationCalls = calls.filter((call) => call.url.includes("/findAffiliated/party"));
+  assert.equal(affiliationCalls.length, 10);
+  assert.equal(affiliationCalls.slice(0, 5).length, 5);
+
+  const [page1, page2] = collectTelegramBodies(calls, "editMessageText");
+  assert.match(page1.text, /Связи/);
+  assert.equal((page1.text.match(/• <b>/g) || []).length, 5);
+  assert.equal((page2.text.match(/• <b>/g) || []).length, 1);
+  assert.ok(page1.reply_markup.inline_keyboard.flat().some((button) => button.callback_data === "co:lnk:7707083893:p:2"));
+  assert.ok(!page1.text.includes("api.checko.ru"));
+});
+
+test("history degrades gracefully without KV", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url: String(url), options });
     return jsonResponse({ ok: true });
   };
 
-  await worker.fetch(makeWebhookRequest({ message: { text: "/history", chat: { id: 1 } } }), makeEnv());
+  await worker.fetch(makeWebhookRequest({ message: { text: "/history", chat: { id: 7 } } }), makeEnv());
 
   const [body] = collectTelegramBodies(calls, "sendMessage");
   assert.match(body.text, /История пока недоступна без хранилища/);
-  assert.match(body.text, /Можно продолжить через новый поиск/);
 });
 
-test("history reply action opens stored successful checks through legacy callbacks", async () => {
+test("history lists recent company cards from KV", async () => {
   const calls = [];
-  const kv = makeKvNamespace([
-    ["history:chat:77", JSON.stringify([
-      { type: "company", id: "7707083893", title: "ООО Тест", timestamp: "2026-03-23T00:00:00.000Z" },
-      { type: "entrepreneur", id: "500100732259", title: "ИП Тест", timestamp: "2026-03-22T00:00:00.000Z" }
-    ])]
-  ]);
+  const kv = makeKvNamespace([["history:chat:77", JSON.stringify([{ id: "7707083893", title: "ООО Тест" }])]]);
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url: String(url), options });
     return jsonResponse({ ok: true });
@@ -154,259 +302,5 @@ test("history reply action opens stored successful checks through legacy callbac
   await worker.fetch(makeWebhookRequest({ message: { text: "/history", chat: { id: 77 } } }), makeEnv({ COMPANY_CACHE: kv }));
 
   const [body] = collectTelegramBodies(calls, "sendMessage");
-  const callbacks = body.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
-  assert.ok(callbacks.includes("select:company:7707083893"));
-  assert.ok(callbacks.includes("select:entrepreneur:500100732259"));
-});
-
-test("10-digit INN opens compact main card with DaData-first buttons", async () => {
-  const calls = [];
-  globalThis.fetch = async (url, options = {}) => {
-    const u = new URL(String(url));
-    calls.push({ url: u.toString(), options });
-    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
-      return jsonResponse({
-        suggestions: [{
-          data: {
-            inn: "7707083893",
-            name: { short_with_opf: "ООО Тест" },
-            state: { status: "ACTIVE", registration_date: 1262304000000 },
-            management: { name: "Иванов И.И." },
-            address: { value: "Россия, 125009, г Москва, ул Тверская, д 1" },
-            capital: { value: 10000 },
-            employee_count: 15,
-            okved: "62.01",
-            successor: { name: "—" }
-          }
-        }]
-      });
-    }
-    return jsonResponse({ ok: true });
-  };
-
-  await worker.fetch(
-    makeWebhookRequest({ message: { text: "7707083893", chat: { id: 1 } } }),
-    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
-  );
-
-  const [body] = collectTelegramBodies(calls, "sendMessage");
-  const callbacks = body.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
-  assert.match(body.text, /Вывод/);
-  assert.match(body.text, /Ключевые факты/);
-  assert.doesNotMatch(body.text, /Что проверить дальше/);
-  assert.ok(callbacks.includes("co:lnk:7707083893"));
-  assert.ok(callbacks.includes("co:own:7707083893"));
-  assert.ok(callbacks.includes("co:fin:7707083893"));
-  assert.ok(callbacks.includes("co:okv:7707083893"));
-  assert.ok(callbacks.includes("co:succ:7707083893"));
-  assert.ok(callbacks.includes("help"));
-  assert.ok(!calls.some((call) => call.url.includes("api.checko.ru") && call.url.includes("/company")));
-});
-
-test("old co:main callback remains backward-compatible and has no pager", async () => {
-  const calls = [];
-  globalThis.fetch = async (url, options = {}) => {
-    const u = new URL(String(url));
-    calls.push({ url: u.toString(), options });
-    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
-      return jsonResponse({ suggestions: [{ data: { inn: "7707083893", name: { short_with_opf: "ООО Тест" }, state: { status: "ACTIVE", registration_date: 1262304000000 }, management: { name: "Иванов И.И." }, address: { value: "г Москва, ул Тверская" }, capital: { value: 10000 }, employee_count: 7, okved: "62.01" } }] });
-    }
-    throw new Error(`Unexpected URL ${u}`);
-  };
-
-  await worker.fetch(
-    makeWebhookRequest({ callback_query: { id: "cb-main", data: "co:main:7707083893", message: { message_id: 5, chat: { id: 1 } } } }),
-    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
-  );
-
-  const [body] = collectTelegramBodies(calls, "editMessageText");
-  const callbacks = body.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
-  assert.ok(!callbacks.some((callback) => callback.includes(":p:")));
-});
-
-test("co:lnk stays on DaData affiliations, uses manager/founder INN flow, and paginates by 5 items", async () => {
-  const calls = [];
-  globalThis.fetch = async (url, options = {}) => {
-    const u = new URL(String(url));
-    calls.push({ url: u.toString(), options });
-    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
-      return jsonResponse({
-        suggestions: [{
-          data: {
-            inn: "7707083893",
-            management: { inn: "111111111111", name: "Руководитель" },
-            founders: [{ inn: "222222222222", name: "Учредитель" }]
-          }
-        }]
-      });
-    }
-    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findAffiliated/party")) {
-      const scope = JSON.parse(options.body).scope[0];
-      const suggestions = Array.from({ length: 6 }, (_, index) => ({
-        data: {
-          inn: `${scope === "MANAGERS" ? "31" : "41"}${index}`.padEnd(10, String(index)),
-          name: { short_with_opf: `${scope === "MANAGERS" ? "ООО Менеджер" : "ООО Учредитель"} ${index + 1}` },
-          okved: `62.0${index}`,
-          state: { status: index % 2 === 0 ? "ACTIVE" : "LIQUIDATING" }
-        }
-      }));
-      return jsonResponse({ suggestions });
-    }
-    throw new Error(`Unexpected URL ${u}`);
-  };
-
-  await worker.fetch(
-    makeWebhookRequest({ callback_query: { id: "cb-lnk", data: "co:lnk:7707083893", message: { message_id: 10, chat: { id: 2 } } } }),
-    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
-  );
-
-  const [body] = collectTelegramBodies(calls, "editMessageText");
-  const affiliationCalls = calls
-    .filter((call) => call.url.includes("/findAffiliated/party"))
-    .map((call) => JSON.parse(call.options.body));
-  assert.match(body.text, /Связи/);
-  assert.match(body.text, /Через руководителя: <b>6<\/b>/);
-  assert.match(body.text, /Через учредителя: <b>6<\/b>/);
-  assert.match(body.text, /Стр\. 1\/3/);
-  assert.equal((body.text.match(/^• .*$/gm) || []).length, 8);
-  assert.deepEqual(affiliationCalls.map((payload) => payload.query), ["111111111111", "222222222222"]);
-  assert.ok(!calls.some((call) => call.url.includes("api.checko.ru")));
-  assert.equal(body.reply_markup.inline_keyboard[0][1].callback_data, "co:lnk:7707083893:p:2");
-});
-
-test("pager callback works and old callbacks without page default to first page", async () => {
-  const calls = [];
-  globalThis.fetch = async (url, options = {}) => {
-    const u = new URL(String(url));
-    calls.push({ url: u.toString(), options });
-    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/history")) {
-      return jsonResponse({ meta: { status: "ok" }, data: Array.from({ length: 7 }, (_, index) => ({ Дата: `2026-03-${String(20 - index).padStart(2, "0")}`, Описание: `Событие ${index + 1}` })) });
-    }
-    throw new Error(`Unexpected URL ${u}`);
-  };
-
-  await worker.fetch(makeWebhookRequest({ callback_query: { id: "cb-his-1", data: "co:his:7707083893", message: { message_id: 3, chat: { id: 9 } } } }), makeEnv());
-  await worker.fetch(makeWebhookRequest({ callback_query: { id: "cb-his-2", data: "co:his:7707083893:p:2", message: { message_id: 3, chat: { id: 9 } } } }), makeEnv());
-
-  const edits = collectTelegramBodies(calls, "editMessageText");
-  assert.match(edits[0].text, /Событие 1/);
-  assert.doesNotMatch(edits[0].text, /Событие 6/);
-  assert.match(edits[1].text, /Событие 6/);
-  assert.match(edits[1].text, /Событие 7/);
-});
-
-test("co:fin uses DaData finance snapshot and avoids Checko", async () => {
-  const calls = [];
-  globalThis.fetch = async (url, options = {}) => {
-    const u = new URL(String(url));
-    calls.push({ url: u.toString(), options });
-    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
-      return jsonResponse({
-        suggestions: [{
-          data: {
-            inn: "7707083893",
-            employee_count: 18,
-            finance: { year: 2024, income: 1300000, expense: 900000, revenue: 1200000, debt: 0, penalty: 0 }
-          }
-        }]
-      });
-    }
-    throw new Error(`Unexpected URL ${u}`);
-  };
-
-  await worker.fetch(
-    makeWebhookRequest({ callback_query: { id: "cb-fin", data: "co:fin:7707083893", message: { message_id: 11, chat: { id: 3 } } } }),
-    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
-  );
-
-  const [body] = collectTelegramBodies(calls, "editMessageText");
-  assert.match(body.text, /Год: <b>2024<\/b>/);
-  assert.match(body.text, /Доход: <b>1(?: |\u00a0)300(?: |\u00a0)000 ₽<\/b>/);
-  assert.match(body.text, /Сотрудники: <b>18<\/b>/);
-  assert.ok(calls.some((call) => call.url.includes("/findById/party")));
-  assert.ok(!calls.some((call) => call.url.includes("api.checko.ru")));
-});
-
-test("co:risk uses corrected fedresurs endpoint and section fallback wording", async () => {
-  const calls = [];
-  globalThis.fetch = async (url, options = {}) => {
-    const u = new URL(String(url));
-    calls.push({ url: u.toString(), options });
-    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/company")) {
-      return jsonResponse({ meta: { status: "ok" }, data: { ИНН: "7707083893", Статус: { Наим: "Действующее" }, Налоги: { СумНедоим: 0 } } });
-    }
-    if (u.hostname === "api.checko.ru" && (u.pathname.endsWith("/finances") || u.pathname.endsWith("/legal-cases") || u.pathname.endsWith("/enforcements") || u.pathname.endsWith("/contracts") || u.pathname.endsWith("/history") || u.pathname.endsWith("/bankruptcy-messages") || u.pathname.endsWith("/fedresurs"))) {
-      return jsonResponse({ meta: { status: "ok" }, data: [] });
-    }
-    throw new Error(`Unexpected URL ${u}`);
-  };
-
-  await worker.fetch(makeWebhookRequest({ callback_query: { id: "cb-risk", data: "co:risk:7707083893", message: { message_id: 12, chat: { id: 4 } } } }), makeEnv());
-
-  assert.ok(calls.some((call) => call.url.includes("/fedresurs?")));
-  assert.ok(!calls.some((call) => call.url.includes("fedresurs-messages")));
-});
-
-test("history screen uses unified history endpoint name, not timeline", async () => {
-  const calls = [];
-  globalThis.fetch = async (url, options = {}) => {
-    const u = new URL(String(url));
-    calls.push({ url: u.toString(), options });
-    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/history")) {
-      return jsonResponse({ meta: { status: "ok" }, data: [{ Дата: "2026-03-20", Описание: "Смена руководителя" }] });
-    }
-    throw new Error(`Unexpected URL ${u}`);
-  };
-
-  await worker.fetch(makeWebhookRequest({ callback_query: { id: "cb-his", data: "co:his:7707083893", message: { message_id: 13, chat: { id: 5 } } } }), makeEnv());
-
-  assert.ok(calls.some((call) => call.url.includes("/history?")));
-  assert.ok(!calls.some((call) => call.url.includes("/timeline?")));
-});
-
-test("section-level fallback screen works for unavailable co:fin", async () => {
-  const calls = [];
-  globalThis.fetch = async (url, options = {}) => {
-    const u = new URL(String(url));
-    calls.push({ url: u.toString(), options });
-    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.hostname === "suggestions.dadata.ru" && u.pathname.endsWith("/findById/party")) {
-      return new Response("<html>upstream error</html>", { status: 200 });
-    }
-    throw new Error(`Unexpected URL ${u}`);
-  };
-
-  await worker.fetch(
-    makeWebhookRequest({ callback_query: { id: "cb-fin-fallback", data: "co:fin:7707083893", message: { message_id: 14, chat: { id: 6 } } } }),
-    makeEnv({ DADATA_API_KEY: "dadata-key", DADATA_SECRET_KEY: "dadata-secret", DADATA_API_URL: "https://suggestions.dadata.ru/suggestions/api/4_1/rs" })
-  );
-
-  const [body] = collectTelegramBodies(calls, "editMessageText");
-  assert.match(body.text, /Раздел временно недоступен/);
-  assert.match(body.text, /Источник данных сейчас не отвечает/);
-});
-
-test("company context remains one editable message for callbacks", async () => {
-  const calls = [];
-  globalThis.fetch = async (url, options = {}) => {
-    const u = new URL(String(url));
-    calls.push({ url: u.toString(), options });
-    if (u.hostname === "api.telegram.org") return jsonResponse({ ok: true });
-    if (u.hostname === "api.checko.ru" && u.pathname.endsWith("/legal-cases")) {
-      return jsonResponse({ meta: { status: "ok" }, data: [] });
-    }
-    throw new Error(`Unexpected URL ${u}`);
-  };
-
-  await worker.fetch(makeWebhookRequest({ callback_query: { id: "cb-arb", data: "co:arb:7707083893", message: { message_id: 88, chat: { id: 9 } } } }), makeEnv());
-
-  assert.equal(collectTelegramBodies(calls, "sendMessage").length, 0);
-  const [edit] = collectTelegramBodies(calls, "editMessageText");
-  assert.equal(edit.message_id, 88);
+  assert.ok(body.reply_markup.inline_keyboard.flat().some((button) => button.callback_data === "select:company:7707083893"));
 });

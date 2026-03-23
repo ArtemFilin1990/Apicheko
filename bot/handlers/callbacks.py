@@ -4,6 +4,7 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
+from dadata import DadataError, get_affiliated
 from bot.cards import DETAIL_FETCHERS, SCREEN_SPECS, build_company_screen, build_detail_card
 from bot.formatters import format_entrepreneur, format_person
 from bot.handlers.search import SearchState
@@ -20,6 +21,7 @@ from storage.database import Database
 from utils.checko_payload import extract_items
 
 router = Router(name="callbacks")
+_AFFILIATED_LIMIT = 15
 
 # Keep compatibility for tests importing internals from this module.
 _DETAIL_FETCHERS = DETAIL_FETCHERS
@@ -78,6 +80,16 @@ async def cb_search_name(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(SearchState.waiting_for_name)
     await call.message.edit_text(
         "🧾 <b>Введите название компании или ФИО ИП</b>",
+        reply_markup=cancel_keyboard(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "search:email")
+async def cb_search_email(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(SearchState.waiting_for_name)
+    await call.message.edit_text(
+        "✉️ <b>Введите корпоративный email</b>\n\nНапример: info@company.ru",
         reply_markup=cancel_keyboard(),
     )
     await call.answer()
@@ -145,7 +157,7 @@ async def cb_company_nav(
     section = callback_data.sec
     ident = callback_data.ident
 
-    if section not in SCREEN_SPECS:
+    if section not in SCREEN_SPECS and section not in {"lnk", "links"}:
         await call.answer("Раздел не найден", show_alert=True)
         return
 
@@ -153,13 +165,22 @@ async def cb_company_nav(
     await call.message.edit_text("🔄 Загружаю раздел...")
 
     try:
-        text = await build_company_screen(checko_api, section, ident)
+        if section in {"lnk", "links"}:
+            text = await build_connections_screen(ident)
+        else:
+            text = await build_company_screen(checko_api, section, ident)
         await call.message.edit_text(
             text,
             reply_markup=company_nav_keyboard(ident),
             disable_web_page_preview=True,
         )
     except CheckoAPIError as exc:
+        await call.message.edit_text(
+            f"⚠️ <b>Ошибка загрузки раздела</b>\n\n"
+            f"<i>{html.escape(str(exc))}</i>",
+            reply_markup=company_nav_keyboard(ident),
+        )
+    except DadataError as exc:
         await call.message.edit_text(
             f"⚠️ <b>Ошибка загрузки раздела</b>\n\n"
             f"<i>{html.escape(str(exc))}</i>",
@@ -313,3 +334,25 @@ async def cb_detail(call: CallbackQuery, checko_api: CheckoAPI) -> None:
             reply_markup=cancel_keyboard(),
         )
     await call.answer()
+
+
+async def build_connections_screen(inn: str) -> str:
+    affiliations = await get_affiliated(inn)
+    lines = [
+        "🔗 <b>Связанные лица и компании</b>",
+        "──────────────────",
+    ]
+
+    if not affiliations:
+        lines.extend(["", "Связи по данным DaData не найдены."])
+        return "\n".join(lines)
+
+    for item in affiliations[:_AFFILIATED_LIMIT]:
+        lines.append(
+            f"• <b>{html.escape(item.name)}</b> (ИНН {html.escape(item.inn)}) — {html.escape(item.type)}"
+        )
+
+    if len(affiliations) > _AFFILIATED_LIMIT:
+        lines.extend(["", "<i>Показаны основные связи</i>"])
+
+    return "\n".join(lines)
