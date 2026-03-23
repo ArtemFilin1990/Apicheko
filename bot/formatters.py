@@ -36,9 +36,10 @@ def _nested(d: dict, *keys: str) -> Any:
 
 
 def build_main_card(company: CompanyData) -> str:
+    import html
     from datetime import date, datetime
 
-    def _get(obj: Any, *paths: str) -> Any:
+    def _get(obj, *paths):
         for path in paths:
             current = obj
             ok = True
@@ -54,14 +55,14 @@ def build_main_card(company: CompanyData) -> str:
                 return current
         return None
 
-    def _as_list(value: Any) -> list[Any]:
+    def _as_list(value):
         if value is None:
             return []
         if isinstance(value, (list, tuple, set)):
             return list(value)
         return [value]
 
-    def _first_contact(value: Any) -> str | None:
+    def _first_contact(value):
         for item in _as_list(value):
             if isinstance(item, dict):
                 candidate = item.get("value") or item.get("unrestricted_value") or item.get("data")
@@ -71,7 +72,7 @@ def build_main_card(company: CompanyData) -> str:
                 return str(candidate).strip()
         return None
 
-    def _clean(value: Any) -> Any:
+    def _clean(value):
         if value is None:
             return None
         if isinstance(value, str):
@@ -81,11 +82,11 @@ def build_main_card(company: CompanyData) -> str:
             return value
         return value
 
-    def _escape(value: Any) -> str | None:
+    def _escape(value):
         value = _clean(value)
         return html.escape(str(value)) if value is not None else None
 
-    def _format_int(value: Any) -> str | None:
+    def _format_int(value):
         value = _clean(value)
         if value is None:
             return None
@@ -95,7 +96,7 @@ def build_main_card(company: CompanyData) -> str:
             return None
         return f"{number:,}".replace(",", " ")
 
-    def _format_date(value: Any) -> str | None:
+    def _format_date(value):
         value = _clean(value)
         if value is None:
             return None
@@ -129,7 +130,7 @@ def build_main_card(company: CompanyData) -> str:
         except Exception:
             return None
 
-    def _add_block(lines: list[str], title: str, block_lines: list[str]) -> None:
+    def _add_block(lines, title, block_lines):
         visible = [line for line in block_lines if line]
         if not visible:
             return
@@ -178,7 +179,14 @@ def build_main_card(company: CompanyData) -> str:
             "management.fio",
         )
     )
-    director_post = _escape(_get(company, "director_post", "management.post", "management.position"))
+    director_post = _escape(
+        _get(
+            company,
+            "director_post",
+            "management.post",
+            "management.position",
+        )
+    )
 
     capital_raw = _get(company, "capital", "capital.value")
     capital = _format_int(capital_raw)
@@ -193,7 +201,7 @@ def build_main_card(company: CompanyData) -> str:
 
     lines = [f"🏢 <b>{company_name}</b>", "──────────────────", status_line]
 
-    requisites: list[str] = []
+    requisites = []
     if inn or kpp:
         if inn and kpp:
             requisites.append(f"• ИНН / КПП: <code>{inn}</code> / <code>{kpp}</code>")
@@ -207,7 +215,7 @@ def build_main_card(company: CompanyData) -> str:
         requisites.append(f"• ОКВЭД: {okved}")
     _add_block(lines, "[ ⚖️ ] Реквизиты", requisites)
 
-    management_block: list[str] = []
+    management_block = []
     if director_name:
         management_line = f"• {director_name}"
         if director_post:
@@ -219,12 +227,12 @@ def build_main_card(company: CompanyData) -> str:
         management_block.append(f"• Штат: {employees} сотрудников")
     _add_block(lines, "[ 👥 ] Управление и Капитал", management_block)
 
-    revenue_block: list[str] = []
+    revenue_block = []
     if revenue:
         revenue_block.append(f"• По данным ФНС: <b>{revenue} ₽</b>")
     _add_block(lines, "[ 💰 ] Выручка", revenue_block)
 
-    contacts_block: list[str] = []
+    contacts_block = []
     if address:
         contacts_block.append(f"• {address}")
     if email:
