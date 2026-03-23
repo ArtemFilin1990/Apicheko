@@ -178,17 +178,19 @@ async function buildCompanySectionView(env, section, id, page = 1) {
 function buildMainMenuView() {
   return {
     text: [
-      "👋 <b>Проверка компании через DaData</b>",
+      "👋 <b>EvaCore: быстрая проверка компании через DaData</b>",
       SECTION_DIVIDER,
       "",
-      "Поддерживаются только DaData-экраны:",
-      "• карточка компании",
-      "• связи",
-      "• учредители",
-      "• финансы",
-      "• ОКВЭД",
+      "⚡ <b>За один экран</b> покажу главное по компании:",
+      "• 🏢 карточку и статус",
+      "• 🔗 связи и 👥 учредителей",
+      "• 📊 финансы и 🏷 ОКВЭД",
       "",
-      "👇 Отправьте ИНН / ОГРН или корпоративный email"
+      "🧭 <b>Как начать:</b>",
+      "• отправьте ИНН / ОГРН",
+      "• или корпоративный email",
+      "",
+      "✨ Выберите сценарий ниже или просто пришлите реквизит сообщением."
     ].join("\n"),
     reply_markup: buildMainMenuKeyboard()
   };
@@ -200,11 +202,11 @@ function buildHelpView() {
       "ℹ️ <b>Как пользоваться</b>",
       SECTION_DIVIDER,
       "",
-      "1. Отправьте ИНН / ОГРН компании.",
-      "2. Либо отправьте корпоративный email.",
-      "3. Навигируйтесь только по DaData-разделам в inline-кнопках.",
+      "1. 🔎 Отправьте ИНН, ОГРН или ИНН/КПП.",
+      "2. ✉️ Либо пришлите корпоративный email.",
+      "3. 🧩 Открывайте нужный раздел кнопками под карточкой.",
       "",
-      "Неподдерживаемые legacy-разделы удалены из интерфейса."
+      "💡 Каждый экран отвечает на один вопрос и не перегружает деталями."
     ].join("\n"),
     reply_markup: buildMainMenuKeyboard()
   };
@@ -269,14 +271,16 @@ async function buildCompanyMainView(env, query) {
       `🏢 <b>${escapeHtml(firstNonEmpty([party?.name?.short_with_opf, party?.name?.full_with_opf, "Компания"]))}</b>`,
       SECTION_DIVIDER,
       "",
-      `ИНН: <code>${escapeHtml(firstNonEmpty([party?.inn, "—"]))}</code>`,
-      `ОГРН: <code>${escapeHtml(firstNonEmpty([party?.ogrn, "—"]))}</code>`,
-      `Статус: <b>${escapeHtml(readablePartyStatus(party?.state?.status))}</b>`,
-      `Руководитель: ${escapeHtml(firstNonEmpty([party?.management?.name, "—"]))}`,
-      `Адрес: ${escapeHtml(firstNonEmpty([party?.address?.value, "—"]))}`,
-      `Капитал: ${escapeHtml(formatMoney(party?.capital?.value))}`,
-      `Сотрудники: ${escapeHtml(firstNonEmpty([party?.employee_count, "—"]))}`,
-      `ОКВЭД: ${escapeHtml(firstNonEmpty([party?.okved, "—"]))}`
+      `🪪 ИНН: <code>${escapeHtml(firstNonEmpty([party?.inn, "—"]))}</code>`,
+      `🏛 ОГРН: <code>${escapeHtml(firstNonEmpty([party?.ogrn, "—"]))}</code>`,
+      `📌 Статус: <b>${escapeHtml(readablePartyStatus(party?.state?.status))}</b>`,
+      `👤 Руководитель: ${escapeHtml(firstNonEmpty([party?.management?.name, "—"]))}`,
+      `📍 Адрес: ${escapeHtml(firstNonEmpty([party?.address?.value, "—"]))}`,
+      `💼 Капитал: ${escapeHtml(formatMoney(party?.capital?.value))}`,
+      `👥 Сотрудники: ${escapeHtml(firstNonEmpty([party?.employee_count, "—"]))}`,
+      `🏷 ОКВЭД: ${escapeHtml(firstNonEmpty([party?.okved, "—"]))}`,
+      "",
+      "✨ Ниже можно открыть нужный раздел карточки."
     ].join("\n"),
     reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query))
   };
@@ -417,8 +421,8 @@ async function buildLookupHistoryView(env, chatId) {
 function buildMainMenuKeyboard() {
   return {
     inline_keyboard: [
-      [kb("🔎 По ИНН / ОГРН", "search:inn"), kb("✉️ По Email", "search:email")],
-      [kb("ℹ️ Помощь", "help")]
+      [kb("🔎 ИНН / ОГРН", "search:inn"), kb("✉️ Email", "search:email")],
+      [kb("ℹ️ Как это работает", "help")]
     ]
   };
 }
@@ -426,12 +430,12 @@ function buildMainMenuKeyboard() {
 function buildCompanyKeyboard(company, active = "main") {
   const id = normalizedCompanyId(company);
   const rows = [
-    [kb(active === "main" ? "• Скоринг" : "⚖️ Скоринг", `co:main:${id}`), kb(active === "lnk" ? "• Связи" : "🔗 Связи", `co:lnk:${id}`)],
-    [kb(active === "own" ? "• Учредители" : "👥 Учредители", `co:own:${id}`), kb(active === "okv" ? "• ОКВЭД" : "🏷 ОКВЭД", `co:okv:${id}`)]
+    [kb(active === "main" ? "✨ Карточка" : "🏢 Карточка", `co:main:${id}`), kb(active === "lnk" ? "✨ Связи" : "🔗 Связи", `co:lnk:${id}`)],
+    [kb(active === "own" ? "✨ Учредители" : "👥 Учредители", `co:own:${id}`), kb(active === "okv" ? "✨ ОКВЭД" : "🏷 ОКВЭД", `co:okv:${id}`)]
   ];
 
   if (companyHasFinance(company)) {
-    rows.push([kb(active === "fin" ? "• Финансы" : "📊 Финансы", `co:fin:${id}`)]);
+    rows.push([kb(active === "fin" ? "✨ Финансы" : "📊 Финансы", `co:fin:${id}`)]);
   }
 
   rows.push([{ text: "📜 История (ФНС)", url: "https://egrul.nalog.ru/" }]);
