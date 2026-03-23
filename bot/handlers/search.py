@@ -7,7 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
 from dadata import DadataError, get_company_by_email
-from bot.formatters import format_bank, format_company, format_entrepreneur, format_person, format_search_results
+from bot.formatters import build_main_card, format_bank, format_company, format_entrepreneur, format_person, format_search_results
 from bot.keyboards import (
     cancel_keyboard,
     company_nav_keyboard,
@@ -136,7 +136,7 @@ async def handle_name_input(
                 return
 
             await message.answer(
-                format_company(company.to_checko_payload()),
+                build_main_card(company),
                 reply_markup=company_nav_keyboard(company.inn),
             )
             return

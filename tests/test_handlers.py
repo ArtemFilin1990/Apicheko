@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock
 from unittest.mock import patch
 
+from bot.formatters import build_main_card
 from bot.handlers.callbacks import _DETAIL_FETCHERS, build_connections_screen, calculate_risk_score, cb_company_nav, cb_detail
 from bot.handlers.search import handle_name_input
 from bot.keyboards import cancel_keyboard, company_detail_keyboard, main_menu_keyboard
@@ -147,6 +148,29 @@ class DadataHandlersTests(unittest.IsolatedAsyncioTestCase):
         message.answer.assert_any_await(unittest.mock.ANY)
         _, kwargs = message.answer.await_args_list[-1]
         self.assertEqual(kwargs["reply_markup"].inline_keyboard[0][0].callback_data, "co:main:7707083893")
+
+    def test_build_main_card_formats_compact_dadata_screen(self) -> None:
+        company = CompanyData(
+            inn="7707083893",
+            name="ООО Ромашка",
+            ogrn="1027700132195",
+            address="г. Москва, ул. Тверская, д. 1",
+            status="ACTIVE",
+            manager="Иванов И.И.",
+            okved="62.01",
+            email="info@example.com",
+        )
+
+        card = build_main_card(company)
+
+        self.assertIn("🏢 <b>ООО Ромашка</b>", card)
+        self.assertIn("🟢 Действующая", card)
+        self.assertIn("• ИНН: <code>7707083893</code>", card)
+        self.assertIn("• ОГРН: <code>1027700132195</code>", card)
+        self.assertIn("• ОКВЭД: 62.01", card)
+        self.assertIn("• Иванов И.И.", card)
+        self.assertIn("• г. Москва, ул. Тверская, д. 1", card)
+        self.assertIn("• Email: info@example.com", card)
 
     async def test_company_nav_links_uses_dadata_affiliations(self) -> None:
         call = MagicMock()
