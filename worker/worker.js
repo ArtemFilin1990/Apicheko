@@ -736,6 +736,13 @@ function hasRepeat(map) {
   return false;
 }
 
+// Добавляет невидимые строки чтобы сообщение не "схлопывалось" при редактировании
+function padText(text, minLines = 18) {
+  const current = text.split("\n").length;
+  if (current >= minLines) return text;
+  return text + "\n" + "\u200b\n".repeat(minLines - current - 1) + "\u200b";
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -1069,7 +1076,7 @@ async function buildCompanyMainView(env, query) {
   lines.push("");
 
   return {
-    text: lines.join("\n"),
+    text: padText(lines.join("\n")),
     reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query))
   };
 }
@@ -1083,7 +1090,7 @@ async function buildFoundersView(env, query, page = 1) {
 
   if (!founders.length) {
     lines.push("Учредители не найдены.");
-    return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "own") };
+    return { text: padText(lines.join("\n")), reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "own") };
   }
 
   const totalPages = Math.max(1, Math.ceil(founders.length / PAGE_SIZE));
@@ -1125,7 +1132,7 @@ async function buildFoundersView(env, query, page = 1) {
 
   const baseKb = buildSectionKeyboard(buildCompanyContext(party, query), "own", currentPage, totalPages);
   return {
-    text: lines.join("\n"),
+    text: padText(lines.join("\n")),
     reply_markup: { inline_keyboard: [...founderButtons, ...baseKb.inline_keyboard] }
   };
 }
@@ -1189,7 +1196,7 @@ async function buildFinancesView(env, query, page = 1) {
 
   // DaData возвращает один год; пагинация готова для будущего расширения
   return {
-    text: finLines.join("\n"),
+    text: padText(finLines.join("\n")),
     reply_markup: buildSectionKeyboard(buildCompanyContext(party, query), "fin", 1, 1)
   };
 }
@@ -1236,7 +1243,7 @@ async function buildOkvedView(env, query, page = 1) {
   }
 
   return {
-    text: lines.join("\n"),
+    text: padText(lines.join("\n")),
     reply_markup: buildSectionKeyboard(buildCompanyContext(party, query), "okv", currentPage, totalPages)
   };
 }
@@ -1249,7 +1256,7 @@ async function buildConnectionsView(env, query, page = 1) {
 
   if (!sourceInns.length) {
     return {
-      text: ["🔗 <b>Связи</b>", SECTION_DIVIDER, "", "У руководителей и учредителей нет ИНН для поиска аффилированности."].join("\n"),
+      text: padText(["🔗 <b>Связи</b>", SECTION_DIVIDER, "", "У руководителей и учредителей нет ИНН для поиска аффилированности."].join("\n")),
       reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "lnk")
     };
   }
@@ -1291,7 +1298,7 @@ async function buildConnectionsView(env, query, page = 1) {
   }
 
   return {
-    text: lines.join("\n"),
+    text: padText(lines.join("\n")),
     reply_markup: buildConnectionsKeyboard(buildCompanyContext(party, query), currentPage, totalPages)
   };
 }
@@ -1425,7 +1432,7 @@ async function buildScoringView(env, query) {
   lines.push(`💡 ${escapeHtml(result.recommendation)}`);
 
   return {
-    text: lines.join("\n"),
+    text: padText(lines.join("\n")),
     reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "scr")
   };
 }
@@ -1520,7 +1527,7 @@ async function buildHistoryView(env, query, page = 1) {
   body.push("", `<a href="https://egrul.nalog.ru/">📋 Полная история в ЕГРЮЛ ↗</a>`);
 
   return {
-    text: [...header, ...body].join("\n"),
+    text: padText([...header, ...body].join("\n")),
     reply_markup: buildSectionKeyboard(buildCompanyContext(party, query), "his", currentPage, totalPages)
   };
 }
