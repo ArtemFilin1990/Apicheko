@@ -1,6 +1,6 @@
 # Apicheko
 
-Telegram-бот для оперативной проверки компаний, ИП, физлиц и банков через **Checko API v2.4**.
+Telegram-бот для оперативной проверки компаний, ИП, физлиц и банков в модели **DaData-first** с legacy-разделами на Checko.
 
 Production runtime: **Cloudflare Worker** (`worker/worker.js`).
 
@@ -18,11 +18,12 @@ Production runtime: **Cloudflare Worker** (`worker/worker.js`).
 
 - `GET /` — healthcheck.
 - `POST /webhook` (или путь из `WEBHOOK_PATH`) — Telegram webhook.
-- Главный экран `/start` в формате «1 сообщение = 1 экран».
+- Главный экран `/start` в формате «1 сообщение = 1 экран» и только с inline-навигацией.
 - Поиск по ИНН/ОГРН/ОГРНИП, БИК, названию и корпоративному email (DaData).
 - Разрешение 12-значного ИНН через выбор: ИП или физлицо.
 - Главная карточка компании + контекстные экраны разделов с inline-навигацией и постраничным выводом длинных списков.
 - DaData-first карточка компании: `co:main`, `co:lnk`, `co:fin`, `co:own`, `co:okv`, `co:succ` работают без зависимости от Checko.
+- Экран связей `co:lnk` строится по `findById/party` → INN руководителей/учредителей → `findAffiliated/party` → dedupe + pager.
 - Навигация по `editMessageText`, обработка callback через `answerCallbackQuery`.
 - Строгое разделение сервисных ошибок и валидных пустых результатов.
 
@@ -66,13 +67,13 @@ co:<section>:<id>:p:<page>   # для длинных экранов и спис�
 - `co:fin` → DaData `findById/party` (`finance`)
 - `co:own` → DaData `findById/party` (`founders`)
 - `co:okv` → DaData `findById/party` (`okved`, `okveds`)
+- `co:succ` → DaData `findById/party` (`successors`)
+- `co:lnk` → DaData `findById/party` + `findAffiliated/party` по INN руководителей/учредителей
 - `co:risk` → `/company`
 - `co:arb` → `/legal-cases`
 - `co:debt` → `/company` + `/enforcements`
 - `co:ctr` → `/contracts`
 - `co:his` → `/history`
-- `co:lnk` → DaData `findById/party` + `findAffiliated/party`
-- `co:succ` → DaData `findById/party` (`successors`)
 
 - `coneur` → `/entrepreneur`
 - `resolve12:person` → `/person`
@@ -148,8 +149,7 @@ KV binding (optional):
 - Поиск по email использует `POST /findByEmail/company`.
 - Обогащение карточки `co:main` использует `POST /findById/party`.
 - Экраны `co:fin`, `co:own`, `co:okv`, `co:succ` также используют только DaData.
-
-- При отсутствии DaData ключей или временной ошибке DaData бот продолжает работать через Checko без падения.
+- `/start` и карточка компании не используют ReplyKeyboardMarkup: навигация собрана на inline-кнопках.
 
 ## Risk scoring v2 (`co:risk`)
 
