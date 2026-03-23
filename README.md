@@ -1,6 +1,6 @@
 # Apicheko
 
-Telegram-бот для оперативной проверки компаний, ИП, физлиц и банков в модели **DaData-first** с legacy-разделами на Checko.
+Telegram-бот для проверки компаний в модели **DaData-only**.
 
 Production runtime: **Cloudflare Worker** (`worker/worker.js`).
 
@@ -19,13 +19,11 @@ Production runtime: **Cloudflare Worker** (`worker/worker.js`).
 - `GET /` — healthcheck.
 - `POST /webhook` (или путь из `WEBHOOK_PATH`) — Telegram webhook.
 - Главный экран `/start` в формате «1 сообщение = 1 экран» и только с inline-навигацией.
-- Поиск по ИНН/ОГРН/ОГРНИП, БИК, названию и корпоративному email (DaData).
-- Разрешение 12-значного ИНН через выбор: ИП или физлицо.
-- Главная карточка компании + контекстные экраны разделов с inline-навигацией и постраничным выводом длинных списков.
-- DaData-first карточка компании: `co:main`, `co:lnk`, `co:fin`, `co:own`, `co:okv`, `co:succ` работают без зависимости от Checko.
-- Экран связей `co:lnk` строится по `findById/party` → INN руководителей/учредителей → `findAffiliated/party` → dedupe + pager.
+- Поиск компании по ИНН, ОГРН, ИНН/КПП и корпоративному email.
+- Главная карточка компании + контекстные DaData-экраны: `co:main`, `co:lnk`, `co:own`, `co:fin`, `co:okv`, `co:succ`.
+- Экран связей `co:lnk` строится по `findById/party` → INN руководителей/учредителей → максимум 5 вызовов `findAffiliated/party` → dedupe по ИНН → pager по 5 элементов.
 - Навигация по `editMessageText`, обработка callback через `answerCallbackQuery`.
-- Строгое разделение сервисных ошибок и валидных пустых результатов.
+- История последних карточек через optional `COMPANY_CACHE`.
 
 ## Callback contract
 
@@ -33,134 +31,73 @@ Production runtime: **Cloudflare Worker** (`worker/worker.js`).
 menu
 help
 search:inn
-search:name
-search:bic
 search:email
-
-resolve12:entrepreneur:<id>
-resolve12:person:<id>
-
 select:company:<id>
-select:entrepreneur:<id>
-
-ep:risk:<id>
-ep:his:<id>
-ep:lnk:<id>
-
 co:main:<id>
-co:risk:<id>
-co:fin:<id>
-co:arb:<id>
-co:debt:<id>
-co:ctr:<id>
-co:his:<id>
 co:lnk:<id>
+co:own:<id>
+co:fin:<id>
+co:okv:<id>
 co:succ:<id>
-co:tax:<id>
-
-co:<section>:<id>:p:<page>   # для длинных экранов и списков
+co:<section>:<id>:p:<page>   # pager для co:lnk
 ```
 
 ## Endpoint mapping
 
 - `co:main` → DaData `findById/party`
-- `co:fin` → DaData `findById/party` (`finance`)
+- `co:lnk` → DaData `findById/party` + `findAffiliated/party`
 - `co:own` → DaData `findById/party` (`founders`)
+- `co:fin` → DaData `findById/party` (`finance`)
 - `co:okv` → DaData `findById/party` (`okved`, `okveds`)
 - `co:succ` → DaData `findById/party` (`successors`)
-- `co:lnk` → DaData `findById/party` + `findAffiliated/party` по INN руководителей/учредителей
-- `co:risk` → `/company`
-- `co:arb` → `/legal-cases`
-- `co:debt` → `/company` + `/enforcements`
-- `co:ctr` → `/contracts`
-- `co:his` → `/history`
-
-- `coneur` → `/entrepreneur`
-- `resolve12:person` → `/person`
-- `search:bic` → `/bank`
+- company by email → DaData `findByEmail/company`
 
 ## Error-handling contract
 
-Worker возвращает `⚠️ Ошибка сервиса Checko` только если:
+Worker возвращает сервисную ошибку DaData, если:
 
-1. HTTP статус Checko != 200;
-2. ответ Checko не JSON;
-3. `meta.status == error`.
+1. HTTP статус DaData не `200`;
+2. ответ DaData не JSON;
+3. DaData недоступна или ответ имеет неожиданный формат.
 
-Если `meta.status == ok`, но данные пустые, показываются экранные empty-state сообщения:
-
-- `📊 Финансовая отчетность не найдена`
-- `🛡️ Исполнительные производства не найдены`
-- `📑 Контракты не найдены`
-- `🕓 История изменений не найдена`
+Если данные пустые, показывается empty-state на уровне конкретного экрана.
 
 ## Secrets / vars
 
 Cloudflare Secrets:
 
 - `TELEGRAM_BOT_TOKEN`
-- `CHECKO_API_KEY`
 - `WEBHOOK_SECRET`
+- `DADATA_API_KEY`
+- `DADATA_SECRET_KEY`
 
 Vars (`wrangler.toml`):
 
-- `CHECKO_API_URL=https://api.checko.ru/v2`
 - `WEBHOOK_PATH=/webhook`
 - `DADATA_API_URL=https://suggestions.dadata.ru/suggestions/api/4_1/rs`
-- `CACHE_BYPASS=0` (установите `1` для отладки без KV)
-
-DaData Secrets (optional, for email search / enrichment / affiliations):
-
-- `DADATA_API_KEY`
-- `DADATA_SECRET_KEY`
+- `CACHE_BYPASS=0`
 
 KV binding (optional):
 
 - `COMPANY_CACHE` (Cloudflare KV namespace)
 
-
 ## KV cache
 
 Кешируются внешние ответы (не Telegram payload):
 
-- Checko `/company` по `company:inn:{inn}` / `company:ogrn:{ogrn}` — TTL 12 часов
 - DaData `findById/party` по `dadata:party:{inn_or_ogrn}` — TTL 12 часов
-- DaData `findAffiliated/party` по `affiliated:{inn}:{scope}` — TTL 24 часа
+- DaData `findAffiliated/party` по `affiliated:{inn}` — TTL 24 часа
 - DaData `findByEmail/company` по `email:{normalized_email}` — TTL 6 часов
 
-Почему раньше падал deploy:
-
-- в `wrangler.toml` были плейсхолдеры `YOUR_COMPANY_CACHE_KV_ID` / `YOUR_COMPANY_CACHE_KV_PREVIEW_ID`;
-- Cloudflare отклоняет deploy с невалидными KV id.
-
-Теперь KV вынесен в безопасный optional-режим: без реальных id deploy проходит, а кеш просто отключён.
-
-Как подключить KV с реальными id:
-
-1. `wrangler kv namespace create COMPANY_CACHE`
-2. `wrangler kv namespace create COMPANY_CACHE --preview`
-3. Скопируйте выданные `id` и `preview_id`.
-4. Раскомментируйте блок `[[kv_namespaces]]` в `wrangler.toml` и вставьте реальные значения.
-
-При отсутствии/ошибках KV worker автоматически деградирует в прямые API-вызовы (без падения user flow).
+KV работает в optional-режиме: без namespace deploy проходит, а кеш и `/history` деградируют безопасно.
 
 ## DaData integration
 
 - Поиск по email использует `POST /findByEmail/company`.
-- Обогащение карточки `co:main` использует `POST /findById/party`.
-- Экраны `co:fin`, `co:own`, `co:okv`, `co:succ` также используют только DaData.
+- Главная карточка `co:main` использует `POST /findById/party`.
+- Экраны `co:own`, `co:fin`, `co:okv`, `co:succ` используют только блоки из `findById/party`.
+- Экран `co:lnk` использует только affiliations flow и не показывает выручку, телефоны, email или сайты для связей.
 - `/start` и карточка компании не используют ReplyKeyboardMarkup: навигация собрана на inline-кнопках.
-
-## Risk scoring v2 (`co:risk`)
-
-- Экран `co:risk` использует rule-based модуль `worker/services/risk-score.js` (архитектура сохранена).
-- Формат результата scoring: `score` (0..100), `level`, `decision`, `factors`, `positives`, `negatives`, `unknowns`, `recommendation`, `summary`.
-- Модель аддитивная: база `50`, явные штрафы/бонусы + compound-правила, затем `clamp` до диапазона `0..100`.
-- Уровни риска: `0-24 critical`, `25-49 high`, `50-74 medium`, `75-100 low`.
-- Новые группы факторов: `legal`, `financial`, `operational`, `network` + отдельные compound-комбинации.
-- Источники: Checko (company/finances/legal-cases/enforcements/contracts/history/bankruptcy/fedresurs) + DaData Maximum (`findById/party`, `findAffiliated/party`).
-- Решения в risk-экране: `approve_standard`, `approve_caution`, `manual_review`, `prepay_only`, `reject_or_legal_review`.
-- Это explainable эвристика для первичного due diligence, а не юридическое заключение и не кредитный рейтинг.
 
 ## DaData MCP server
 
