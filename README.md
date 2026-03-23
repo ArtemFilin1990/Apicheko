@@ -162,6 +162,31 @@ KV binding (optional):
 - Решения в risk-экране: `approve_standard`, `approve_caution`, `manual_review`, `prepay_only`, `reject_or_legal_review`.
 - Это explainable эвристика для первичного due diligence, а не юридическое заключение и не кредитный рейтинг.
 
+## DaData MCP server
+
+В репозиторий добавлен минимальный MCP-сервер для DaData enrichment:
+
+- entrypoint: `dadata_server.py`
+- package metadata: `pyproject.toml`
+- запуск: `dadata-enrichment` или `python dadata_server.py`
+- transport: `stdio`
+- tools: `enrich_company`, `enrich_company_for_bitrix`
+
+Поведение сервера:
+
+- использует только существующие секреты `DADATA_API_KEY` и `DADATA_SECRET_KEY`;
+- читает `DADATA_API_URL` из окружения, иначе использует DaData `findById/party`;
+- валидирует только 10-значный ИНН и 13-значный ОГРН для company enrichment;
+- возвращает статусы `synced`, `not_found`, `error`;
+- добавляет `raw_hash` для дедупликации апдейтов в Bitrix24.
+
+Пример локального запуска после установки зависимостей из `pyproject.toml`:
+
+```bash
+python -m pip install -e .
+dadata-enrichment
+```
+
 ## Локальная проверка
 
 ```bash
