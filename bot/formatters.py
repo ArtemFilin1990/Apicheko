@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import html
-from datetime import date, datetime
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from dadata import CompanyData
+if TYPE_CHECKING:
+    from dadata import CompanyData
 
 
 def _fmt(value: Any, default: str = "—") -> str:
@@ -36,6 +36,8 @@ def _nested(d: dict, *keys: str) -> Any:
 
 
 def build_main_card(company: CompanyData) -> str:
+    from datetime import date, datetime
+
     def _get(obj: Any, *paths: str) -> Any:
         for path in paths:
             current = obj
@@ -168,7 +170,14 @@ def build_main_card(company: CompanyData) -> str:
     else:
         okved = None
 
-    director_name = _escape(_get(company, "director_name", "management.name", "management.fio", "manager"))
+    director_name = _escape(
+        _get(
+            company,
+            "director_name",
+            "management.name",
+            "management.fio",
+        )
+    )
     director_post = _escape(_get(company, "director_post", "management.post", "management.position"))
 
     capital_raw = _get(company, "capital", "capital.value")

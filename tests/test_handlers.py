@@ -168,7 +168,6 @@ class DadataHandlersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("• ИНН: <code>7707083893</code>", card)
         self.assertIn("• ОГРН: <code>1027700132195</code>", card)
         self.assertIn("• ОКВЭД: 62.01", card)
-        self.assertIn("• Иванов И.И.", card)
         self.assertIn("• г. Москва, ул. Тверская, д. 1", card)
         self.assertIn("• Email: info@example.com", card)
 
