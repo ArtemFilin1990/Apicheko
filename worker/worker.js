@@ -15,7 +15,8 @@ const COMPANY_SECTION_TITLES = {
   lnk: "🔗 Связи",
   own: "👥 Учредители",
   fin: "📊 Финансы",
-  okv: "🏷 ОКВЭД"
+  okv: "🏷 ОКВЭД",
+  his: "📜 История"
 };
 
 class DadataServiceError extends Error {
@@ -173,6 +174,8 @@ async function buildCompanySectionView(env, section, id, page = 1) {
       return buildFinancesView(env, id);
     case "okv":
       return buildOkvedView(env, id);
+    case "his":
+      return buildHistoryView(env, id);
     default:
       return null;
   }
@@ -462,6 +465,74 @@ async function buildConnectionsView(env, query, page = 1) {
   };
 }
 
+async function buildHistoryView(env, query) {
+  const party = await findPartyByInnOrOgrn(env, query);
+  if (!party) throw new DadataNotFoundError();
+
+  const lines = ["📜 <b>История компании</b>", SECTION_DIVIDER, ""];
+
+  // Регистрация
+  const regDate = formatTimestamp(party?.state?.registration_date);
+  const ogrnDate = formatTimestamp(party?.ogrn_date);
+  if (regDate) lines.push(`📅 <b>Зарегистрирована:</b> <b>${escapeHtml(regDate)}</b>`);
+  if (ogrnDate && ogrnDate !== regDate) lines.push(`🏛 <b>ОГРН выдан:</b> ${escapeHtml(ogrnDate)}`);
+
+  // Ликвидация
+  const liqDate = formatTimestamp(party?.state?.liquidation_date);
+  if (liqDate) lines.push(`🔴 <b>Ликвидирована:</b> <b>${escapeHtml(liqDate)}</b>`);
+
+  // Актуальность данных
+  const actualDate = formatTimestamp(party?.state?.actuality_date);
+  if (actualDate) lines.push(`🔄 <b>Данные актуальны на:</b> ${escapeHtml(actualDate)}`);
+
+  lines.push("");
+
+  // Руководители (managers — полный список)
+  const managers = ensureArray(party?.managers);
+  if (managers.length) {
+    lines.push(`${BLOCK_DIVIDER}`, "<b>Руководители</b>");
+    for (const m of managers.slice(0, 5)) {
+      const mname = escapeHtml(firstNonEmpty([m?.name, (m?.fio || {})?.source, "—"]));
+      const mpost = m?.post ? `  <i>${escapeHtml(m.post)}</i>` : "";
+      const mdate = m?.start_date ? `  с ${formatTimestamp(m.start_date)}` : "";
+      lines.push(`• <b>${mname}</b>${mpost}${mdate}`);
+    }
+    lines.push("");
+  }
+
+  // Правопредшественники
+  const predecessors = ensureArray(party?.predecessors);
+  if (predecessors.length) {
+    lines.push(`${BLOCK_DIVIDER}`, "<b>Правопредшественники</b>");
+    for (const p of predecessors) {
+      lines.push(`• <b>${escapeHtml(p?.name || "—")}</b>  ИНН <code>${escapeHtml(p?.inn || "—")}</code>`);
+    }
+    lines.push("");
+  }
+
+  // Правопреемники
+  const successors = ensureArray(party?.successors);
+  if (successors.length) {
+    lines.push(`${BLOCK_DIVIDER}`, "<b>Правопреемники</b>");
+    for (const s of successors) {
+      lines.push(`• <b>${escapeHtml(s?.name || "—")}</b>  ИНН <code>${escapeHtml(s?.inn || "—")}</code>`);
+    }
+    lines.push("");
+  }
+
+  if (lines.length <= 4) {
+    lines.push("История изменений недоступна.");
+  }
+
+  // Ссылка на ЕГРЮЛ для полной истории
+  lines.push("", `<a href="https://egrul.nalog.ru/">📋 Полная история в ЕГРЮЛ ↗</a>`);
+
+  return {
+    text: lines.join("\n"),
+    reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "his")
+  };
+}
+
 async function buildLookupHistoryView(env, chatId) {
   if (!env.COMPANY_CACHE) {
     return {
@@ -505,7 +576,7 @@ function buildCompanyKeyboard(company, active = "main") {
     inline_keyboard: [
       [activeBtn("main", "Карточка", "🏢"), activeBtn("fin", "Финансы", "📊")],
       [activeBtn("own", "Учредители", "👥"), activeBtn("okv", "ОКВЭД", "🏷")],
-      [activeBtn("lnk", "Связи", "🔗"), { text: "📜 ФНС ↗", url: "https://egrul.nalog.ru/" }],
+      [activeBtn("lnk", "Связи", "🔗"), activeBtn("his", "История", "📜")],
       [kb("🏠 В меню", "menu")]
     ]
   };

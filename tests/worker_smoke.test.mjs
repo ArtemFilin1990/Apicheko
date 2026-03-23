@@ -138,7 +138,7 @@ test("10-digit INN opens compact DaData keyboard without successor button and wi
   assert.ok(callbacks.includes("co:fin:7707083893"));
   assert.ok(callbacks.includes("co:okv:7707083893"));
   assert.ok(!callbacks.includes("co:succ:7707083893"));
-  assert.ok(body.reply_markup.inline_keyboard.flat().some((button) => button.url === "https://egrul.nalog.ru/"));
+  assert.ok(callbacks.includes("co:his:7707083893"));
 });
 
 test("email lookup uses findByEmail/company and then opens the standard main card", async () => {
