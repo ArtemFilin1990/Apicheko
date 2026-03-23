@@ -3,7 +3,7 @@ import { calculateCompanyRiskScore, formatRiskResultForTelegram } from "./servic
 const DEFAULT_CHECKO_API_URL = "https://api.checko.ru/v2";
 const DEFAULT_WEBHOOK_PATH = "/webhook";
 const COMPANY_NOT_FOUND_MESSAGE = "❌ Компания не найдена";
-const CHECKO_SERVICE_ERROR_MESSAGE = "⚠️ Ошибка сервиса Checko";
+const CHECKO_SERVICE_ERROR_MESSAGE = "⚠️ Раздел временно недоступен";
 const SEARCH_MIN_QUERY_LENGTH = 4;
 const DEFAULT_DADATA_API_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs";
 const CACHE_TTL_COMPANY_SECONDS = 12 * 60 * 60;
@@ -247,9 +247,9 @@ function buildMainMenuView() {
       "",
       "Покажу главное:",
       "• статус компании",
+      "• риски и долги",
       "• связи и аффилированность",
-      "• финансовый контур",
-      "• учредителей и ОКВЭД",
+      "• финансовые сигналы",
       "",
       "👇 Отправьте ИНН одним сообщением",
       "• 10 цифр — компания",
@@ -265,7 +265,7 @@ function buildHelpView() {
       "💬 <b>Как пользоваться</b>",
       SECTION_DIVIDER,
       "",
-      "Отправьте ИНН, а бот соберёт короткую сводку по компании:",
+      "Отправьте ИНН, и бот соберёт краткую сводку по компании:",
       "• статус",
       "• риски",
       "• связи",
@@ -288,8 +288,8 @@ async function buildLookupHistoryView(env, chatId) {
         "📁 <b>История</b>",
         SECTION_DIVIDER,
         "",
-        "История временно недоступна.",
-        "Для сохранения истории подключите KV и повторите позже."
+        "История пока недоступна без хранилища.",
+        "Можно продолжить через новый поиск."
       ].join("\n"),
       reply_markup: buildGlobalReplyKeyboard()
     };
@@ -546,11 +546,6 @@ async function buildCompanyMainView(env, id) {
     `• Основной ОКВЭД: <b>${escapeHtml(String(primaryOkved))}</b>`,
     `• Правопреемник: <b>${escapeHtml(successorName)}</b>`,
     "",
-    "<b>Что проверить дальше</b>",
-    "• риски и долги перед сделкой",
-    "• судебную нагрузку компании",
-    "• сеть связанных организаций",
-    "• историю изменений и контрактов"
   ].filter(Boolean);
 
   return {
@@ -616,41 +611,59 @@ async function buildRiskView(env, id) {
 }
 
 async function buildFinancesView(env, id, page = 1) {
-  const partyState = await loadDadataPartyState(env, id);
-  if (partyState.state === "missing_config") {
-    return buildDadataMissingConfigView("📊 <b>Финансы</b>", id);
-  }
-  if (partyState.state === "unavailable") {
-    return buildDadataTemporaryUnavailableView("📊 <b>Финансы</b>", id);
+  if (!isCheckoConfigured(env)) {
+    return buildCheckoMissingConfigView("📊 <b>Финансы</b>", id);
   }
 
-  const finance = partyState.party?.finance;
-  if (!finance || typeof finance !== "object" || !hasVisibleFinanceData(finance, partyState.party?.employee_count)) {
+  let companyPayload;
+  let financesPayload;
+  try {
+    [companyPayload, financesPayload] = await Promise.all([
+      checkoRequest(env, "company", identifierParams(id)),
+      checkoRequest(env, "finances", identifierParams(id))
+    ]);
+  } catch (error) {
+    if (error instanceof CheckoServiceError) {
+      return buildCheckoTemporaryUnavailableView("📊 <b>Финансы</b>", id);
+    }
+    throw error;
+  }
+
+  const companyData = companyPayload.data || {};
+  const financeRows = financesPayload.data || {};
+  const latestYear = getYearsSorted(financeRows)[0] || null;
+  const latestRow = latestYear ? financeRows[latestYear] || {} : {};
+  const staff = firstNonEmpty([companyData.ЧислСотр, companyData.Численность, companyData.Сотрудники, "нет данных"]);
+  const salary = firstNonEmpty([companyData.ЗПСреднемес, companyData.СрЗП, companyData.СредЗП, "нет данных"]);
+  const taxMode = firstNonEmpty([companyData.НалРежим?.Наим, companyData.НалогРежим?.Наим, companyData.Налогообложение?.Наим, "нет данных"]);
+  const mspStatus = firstNonEmpty([companyData.РМСП?.Кат, companyData.МСП?.Кат, "нет данных"]);
+  const financeSourceState = latestYear ? `отчётность за ${latestYear}` : "нет данных";
+
+  if (!latestYear && staff === "нет данных" && salary === "нет данных" && taxMode === "нет данных" && mspStatus === "нет данных") {
     return {
       text: [
         "📊 <b>Финансы</b>",
         SECTION_DIVIDER,
         "",
-        "Финансовый контур не найден.",
-        "DaData не передал финансовые показатели по этой компании."
+        "Финансовые данные не найдены.",
+        "Источник не передал отчётность по этой компании."
       ].join("\n"),
       reply_markup: compactSectionKeyboard(id, "fin")
     };
   }
 
+  const financeBluf = buildCheckoFinanceBluf(latestRow, latestYear, staff);
   const lines = [
     "📊 <b>Финансы</b>",
     SECTION_DIVIDER,
     "",
-    escapeHtml(buildFinanceBluf(finance)),
+    escapeHtml(financeBluf),
     "",
-    `• Год: <b>${escapeHtml(formatOptionalYear(finance.year))}</b>`,
-    `• Доход: <b>${escapeHtml(formatOptionalMoney(finance.income))}</b>`,
-    `• Расход: <b>${escapeHtml(formatOptionalMoney(finance.expense))}</b>`,
-    `• Выручка: <b>${escapeHtml(formatOptionalMoney(finance.revenue))}</b>`,
-    `• Долг: <b>${escapeHtml(formatOptionalMoney(finance.debt))}</b>`,
-    `• Пени: <b>${escapeHtml(formatOptionalMoney(finance.penalty))}</b>`,
-    `• Штат: <b>${escapeHtml(formatOptionalNumber(partyState.party?.employee_count))}</b>`
+    `• Штат: <b>${escapeHtml(formatOptionalNumber(staff))}</b>`,
+    `• Средняя зарплата: <b>${escapeHtml(formatOptionalMoneyOrText(salary))}</b>`,
+    `• Спецрежим: <b>${escapeHtml(taxMode)}</b>`,
+    `• МСП: <b>${escapeHtml(mspStatus)}</b>`,
+    `• Источник отчётности: <b>${escapeHtml(financeSourceState)}</b>`
   ];
 
   return { text: lines.join("\n"), reply_markup: compactSectionKeyboard(id, "fin") };
@@ -1195,10 +1208,10 @@ async function sendHtmlMessage(env, chatId, view) {
 
 function buildCompanyKeyboard(id, env = {}, opts = {}) {
   const rows = [
-    [kb("🔗 Связи", `co:lnk:${id}`), kb("👥 Учредители", `co:own:${id}`)],
-    [kb("📊 Финансы", `co:fin:${id}`), kb("🏷 ОКВЭД", `co:okv:${id}`)],
-    [kb("🏢 Правопреемник", `co:succ:${id}`), kb("🏢 Карточка", `co:main:${id}`)],
-    [kb("🏠 Меню", "menu")]
+    [kb("⚖️ Риски", `co:risk:${id}`), kb("🏛 Суды", `co:arb:${id}`)],
+    [kb("🏦 Долги", `co:debt:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
+    [kb("📊 Финансы", `co:fin:${id}`), kb("📋 Контракты", `co:ctr:${id}`)],
+    [kb("🏢 Правопреемник", `co:succ:${id}`), kb("🗓 История", `co:his:${id}`)]
   ];
   return withPagerRow(rows, "main", id, opts.page, opts.totalPages);
 }
@@ -1268,7 +1281,7 @@ function compactSectionKeyboard(id, section = "main", page = 1, totalPages = 1) 
   }
   if (section === "fin") {
     rows = [
-      [kb("🏷 ОКВЭД", `co:okv:${id}`), kb("👥 Учредители", `co:own:${id}`)],
+      [kb("🏦 Долги", `co:debt:${id}`), kb("📋 Контракты", `co:ctr:${id}`)],
       [kb("🔙 В карточку", `co:main:${id}`)]
     ];
     return withPagerRow(rows, section, id, page, totalPages);
@@ -1289,7 +1302,7 @@ function compactSectionKeyboard(id, section = "main", page = 1, totalPages = 1) 
   }
   if (section === "succ") {
     rows = [
-      [kb("🔗 Связи", `co:lnk:${id}`), kb("👥 Учредители", `co:own:${id}`)],
+      [kb("🔗 Связи", `co:lnk:${id}`)],
       [kb("🔙 В карточку", `co:main:${id}`)]
     ];
     return { inline_keyboard: rows };
@@ -1316,10 +1329,10 @@ function compactSectionKeyboard(id, section = "main", page = 1, totalPages = 1) 
     return withPagerRow(rows, section, id, page, totalPages);
   }
   rows = [
-    [kb("🔗 Связи", `co:lnk:${id}`), kb("👥 Учредители", `co:own:${id}`)],
-    [kb("📊 Финансы", `co:fin:${id}`), kb("🏷 ОКВЭД", `co:okv:${id}`)],
-    [kb("🏢 Правопреемник", `co:succ:${id}`), kb("🏢 Карточка", `co:main:${id}`)],
-    [kb("🏠 Меню", "menu")]
+    [kb("⚖️ Риски", `co:risk:${id}`), kb("🏛 Суды", `co:arb:${id}`)],
+    [kb("🏦 Долги", `co:debt:${id}`), kb("🔗 Связи", `co:lnk:${id}`)],
+    [kb("📊 Финансы", `co:fin:${id}`), kb("📋 Контракты", `co:ctr:${id}`)],
+    [kb("🏢 Правопреемник", `co:succ:${id}`), kb("🗓 История", `co:his:${id}`)]
   ];
   return withPagerRow(rows, section, id, page, totalPages);
 }
@@ -1712,6 +1725,12 @@ function formatOptionalMoney(value) {
   return formatMoney(value);
 }
 
+function formatOptionalMoneyOrText(value) {
+  if (!hasText(value)) return "нет данных";
+  const normalized = String(value).trim();
+  return /^-?\d+([.,]\d+)?$/.test(normalized) ? formatMoney(normalized.replace(",", ".")) : normalized;
+}
+
 function formatOptionalNumber(value) {
   if (!hasText(value)) return "нет данных";
   return String(value);
@@ -2093,6 +2112,20 @@ function buildFinanceBluf(finance) {
   return "Финансовые показатели доступны частично: проверьте ключевые суммы ниже.";
 }
 
+function buildCheckoFinanceBluf(latestRow, latestYear, staff) {
+  const revenue = latestRow?.[2110];
+  if (latestYear && revenue !== undefined && revenue !== null && revenue !== "") {
+    return `Последняя отчётность доступна за ${latestYear} год, выручка ${formatMoney(revenue)}.`;
+  }
+  if (latestYear) {
+    return `Последняя отчётность доступна за ${latestYear} год.`;
+  }
+  if (staff !== "нет данных") {
+    return "Есть операционные сигналы по компании, но финансовая отчётность доступна частично.";
+  }
+  return "Финансовый профиль компании доступен частично.";
+}
+
 function formatOptionalYear(value) {
   const year = Number.parseInt(String(value || ""), 10);
   return Number.isFinite(year) && year > 0 ? String(year) : "нет данных";
@@ -2103,8 +2136,13 @@ function buildDadataMissingConfigView(title, id) {
     text: `${title}
 ${SECTION_DIVIDER}
 
-DaData не настроен.
-Попросите администратора добавить ключи и откройте раздел снова.`,
+Раздел временно недоступен.
+Источник данных не настроен.
+
+Что можно сделать:
+• попробовать позже
+• вернуться в карточку
+• открыть другой раздел`,
     reply_markup: compactSectionKeyboard(id)
   };
 }
@@ -2114,8 +2152,13 @@ function buildDadataTemporaryUnavailableView(title, id) {
     text: `${title}
 ${SECTION_DIVIDER}
 
-DaData временно недоступен.
-Попробуйте открыть раздел чуть позже.`,
+Раздел временно недоступен.
+Источник данных сейчас не отвечает.
+
+Что можно сделать:
+• попробовать позже
+• вернуться в карточку
+• открыть другой раздел`,
     reply_markup: compactSectionKeyboard(id)
   };
 }
