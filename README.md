@@ -20,7 +20,7 @@ Production runtime: **Cloudflare Worker** (`worker/worker.js`).
 - `POST /webhook` (или путь из `WEBHOOK_PATH`) — Telegram webhook.
 - Главный экран `/start` в формате «1 сообщение = 1 экран» и только с inline-навигацией.
 - Поиск компании по ИНН, ОГРН, ИНН/КПП и корпоративному email.
-- Главная карточка компании + контекстные DaData-экраны: `co:main`, `co:lnk`, `co:own`, `co:fin`, `co:okv`, `co:succ`.
+- В клавиатуре карточки доступны `co:main`, `co:lnk`, `co:own`, `co:okv` и динамический `co:fin`, а история изменений вынесена во внешнюю ссылку ФНС `https://egrul.nalog.ru/`.
 - Экран связей `co:lnk` строится по `findById/party` → INN руководителей/учредителей → максимум 5 вызовов `findAffiliated/party` → dedupe по ИНН → pager по 5 элементов.
 - Навигация по `editMessageText`, обработка callback через `answerCallbackQuery`.
 - История последних карточек через optional `COMPANY_CACHE`.
@@ -38,7 +38,6 @@ co:lnk:<id>
 co:own:<id>
 co:fin:<id>
 co:okv:<id>
-co:succ:<id>
 co:<section>:<id>:p:<page>   # pager для co:lnk
 ```
 
@@ -49,7 +48,6 @@ co:<section>:<id>:p:<page>   # pager для co:lnk
 - `co:own` → DaData `findById/party` (`founders`)
 - `co:fin` → DaData `findById/party` (`finance`)
 - `co:okv` → DaData `findById/party` (`okved`, `okveds`)
-- `co:succ` → DaData `findById/party` (`successors`)
 - company by email → DaData `findByEmail/company`
 
 ## Error-handling contract
@@ -95,7 +93,7 @@ KV работает в optional-режиме: без namespace deploy прохо
 
 - Поиск по email использует `POST /findByEmail/company`.
 - Главная карточка `co:main` использует `POST /findById/party`.
-- Экраны `co:own`, `co:fin`, `co:okv`, `co:succ` используют только блоки из `findById/party`.
+- Экраны `co:own`, `co:fin`, `co:okv` используют только блоки из `findById/party`.
 - Экран `co:lnk` использует только affiliations flow и не показывает выручку, телефоны, email или сайты для связей.
 - `/start` и карточка компании не используют ReplyKeyboardMarkup: навигация собрана на inline-кнопках.
 

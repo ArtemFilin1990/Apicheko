@@ -69,8 +69,14 @@ class PersonKeyboardTests(unittest.TestCase):
             btn.callback_data
             for row in markup.inline_keyboard
             for btn in row
+            if btn.callback_data
         ]
         self.assertIn("co:main:7707083893", callbacks_data)
+        self.assertNotIn("co:succ:7707083893", callbacks_data)
+        self.assertTrue(
+            any(btn.url == "https://egrul.nalog.ru/" for row in markup.inline_keyboard for btn in row),
+            "company keyboard must contain the FNS history URL button",
+        )
 
 
     def test_main_menu_contains_expected_actions(self) -> None:

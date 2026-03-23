@@ -14,8 +14,7 @@ const COMPANY_SECTION_TITLES = {
   lnk: "🔗 Связи",
   own: "👥 Учредители",
   fin: "📊 Финансы",
-  okv: "🏷 ОКВЭД",
-  succ: "🏢 Правопреемство"
+  okv: "🏷 ОКВЭД"
 };
 
 class DadataServiceError extends Error {
@@ -171,8 +170,6 @@ async function buildCompanySectionView(env, section, id, page = 1) {
       return buildFinancesView(env, id);
     case "okv":
       return buildOkvedView(env, id);
-    case "succ":
-      return buildSuccessorView(env, id);
     default:
       return null;
   }
@@ -190,7 +187,6 @@ function buildMainMenuView() {
       "• учредители",
       "• финансы",
       "• ОКВЭД",
-      "• правопреемство",
       "",
       "👇 Отправьте ИНН / ОГРН или корпоративный email"
     ].join("\n"),
@@ -282,7 +278,7 @@ async function buildCompanyMainView(env, query) {
       `Сотрудники: ${escapeHtml(firstNonEmpty([party?.employee_count, "—"]))}`,
       `ОКВЭД: ${escapeHtml(firstNonEmpty([party?.okved, "—"]))}`
     ].join("\n"),
-    reply_markup: buildCompanyKeyboard(id)
+    reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query))
   };
 }
 
@@ -305,7 +301,7 @@ async function buildFoundersView(env, query) {
     }
   }
 
-  return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(id, "own") };
+  return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "own") };
 }
 
 async function buildFinancesView(env, query) {
@@ -332,7 +328,7 @@ async function buildFinancesView(env, query) {
       `Задолженность: ${escapeHtml(formatMoney(debt))}`,
       `Пени и штрафы: ${escapeHtml(formatMoney(penalty))}`
     ].join("\n"),
-    reply_markup: buildCompanyKeyboard(id, "fin")
+    reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "fin")
   };
 }
 
@@ -351,29 +347,7 @@ async function buildOkvedView(env, query) {
     }
   }
 
-  return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(id, "okv") };
-}
-
-async function buildSuccessorView(env, query) {
-  const party = await findPartyByInnOrOgrn(env, query);
-  if (!party) throw new DadataNotFoundError();
-  const id = normalizedCompanyId(party, query);
-  const successors = ensureArray(party?.successors);
-  const lines = ["🏢 <b>Правопреемство</b>", SECTION_DIVIDER, ""];
-
-  if (!successors.length) {
-    lines.push("Данные о правопреемниках отсутствуют.");
-  } else {
-    for (const item of successors.slice(0, 10)) {
-      lines.push(
-        `• <b>${escapeHtml(firstNonEmpty([item?.name, item?.full_name, "—"]))}</b>`,
-        `  ИНН: <code>${escapeHtml(firstNonEmpty([item?.inn, "—"]))}</code>`,
-        `  ОГРН: <code>${escapeHtml(firstNonEmpty([item?.ogrn, "—"]))}</code>`
-      );
-    }
-  }
-
-  return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(id, "succ") };
+  return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "okv") };
 }
 
 async function buildConnectionsView(env, query, page = 1) {
@@ -385,7 +359,7 @@ async function buildConnectionsView(env, query, page = 1) {
   if (!sourceInns.length) {
     return {
       text: ["🔗 <b>Связи</b>", SECTION_DIVIDER, "", "У руководителей и учредителей нет ИНН для поиска аффилированности."].join("\n"),
-      reply_markup: buildCompanyKeyboard(id, "lnk")
+      reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "lnk")
     };
   }
 
@@ -411,7 +385,7 @@ async function buildConnectionsView(env, query, page = 1) {
 
   return {
     text: lines.join("\n"),
-    reply_markup: buildConnectionsKeyboard(id, currentPage, totalPages)
+    reply_markup: buildConnectionsKeyboard(buildCompanyContext(party, query), currentPage, totalPages)
   };
 }
 
@@ -449,24 +423,30 @@ function buildMainMenuKeyboard() {
   };
 }
 
-function buildCompanyKeyboard(id, active = "main") {
+function buildCompanyKeyboard(company, active = "main") {
+  const id = normalizedCompanyId(company);
   const rows = [
-    [kb(active === "main" ? "• Карточка" : "🏢 Карточка", `co:main:${id}`), kb(active === "lnk" ? "• Связи" : "🔗 Связи", `co:lnk:${id}`)],
-    [kb(active === "own" ? "• Учредители" : "👥 Учредители", `co:own:${id}`), kb(active === "fin" ? "• Финансы" : "📊 Финансы", `co:fin:${id}`)],
-    [kb(active === "okv" ? "• ОКВЭД" : "🏷 ОКВЭД", `co:okv:${id}`), kb(active === "succ" ? "• Правопреемство" : "🏢 Правопреемство", `co:succ:${id}`)],
-    [kb("🏠 В меню", "menu")]
+    [kb(active === "main" ? "• Скоринг" : "⚖️ Скоринг", `co:main:${id}`), kb(active === "lnk" ? "• Связи" : "🔗 Связи", `co:lnk:${id}`)],
+    [kb(active === "own" ? "• Учредители" : "👥 Учредители", `co:own:${id}`), kb(active === "okv" ? "• ОКВЭД" : "🏷 ОКВЭД", `co:okv:${id}`)]
   ];
+
+  if (companyHasFinance(company)) {
+    rows.push([kb(active === "fin" ? "• Финансы" : "📊 Финансы", `co:fin:${id}`)]);
+  }
+
+  rows.push([{ text: "📜 История (ФНС)", url: "https://egrul.nalog.ru/" }]);
   return { inline_keyboard: rows };
 }
 
-function buildConnectionsKeyboard(id, page, totalPages) {
-  const keyboard = [...buildCompanyKeyboard(id, "lnk").inline_keyboard];
+function buildConnectionsKeyboard(company, page, totalPages) {
+  const id = normalizedCompanyId(company);
+  const keyboard = [...buildCompanyKeyboard(company, "lnk").inline_keyboard];
   if (totalPages > 1) {
     const pager = [];
     if (page > 1) pager.push(kb("⬅️ Назад", `co:lnk:${id}:p:${page - 1}`));
     pager.push(kb(`${page}/${totalPages}`, "noop"));
     if (page < totalPages) pager.push(kb("➡️ Далее", `co:lnk:${id}:p:${page + 1}`));
-    keyboard.splice(3, 0, pager);
+    keyboard.splice(companyHasFinance(company) ? 2 : 2, 0, pager);
   }
   return { inline_keyboard: keyboard };
 }
@@ -708,6 +688,19 @@ function formatShare(share) {
   if (share.value !== undefined && share.type) return `${share.value} ${share.type}`;
   if (share.value !== undefined) return String(share.value);
   return "—";
+}
+
+function buildCompanyContext(party, fallback) {
+  return {
+    inn: normalizedCompanyId(party, fallback),
+    finance: party?.finance || null,
+    authorized_capital: party?.authorized_capital ?? party?.capital?.value ?? null
+  };
+}
+
+function companyHasFinance(company) {
+  const revenue = company?.finance?.revenue ?? company?.finance?.income ?? null;
+  return revenue !== null && revenue !== undefined && revenue !== "" || Boolean(company?.authorized_capital);
 }
 
 function normalizedCompanyId(party, fallback) {

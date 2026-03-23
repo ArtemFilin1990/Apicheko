@@ -100,7 +100,7 @@ test("/start shows DaData-only menu and removes legacy search buttons", async ()
   assert.ok(!callbacks.includes("search:bic"));
 });
 
-test("10-digit INN opens DaData-only card and supported section buttons", async () => {
+test("10-digit INN opens compact DaData keyboard without successor button and with FNS history link", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const u = new URL(String(url));
@@ -117,6 +117,7 @@ test("10-digit INN opens DaData-only card and supported section buttons", async 
             management: { name: "Иванов И.И." },
             address: { value: "г Москва, ул Тверская, д 1" },
             capital: { value: 10000 },
+            authorized_capital: 10000,
             employee_count: 12,
             okved: "62.01"
           }
@@ -136,12 +137,8 @@ test("10-digit INN opens DaData-only card and supported section buttons", async 
   assert.ok(callbacks.includes("co:own:7707083893"));
   assert.ok(callbacks.includes("co:fin:7707083893"));
   assert.ok(callbacks.includes("co:okv:7707083893"));
-  assert.ok(callbacks.includes("co:succ:7707083893"));
-  assert.ok(!callbacks.includes("co:arb:7707083893"));
-  assert.ok(!callbacks.includes("co:debt:7707083893"));
-  assert.ok(!callbacks.includes("co:ctr:7707083893"));
-  assert.ok(!callbacks.includes("co:his:7707083893"));
-  assert.ok(!callbacks.includes("co:tax:7707083893"));
+  assert.ok(!callbacks.includes("co:succ:7707083893"));
+  assert.ok(body.reply_markup.inline_keyboard.flat().some((button) => button.url === "https://egrul.nalog.ru/"));
 });
 
 test("email lookup uses findByEmail/company and then opens the standard main card", async () => {
