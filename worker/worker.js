@@ -178,21 +178,7 @@ async function buildCompanySectionView(env, section, id, page = 1) {
 function buildMainMenuView() {
   return {
     text: [
-      "✨ <b>EvaCore — экспресс-проверка компании через DaData</b>",
-      SECTION_DIVIDER,
-      "",
-      "🚀 <b>Что можно открыть за 1 тап:</b>",
-      "• 🏢 карточку компании",
-      "• 🔗 связи и аффилированность",
-      "• 👥 учредителей",
-      "• 📊 финансы",
-      "• 🏷 ОКВЭД",
-      "",
-      "🧭 <b>Как начать:</b>",
-      "• отправьте ИНН компании или ОГРН",
-      "• либо пришлите корпоративный email",
-      "",
-      "💡 Пример: <code>7707083893</code>"
+
     ].join("\n"),
     reply_markup: buildMainMenuKeyboard()
   };
@@ -204,12 +190,7 @@ function buildHelpView() {
       "ℹ️ <b>Как пользоваться ботом</b>",
       SECTION_DIVIDER,
       "",
-      "1. 🔎 Отправьте ИНН / ОГРН компании.",
-      "2. ✉️ Или пришлите корпоративный email.",
-      "3. 👆 Откройте нужный раздел кнопками под карточкой.",
-      "",
-      "⚡ Каждый экран отвечает на один вопрос без лишнего шума.",
-      "🔒 В меню доступны только актуальные DaData-разделы."
+
     ].join("\n"),
     reply_markup: buildMainMenuKeyboard()
   };
@@ -278,14 +259,16 @@ async function buildCompanyMainView(env, query) {
       `🏢 <b>${escapeHtml(firstNonEmpty([party?.name?.short_with_opf, party?.name?.full_with_opf, "Компания"]))}</b>`,
       SECTION_DIVIDER,
       "",
-      `ИНН: <code>${escapeHtml(firstNonEmpty([party?.inn, "—"]))}</code>`,
-      `ОГРН: <code>${escapeHtml(firstNonEmpty([party?.ogrn, "—"]))}</code>`,
-      `Статус: <b>${escapeHtml(readablePartyStatus(party?.state?.status))}</b>`,
-      `Руководитель: ${escapeHtml(firstNonEmpty([party?.management?.name, "—"]))}`,
-      `Адрес: ${escapeHtml(firstNonEmpty([party?.address?.value, "—"]))}`,
-      `Капитал: ${escapeHtml(formatMoney(party?.capital?.value))}`,
-      `Сотрудники: ${escapeHtml(firstNonEmpty([party?.employee_count, "—"]))}`,
-      `ОКВЭД: ${escapeHtml(firstNonEmpty([party?.okved, "—"]))}`
+      `🪪 ИНН: <code>${escapeHtml(firstNonEmpty([party?.inn, "—"]))}</code>`,
+      `🏛 ОГРН: <code>${escapeHtml(firstNonEmpty([party?.ogrn, "—"]))}</code>`,
+      `📌 Статус: <b>${escapeHtml(readablePartyStatus(party?.state?.status))}</b>`,
+      `👤 Руководитель: ${escapeHtml(firstNonEmpty([party?.management?.name, "—"]))}`,
+      `📍 Адрес: ${escapeHtml(firstNonEmpty([party?.address?.value, "—"]))}`,
+      `💼 Капитал: ${escapeHtml(formatMoney(party?.capital?.value))}`,
+      `👥 Сотрудники: ${escapeHtml(firstNonEmpty([party?.employee_count, "—"]))}`,
+      `🏷 ОКВЭД: ${escapeHtml(firstNonEmpty([party?.okved, "—"]))}`,
+      "",
+      "✨ Ниже можно открыть нужный раздел карточки."
     ].join("\n"),
     reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query))
   };
@@ -426,8 +409,7 @@ async function buildLookupHistoryView(env, chatId) {
 function buildMainMenuKeyboard() {
   return {
     inline_keyboard: [
-      [kb("🚀 ИНН / ОГРН", "search:inn"), kb("📨 Email", "search:email")],
-      [kb("🪄 Как это работает", "help")]
+
     ]
   };
 }
