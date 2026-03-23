@@ -178,19 +178,7 @@ async function buildCompanySectionView(env, section, id, page = 1) {
 function buildMainMenuView() {
   return {
     text: [
-      "👋 <b>EvaCore: быстрая проверка компании через DaData</b>",
-      SECTION_DIVIDER,
-      "",
-      "⚡ <b>За один экран</b> покажу главное по компании:",
-      "• 🏢 карточку и статус",
-      "• 🔗 связи и 👥 учредителей",
-      "• 📊 финансы и 🏷 ОКВЭД",
-      "",
-      "🧭 <b>Как начать:</b>",
-      "• отправьте ИНН / ОГРН",
-      "• или корпоративный email",
-      "",
-      "✨ Выберите сценарий ниже или просто пришлите реквизит сообщением."
+
     ].join("\n"),
     reply_markup: buildMainMenuKeyboard()
   };
@@ -199,14 +187,10 @@ function buildMainMenuView() {
 function buildHelpView() {
   return {
     text: [
-      "ℹ️ <b>Как пользоваться</b>",
+      "ℹ️ <b>Как пользоваться ботом</b>",
       SECTION_DIVIDER,
       "",
-      "1. 🔎 Отправьте ИНН, ОГРН или ИНН/КПП.",
-      "2. ✉️ Либо пришлите корпоративный email.",
-      "3. 🧩 Открывайте нужный раздел кнопками под карточкой.",
-      "",
-      "💡 Каждый экран отвечает на один вопрос и не перегружает деталями."
+
     ].join("\n"),
     reply_markup: buildMainMenuKeyboard()
   };
@@ -218,10 +202,12 @@ function buildSearchInnView() {
       "🔎 <b>Поиск по ИНН / ОГРН</b>",
       SECTION_DIVIDER,
       "",
-      "Отправьте:",
-      "• ИНН компании — 10 цифр",
-      "• ОГРН — 13 цифр",
-      "• ИНН/КПП — через слеш"
+      "Отправьте один из форматов:",
+      "• 🧾 ИНН компании — 10 цифр",
+      "• 🏛 ОГРН — 13 цифр",
+      "• 🧩 ИНН/КПП — через слеш",
+      "",
+      "⚡ После ответа сразу откроется карточка и разделы проверки."
     ].join("\n"),
     reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
   };
@@ -234,7 +220,9 @@ function buildSearchEmailView() {
       SECTION_DIVIDER,
       "",
       "Отправьте корпоративный email, например:",
-      "<code>info@company.ru</code>"
+      "<code>info@company.ru</code>",
+      "",
+      "📨 Бот найдёт компанию и откроет основную карточку."
     ].join("\n"),
     reply_markup: { inline_keyboard: [[kb("🏠 В меню", "menu")]] }
   };
@@ -421,8 +409,7 @@ async function buildLookupHistoryView(env, chatId) {
 function buildMainMenuKeyboard() {
   return {
     inline_keyboard: [
-      [kb("🔎 ИНН / ОГРН", "search:inn"), kb("✉️ Email", "search:email")],
-      [kb("ℹ️ Как это работает", "help")]
+
     ]
   };
 }
@@ -438,7 +425,7 @@ function buildCompanyKeyboard(company, active = "main") {
     rows.push([kb(active === "fin" ? "✨ Финансы" : "📊 Финансы", `co:fin:${id}`)]);
   }
 
-  rows.push([{ text: "📜 История (ФНС)", url: "https://egrul.nalog.ru/" }]);
+  rows.push([{ text: "📜 История в ФНС ↗", url: "https://egrul.nalog.ru/" }]);
   return { inline_keyboard: rows };
 }
 
