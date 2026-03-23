@@ -873,13 +873,13 @@ async function buildCompanySectionView(env, section, id, page = 1) {
     case "lnk":
       return buildConnectionsView(env, id, page);
     case "own":
-      return buildFoundersView(env, id);
+      return buildFoundersView(env, id, page);
     case "fin":
-      return buildFinancesView(env, id);
+      return buildFinancesView(env, id, page);
     case "okv":
-      return buildOkvedView(env, id);
+      return buildOkvedView(env, id, page);
     case "his":
-      return buildHistoryView(env, id);
+      return buildHistoryView(env, id, page);
     case "scr":
       return buildScoringView(env, id);
     default:
@@ -1074,7 +1074,7 @@ async function buildCompanyMainView(env, query) {
   };
 }
 
-async function buildFoundersView(env, query) {
+async function buildFoundersView(env, query, page = 1) {
   const party = await findPartyByInnOrOgrn(env, query);
   if (!party) throw new DadataNotFoundError();
   const id = normalizedCompanyId(party, query);
@@ -1083,37 +1083,39 @@ async function buildFoundersView(env, query) {
 
   if (!founders.length) {
     lines.push("Учредители не найдены.");
-  } else {
-    lines.push("<b>Актуальные учредители</b>");
-    lines.push("");
-    for (const [i, founder] of founders.slice(0, 10).entries()) {
-      const fname = escapeHtml(firstNonEmpty([founder?.name, (founder?.fio || {})?.source, "—"]));
-      const finn = escapeHtml(firstNonEmpty([founder?.inn, "—"]));
-      const ftype = founder?.type === "PHYSICAL" ? "👤" : "🏢";
-      const invalidMark = founder?.invalidity ? "  ⚠️ <i>Сведения недостоверны</i>" : "";
-
-      // Доля: рублями + процент
-      let shareStr = "—";
-      if (founder?.share) {
-        const s = founder.share;
-        if (s.value !== undefined) {
-          const pct = s.type?.replace("PERCENT", "%") || "";
-          shareStr = `${s.value} ${pct}`.trim();
-        }
-      }
-      // Доля в рублях из capital
-      const shareRub = founder?.capital_rub || founder?.share?.nominal_value;
-
-      lines.push(`${ftype} <b>${fname}</b>${invalidMark}`);
-      if (finn !== "—") lines.push(`   ИНН: <code>${finn}</code>`);
-      lines.push(`   Доля: <b>${escapeHtml(shareStr)}</b>` + (shareRub ? `  (${escapeHtml(formatMoney(shareRub))})` : ""));
-      if (i < founders.slice(0, 10).length - 1) lines.push("");
-    }
-    if (founders.length > 10) lines.push(`<i>…и ещё ${founders.length - 10}</i>`);
+    return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "own") };
   }
 
-  // Кнопки для учредителей-юрлиц (по ИНН)
-  const founderButtons = founders.slice(0, 10)
+  const totalPages = Math.max(1, Math.ceil(founders.length / PAGE_SIZE));
+  const currentPage = clampPage(page, totalPages);
+  const slice = founders.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  lines.push(`<b>Учредители</b>  <i>(${founders.length})</i>`);
+  lines.push("");
+  for (const [i, founder] of slice.entries()) {
+    const fname = escapeHtml(firstNonEmpty([founder?.name, (founder?.fio || {})?.source, "—"]));
+    const finn = escapeHtml(firstNonEmpty([founder?.inn, "—"]));
+    const ftype = founder?.type === "PHYSICAL" ? "👤" : "🏢";
+    const invalidMark = founder?.invalidity ? "  ⚠️ <i>Сведения недостоверны</i>" : "";
+
+    let shareStr = "—";
+    if (founder?.share) {
+      const s = founder.share;
+      if (s.value !== undefined) {
+        const pct = s.type?.replace("PERCENT", "%") || "";
+        shareStr = `${s.value} ${pct}`.trim();
+      }
+    }
+    const shareRub = founder?.capital_rub || founder?.share?.nominal_value;
+
+    lines.push(`${ftype} <b>${fname}</b>${invalidMark}`);
+    if (finn !== "—") lines.push(`   ИНН: <code>${finn}</code>`);
+    lines.push(`   Доля: <b>${escapeHtml(shareStr)}</b>` + (shareRub ? `  (${escapeHtml(formatMoney(shareRub))})` : ""));
+    if (i < slice.length - 1) lines.push("");
+  }
+
+  // Кнопки для учредителей-юрлиц на текущей странице
+  const founderButtons = slice
     .filter(f => f?.inn && /^\d{10}$/.test(String(f.inn)))
     .map(f => {
       const fname = firstNonEmpty([f?.name, "—"]);
@@ -1121,15 +1123,14 @@ async function buildFoundersView(env, query) {
       return [kb(`🏢 ${shortLabel}`, `select:company:${f.inn}`)];
     });
 
-  const baseKb = buildCompanyKeyboard(buildCompanyContext(party, query), "own");
-  const finalKb = {
-    inline_keyboard: [...founderButtons, ...baseKb.inline_keyboard]
+  const baseKb = buildSectionKeyboard(buildCompanyContext(party, query), "own", currentPage, totalPages);
+  return {
+    text: lines.join("\n"),
+    reply_markup: { inline_keyboard: [...founderButtons, ...baseKb.inline_keyboard] }
   };
-
-  return { text: lines.join("\n"), reply_markup: finalKb };
 }
 
-async function buildFinancesView(env, query) {
+async function buildFinancesView(env, query, page = 1) {
   const party = await findPartyByInnOrOgrn(env, query);
   if (!party) throw new DadataNotFoundError();
   const id = normalizedCompanyId(party, query);
@@ -1186,13 +1187,14 @@ async function buildFinancesView(env, query) {
     finLines.push(`🔴 <b>Пени и штрафы:</b> <b>${escapeHtml(formatMoney(penaltyAmt))}</b>`);
   }
 
+  // DaData возвращает один год; пагинация готова для будущего расширения
   return {
     text: finLines.join("\n"),
-    reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "fin")
+    reply_markup: buildSectionKeyboard(buildCompanyContext(party, query), "fin", 1, 1)
   };
 }
 
-async function buildOkvedView(env, query) {
+async function buildOkvedView(env, query, page = 1) {
   const party = await findPartyByInnOrOgrn(env, query);
   if (!party) throw new DadataNotFoundError();
   const id = normalizedCompanyId(party, query);
@@ -1201,24 +1203,42 @@ async function buildOkvedView(env, query) {
   const extraOkveds = okveds.filter(o => !o?.main);
   const lines = ["🏷 <b>ОКВЭД</b>", SECTION_DIVIDER, ""];
 
-  lines.push("<b>Основной:</b>");
-  if (mainOkved) {
-    lines.push(`• <b>${escapeHtml(mainOkved.code || party?.okved || "—")}</b>  <i>${escapeHtml(mainOkved.name || "")}</i>`);
-  } else {
-    lines.push(`• <b>${escapeHtml(firstNonEmpty([party?.okved, "—"]))}</b>`);
-  }
+  // Стр.1 = основной + первые 4 доп.; стр.2+ = по 5 доп.
+  const PG = PAGE_SIZE;
+  const totalExtra = extraOkveds.length;
+  // Стр.1: основной + до 4 доп; стр.2+: по 5 доп
+  const page1Extra = extraOkveds.slice(0, PG - 1);
+  const restExtra = extraOkveds.slice(PG - 1);
+  const restPages = Math.ceil(restExtra.length / PG);
+  const totalPages = 1 + restPages;
+  const currentPage = clampPage(page, totalPages);
 
-  if (extraOkveds.length) {
-    lines.push("", `<b>Дополнительные</b> (${extraOkveds.length}):`);
-    for (const item of extraOkveds.slice(0, 15)) {
-      const code = escapeHtml(item?.code || "—");
-      const name = item?.name ? `  <i>${escapeHtml(item.name)}</i>` : "";
-      lines.push(`• ${code}${name}`);
+  if (currentPage === 1) {
+    lines.push("<b>Основной:</b>");
+    if (mainOkved) {
+      lines.push(`• <b>${escapeHtml(mainOkved.code || party?.okved || "—")}</b>  <i>${escapeHtml(mainOkved.name || "")}</i>`);
+    } else {
+      lines.push(`• <b>${escapeHtml(firstNonEmpty([party?.okved, "—"]))}</b>`);
     }
-    if (extraOkveds.length > 15) lines.push(`<i>…и ещё ${extraOkveds.length - 15}</i>`);
+    if (page1Extra.length) {
+      lines.push("", `<b>Дополнительные</b> (${totalExtra}):`);
+      for (const item of page1Extra) {
+        lines.push(`• <b>${escapeHtml(item?.code || "—")}</b>  <i>${escapeHtml(item?.name || "")}</i>`);
+      }
+    }
+  } else {
+    const startIdx = (currentPage - 2) * PG;
+    const pageSlice = restExtra.slice(startIdx, startIdx + PG);
+    lines.push(`<b>Дополнительные</b> (${totalExtra}):`);
+    for (const item of pageSlice) {
+      lines.push(`• <b>${escapeHtml(item?.code || "—")}</b>  <i>${escapeHtml(item?.name || "")}</i>`);
+    }
   }
 
-  return { text: lines.join("\n"), reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "okv") };
+  return {
+    text: lines.join("\n"),
+    reply_markup: buildSectionKeyboard(buildCompanyContext(party, query), "okv", currentPage, totalPages)
+  };
 }
 
 async function buildConnectionsView(env, query, page = 1) {
@@ -1410,7 +1430,7 @@ async function buildScoringView(env, query) {
   };
 }
 
-async function buildHistoryView(env, query) {
+async function buildHistoryView(env, query, page = 1) {
   const party = await findPartyByInnOrOgrn(env, query);
   if (!party) throw new DadataNotFoundError();
 
@@ -1432,49 +1452,50 @@ async function buildHistoryView(env, query) {
 
   lines.push("");
 
-  // Руководители (managers — полный список)
+  // Собираем все элементы истории в единый список для пагинации
   const managers = ensureArray(party?.managers);
-  if (managers.length) {
-    lines.push(`${BLOCK_DIVIDER}`, "<b>Руководители</b>");
-    for (const m of managers.slice(0, 5)) {
-      const mname = escapeHtml(firstNonEmpty([m?.name, (m?.fio || {})?.source, "—"]));
-      const mpost = m?.post ? `  <i>${escapeHtml(m.post)}</i>` : "";
-      const mdate = m?.start_date ? `  с ${formatTimestamp(m.start_date)}` : "";
-      lines.push(`• <b>${mname}</b>${mpost}${mdate}`);
-    }
-    lines.push("");
-  }
-
-  // Правопредшественники
   const predecessors = ensureArray(party?.predecessors);
-  if (predecessors.length) {
-    lines.push(`${BLOCK_DIVIDER}`, "<b>Правопредшественники</b>");
-    for (const p of predecessors) {
-      lines.push(`• <b>${escapeHtml(p?.name || "—")}</b>  ИНН <code>${escapeHtml(p?.inn || "—")}</code>`);
-    }
-    lines.push("");
-  }
-
-  // Правопреемники
   const successors = ensureArray(party?.successors);
-  if (successors.length) {
-    lines.push(`${BLOCK_DIVIDER}`, "<b>Правопреемники</b>");
-    for (const s of successors) {
-      lines.push(`• <b>${escapeHtml(s?.name || "—")}</b>  ИНН <code>${escapeHtml(s?.inn || "—")}</code>`);
-    }
-    lines.push("");
-  }
 
-  if (lines.length <= 4) {
+  // Каждый элемент = { type, data }
+  const allItems = [
+    ...managers.map(m => ({ type: "manager", data: m })),
+    ...predecessors.map(p => ({ type: "predecessor", data: p })),
+    ...successors.map(s => ({ type: "successor", data: s })),
+  ];
+
+  const totalPages = Math.max(1, Math.ceil(allItems.length / PAGE_SIZE));
+  const currentPage = clampPage(page, totalPages);
+  const slice = allItems.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  if (!slice.length && allItems.length === 0) {
     lines.push("История изменений недоступна.");
+  } else {
+    for (const [i, entry] of slice.entries()) {
+      const { type, data } = entry;
+      if (type === "manager") {
+        const mname = escapeHtml(firstNonEmpty([data?.name, (data?.fio || {})?.source, "—"]));
+        const mpost = data?.post ? `  <i>${escapeHtml(data.post)}</i>` : "";
+        const mdate = data?.start_date ? `  с ${escapeHtml(formatTimestamp(data.start_date))}` : "";
+        const invalid = data?.invalidity ? "  ⚠️ <i>недостоверный</i>" : "";
+        lines.push(`👤 <b>${mname}</b>${mpost}${mdate}${invalid}`);
+      } else if (type === "predecessor") {
+        lines.push(`◀ <b>Предшественник:</b> ${escapeHtml(data?.name || "—")}`);
+        if (data?.inn) lines.push(`   ИНН: <code>${escapeHtml(data.inn)}</code>`);
+      } else if (type === "successor") {
+        lines.push(`▶ <b>Правопреемник:</b> ${escapeHtml(data?.name || "—")}`);
+        if (data?.inn) lines.push(`   ИНН: <code>${escapeHtml(data.inn)}</code>`);
+      }
+      if (i < slice.length - 1) lines.push("");
+    }
   }
 
-  // Ссылка на ЕГРЮЛ для полной истории
+  // Ссылка на ЕГРЮЛ
   lines.push("", `<a href="https://egrul.nalog.ru/">📋 Полная история в ЕГРЮЛ ↗</a>`);
 
   return {
     text: lines.join("\n"),
-    reply_markup: buildCompanyKeyboard(buildCompanyContext(party, query), "his")
+    reply_markup: buildSectionKeyboard(buildCompanyContext(party, query), "his", currentPage, totalPages)
   };
 }
 
@@ -1534,6 +1555,23 @@ function buildCompanyKeyboard(company, active = "main") {
   }
 
   rows.push([kb("🏠 В меню", "menu")]);
+  return { inline_keyboard: rows };
+}
+
+// Универсальная клавиатура с пагинацией контента для любой секции
+function buildSectionKeyboard(company, active, page, totalPages) {
+  const id = normalizedCompanyId(company);
+  const base = buildCompanyKeyboard(company, active);
+  if (totalPages <= 1) return base;
+
+  const pager = [];
+  if (page > 1) pager.push(kb("⬅️", `co:${active}:${id}:p:${page - 1}`));
+  pager.push(kb(`${page} / ${totalPages}`, "noop"));
+  if (page < totalPages) pager.push(kb("➡️", `co:${active}:${id}:p:${page + 1}`));
+
+  // Вставить pager перед последней строкой (В меню)
+  const rows = [...base.inline_keyboard];
+  rows.splice(rows.length - 1, 0, pager);
   return { inline_keyboard: rows };
 }
 
