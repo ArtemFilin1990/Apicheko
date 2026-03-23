@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import html
-from datetime import date, datetime
-from typing import Any
+
 
 from dadata import CompanyData
 
@@ -36,7 +35,7 @@ def _nested(d: dict, *keys: str) -> Any:
 
 
 def build_main_card(company: CompanyData) -> str:
-    def _get(obj: Any, *paths: str) -> Any:
+
         for path in paths:
             current = obj
             ok = True
@@ -52,14 +51,14 @@ def build_main_card(company: CompanyData) -> str:
                 return current
         return None
 
-    def _as_list(value: Any) -> list[Any]:
+
         if value is None:
             return []
         if isinstance(value, (list, tuple, set)):
             return list(value)
         return [value]
 
-    def _first_contact(value: Any) -> str | None:
+
         for item in _as_list(value):
             if isinstance(item, dict):
                 candidate = item.get("value") or item.get("unrestricted_value") or item.get("data")
@@ -69,7 +68,7 @@ def build_main_card(company: CompanyData) -> str:
                 return str(candidate).strip()
         return None
 
-    def _clean(value: Any) -> Any:
+
         if value is None:
             return None
         if isinstance(value, str):
@@ -79,11 +78,7 @@ def build_main_card(company: CompanyData) -> str:
             return value
         return value
 
-    def _escape(value: Any) -> str | None:
-        value = _clean(value)
-        return html.escape(str(value)) if value is not None else None
 
-    def _format_int(value: Any) -> str | None:
         value = _clean(value)
         if value is None:
             return None
@@ -93,7 +88,7 @@ def build_main_card(company: CompanyData) -> str:
             return None
         return f"{number:,}".replace(",", " ")
 
-    def _format_date(value: Any) -> str | None:
+
         value = _clean(value)
         if value is None:
             return None
@@ -116,13 +111,7 @@ def build_main_card(company: CompanyData) -> str:
         if not raw:
             return None
 
-        for fmt in (
-            "%Y-%m-%d",
-            "%Y-%m-%dT%H:%M:%S",
-            "%Y-%m-%dT%H:%M:%S.%f",
-            "%d.%m.%Y",
-            "%Y/%m/%d",
-        ):
+
             try:
                 return datetime.strptime(raw[:26], fmt).strftime("%d.%m.%Y")
             except Exception:
@@ -133,7 +122,7 @@ def build_main_card(company: CompanyData) -> str:
         except Exception:
             return None
 
-    def _add_block(lines: list[str], title: str, block_lines: list[str]) -> None:
+
         visible = [line for line in block_lines if line]
         if not visible:
             return
@@ -143,14 +132,7 @@ def build_main_card(company: CompanyData) -> str:
         lines.extend(visible)
 
     company_name = _escape(
-        _get(
-            company,
-            "name.short_with_opf",
-            "name.full_with_opf",
-            "short_name",
-            "full_name",
-            "name",
-        )
+
     ) or "Компания"
 
     status_raw = str(_clean(_get(company, "status", "state.status")) or "").upper()
@@ -163,14 +145,7 @@ def build_main_card(company: CompanyData) -> str:
     else:
         status_text = "⚪ Неизвестно"
 
-    registration_date = _format_date(
-        _get(
-            company,
-            "registration_date",
-            "state.registration_date",
-            "state.registration_date_ts",
-        )
-    )
+
     status_line = status_text + (f" (с {registration_date})" if registration_date else "")
 
     inn = _escape(_get(company, "inn"))
@@ -188,10 +163,7 @@ def build_main_card(company: CompanyData) -> str:
     else:
         okved = None
 
-    director_name = _escape(_get(company, "director_name", "management.name", "management.fio", "manager"))
-    director_post = _escape(_get(company, "director_post", "management.post", "management.position"))
 
-    capital = _format_int(_get(company, "capital", "capital.value"))
     if capital == "0":
         capital = None
 
@@ -201,19 +173,13 @@ def build_main_card(company: CompanyData) -> str:
     email = _escape(_first_contact(_get(company, "email", "emails")))
     phone = _escape(_first_contact(_get(company, "phone", "phones")))
 
-    lines: list[str] = [
-        f"🏢 <b>{company_name}</b>",
-        "──────────────────",
-        status_line,
-    ]
 
-    requisites: list[str] = []
     if inn or kpp:
         if inn and kpp:
             requisites.append(f"• ИНН / КПП: <code>{inn}</code> / <code>{kpp}</code>")
         elif inn:
             requisites.append(f"• ИНН: <code>{inn}</code>")
-        elif kpp:
+
             requisites.append(f"• КПП: <code>{kpp}</code>")
     if ogrn:
         requisites.append(f"• ОГРН: <code>{ogrn}</code>")
@@ -221,7 +187,7 @@ def build_main_card(company: CompanyData) -> str:
         requisites.append(f"• ОКВЭД: {okved}")
     _add_block(lines, "[ ⚖️ ] Реквизиты", requisites)
 
-    management_block: list[str] = []
+
     if director_name:
         management_line = f"• {director_name}"
         if director_post:
@@ -233,12 +199,12 @@ def build_main_card(company: CompanyData) -> str:
         management_block.append(f"• Штат: {employees} сотрудников")
     _add_block(lines, "[ 👥 ] Управление и Капитал", management_block)
 
-    revenue_block: list[str] = []
+
     if revenue:
         revenue_block.append(f"• По данным ФНС: <b>{revenue} ₽</b>")
     _add_block(lines, "[ 💰 ] Выручка", revenue_block)
 
-    contacts_block: list[str] = []
+
     if address:
         contacts_block.append(f"• {address}")
     if email:
