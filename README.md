@@ -122,6 +122,58 @@ python -m pip install -e .
 dadata-enrichment
 ```
 
+## Production operations
+
+### Команды
+
+- **Health check**
+
+```bash
+curl -i "$WORKER_URL/"
+```
+
+Ожидается HTTP `200`.
+
+- **Webhook check (Telegram getWebhookInfo)**
+
+```bash
+curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo"
+```
+
+- **Логи Worker**
+
+```bash
+npx wrangler tail
+```
+
+- **Redeploy**
+
+```bash
+npx wrangler deploy
+```
+
+- **Rollback (предыдущий стабильный commit)**
+
+```bash
+git checkout <PREVIOUS_STABLE_COMMIT>
+npx wrangler deploy
+```
+
+### Критерии инцидента
+
+Считать ситуацию инцидентом, если выполняется хотя бы один признак:
+
+1. Health check возвращает non-`200`.
+2. В `getWebhookInfo` присутствует `last_error_message` (не пустой).
+3. В `getWebhookInfo` растёт `pending_update_count` в повторных проверках.
+
+### Manual recheck checklist (после каждого deploy)
+
+1. Выполнить health check и убедиться в HTTP `200`.
+2. Проверить `getWebhookInfo`: верный `url`, пустой `last_error_message`.
+3. Повторно проверить `pending_update_count` через 1-2 минуты: счётчик не растёт.
+4. Открыть `npx wrangler tail` и проверить отсутствие новых ошибок на `/start` и одном callback (например, `co:main`).
+
 ## Локальная проверка
 
 ```bash
