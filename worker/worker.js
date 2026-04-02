@@ -1795,7 +1795,10 @@ async function withCache(env, key, ttlSeconds, loader) {
 }
 
 function resolveWebhookPaths(env) {
-  return [String(env.WEBHOOK_PATH || DEFAULT_WEBHOOK_PATH).trim() || DEFAULT_WEBHOOK_PATH];
+  const rawPath = String(env.WEBHOOK_PATH ?? "").trim();
+  const path = rawPath || DEFAULT_WEBHOOK_PATH;
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return [normalizedPath];
 }
 
 function verifyTelegramWebhookSecret(request, env) {
