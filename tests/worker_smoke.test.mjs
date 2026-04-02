@@ -81,6 +81,34 @@ test("GET / healthcheck", async () => {
   assert.deepEqual(body.webhookPaths, ["/webhook"]);
 });
 
+test('WEBHOOK_PATH without leading slash is normalized and POST is accepted', async () => {
+  const env = makeEnv({ WEBHOOK_PATH: "webhook" });
+  const health = await worker.fetch(new Request("https://example.com/"), env);
+  assert.equal(health.status, 200);
+  const healthBody = await health.json();
+  assert.deepEqual(healthBody.webhookPaths, ["/webhook"]);
+
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    return jsonResponse({ ok: true });
+  };
+
+  const postResponse = await worker.fetch(new Request("https://example.com/webhook", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "X-Telegram-Bot-Api-Secret-Token": "secret-token"
+    },
+    body: JSON.stringify({ message: { text: "/start", chat: { id: 1 } } })
+  }), env);
+
+  assert.equal(postResponse.status, 200);
+  const postBody = await postResponse.json();
+  assert.equal(postBody.ok, true);
+  assert.ok(calls.some((call) => call.url.includes("/sendMessage")));
+});
+
 test("/start shows DaData-only menu and removes legacy search buttons", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
